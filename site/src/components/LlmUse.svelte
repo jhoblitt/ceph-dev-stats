@@ -16,7 +16,7 @@
   import { getPage } from '../lib/page';
   import { openedIn } from '../lib/select';
   import { chooseBucket } from '../lib/selection';
-  import { routeHash } from '../lib/state';
+  import { sectionHash } from '../lib/state';
   import { disclosureCounts, familiesShare, namingAny } from '../lib/stats/measures';
   import { weekly } from '../lib/stats/weekly';
   import BucketChart from './charts/BucketChart.svelte';
@@ -152,7 +152,7 @@
     groups also differ in other ways, such as kind, size and author, so a difference between them does not show that
     LLM use caused it. Disclosed PRs are newer on average, so the share merged at a long horizon is about fewer of them,
     and only their earliest ones, opened when disclosure was rarer. To compare PRs of like size, use the Size filter.
-    <a href={routeHash($selection, 'methods', meta)}>How disclosure is detected, and what it cannot show</a>.
+    <a href={sectionHash($selection, 'disclosure', meta)}>How disclosure is detected, and what it cannot show</a>.
   </p>
 </section>
 

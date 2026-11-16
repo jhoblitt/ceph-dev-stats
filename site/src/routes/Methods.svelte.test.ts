@@ -1,21 +1,37 @@
 // @vitest-environment jsdom
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/svelte';
-import { beforeAll, describe, expect, it } from 'vitest';
+import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import App from '../App.svelte';
 import { fixturePage } from '../lib/__fixtures__/page';
 import { sections } from '../lib/methods/sections';
+import { stateFromHash } from '../lib/state';
+
+/** The ids of the elements scrolled into view, in order. */
+let scrolled: string[] = [];
+/** How many times the window was scrolled to the top. */
+let toTop = 0;
 
 beforeAll(() => {
   // jsdom has no matchMedia, which the theme toggle asks, nor scrolling.
   window.matchMedia = (query: string) =>
     ({ matches: false, media: query, addEventListener() {}, removeEventListener() {} }) as unknown as MediaQueryList;
-  Element.prototype.scrollIntoView = function () {};
+  Element.prototype.scrollIntoView = function (this: Element) {
+    scrolled.push(this.id);
+  };
+  window.scrollTo = ((x: number, y: number) => {
+    if (x === 0 && y === 0) toTop++;
+  }) as typeof window.scrollTo;
 });
 
-async function methods(files: Record<string, unknown> = {}) {
-  const { props, loc } = await fixturePage('#/methods', files);
+beforeEach(() => {
+  scrolled = [];
+  toTop = 0;
+});
+
+async function methods(files: Record<string, unknown> = {}, hash = '#/methods') {
+  const { props, loc } = await fixturePage(hash, files);
   render(App, props);
-  return { main: screen.getByRole('main'), loc };
+  return { main: screen.getByRole('main'), loc, page: props.page };
 }
 
 const article = () => screen.getByRole('main').querySelector('article') as HTMLElement;
@@ -43,24 +59,98 @@ describe('the methods page', () => {
     for (const a of links) expect(main.querySelector(`#${a.dataset['target']}`), a.textContent ?? '').not.toBeNull();
   });
 
-  it('moves to a section from its contents link without leaving the page', async () => {
+  it('gives each contents link the address of its section, which survives being copied', async () => {
+    await methods();
+    const link = within(screen.getByRole('navigation', { name: 'Contents' })).getByRole('link', {
+      name: 'Disclosure of LLM use',
+    });
+    expect(link.getAttribute('href')).toBe('#/methods?target=main&section=disclosure');
+  });
+
+  it('moves to a section from its contents link, naming it in the address', async () => {
     const { loc } = await methods();
-    const before = loc.hash();
     const link = within(screen.getByRole('navigation', { name: 'Contents' })).getByRole('link', {
       name: 'Disclosure of LLM use',
     });
     await fireEvent.click(link);
-    expect(loc.hash()).toBe(before);
+    expect(loc.hash()).toBe('#/methods?target=main&section=disclosure');
+    await waitFor(() => expect(document.activeElement?.id).toBe('disclosure'));
+    expect(scrolled.at(-1)).toBe('disclosure');
+  });
+
+  it('moves again to the section the address already names when its link is followed', async () => {
+    const { loc } = await methods({}, '#/methods?section=disclosure');
+    await waitFor(() => expect(document.activeElement?.id).toBe('disclosure'));
+    (document.activeElement as HTMLElement).blur();
+    const link = within(screen.getByRole('navigation', { name: 'Contents' })).getByRole('link', {
+      name: 'Disclosure of LLM use',
+    });
+    await fireEvent.click(link);
+    expect(loc.hash()).toBe('#/methods?target=main&section=disclosure');
     expect(document.activeElement?.id).toBe('disclosure');
   });
 
-  it('follows a link to another section inside the prose without leaving the page', async () => {
+  it('follows a link to another section inside the prose through the address', async () => {
     const { loc } = await methods();
-    const before = loc.hash();
     const section = document.getElementById('responses') as HTMLElement;
-    await fireEvent.click(within(section).getByRole('link', { name: 'bot command' }));
-    expect(loc.hash()).toBe(before);
-    expect(document.activeElement?.id).toBe('commands');
+    const link = within(section).getByRole('link', { name: 'bot command' });
+    expect(link.getAttribute('href')).toBe('#/methods?target=main&section=commands');
+    await fireEvent.click(link);
+    expect(loc.hash()).toBe('#/methods?target=main&section=commands');
+    await waitFor(() => expect(document.activeElement?.id).toBe('commands'));
+  });
+
+  it('opens at the section its address names', async () => {
+    await methods({}, '#/methods?target=main&section=commands');
+    await waitFor(() => expect(document.activeElement?.id).toBe('commands'));
+    expect(scrolled).toContain('commands');
+  });
+
+  it('opens at a subheading its address names', async () => {
+    await methods({}, '#/methods?section=privacy-what-is-withheld');
+    await waitFor(() => expect(document.activeElement?.id).toBe('privacy-what-is-withheld'));
+  });
+
+  it('opens at the top for a section the page does not have', async () => {
+    const { loc } = await methods({}, '#/methods?section=nowhere');
+    await new Promise((r) => setTimeout(r, 10));
+    expect(scrolled).toEqual([]);
+    expect(loc.hash()).toBe('#/methods?target=main');
+  });
+
+  it("lands on the disclosure section from the LLM-use section's link", async () => {
+    const { page } = await methods({}, '#/');
+    const link = screen.getByRole('link', { name: 'How disclosure is detected, and what it cannot show' });
+    const href = link.getAttribute('href') as string;
+    expect(href).toBe('#/methods?target=main&section=disclosure');
+    page.selection.set(stateFromHash(href, page.meta));
+    await waitFor(() => expect(document.activeElement?.id).toBe('disclosure'));
+    expect(scrolled.at(-1)).toBe('disclosure');
+    // The app leaves the move to the methods page rather than scrolling to the top first.
+    expect(toTop).toBe(0);
+  });
+
+  it('goes back to the top when the address stops naming a section, as a fresh page would', async () => {
+    const { page } = await methods({}, '#/methods?target=main&section=commands');
+    await waitFor(() => expect(document.activeElement?.id).toBe('commands'));
+    page.selection.set(stateFromHash('#/methods?target=main', page.meta));
+    await waitFor(() => expect(document.activeElement?.textContent).toBe('Methods'));
+    expect(toTop).toBe(1);
+  });
+
+  it('stays at the top when the page opens with no section, and moves nowhere', async () => {
+    await methods({}, '#/methods?target=main');
+    await new Promise((r) => setTimeout(r, 10));
+    expect(toTop).toBe(0);
+    expect(scrolled).toEqual([]);
+  });
+
+  it('starts the report at the top when coming back from a section of the methods page', async () => {
+    const { page } = await methods({}, '#/methods?target=main&section=commands');
+    await waitFor(() => expect(document.activeElement?.id).toBe('commands'));
+    page.selection.set(stateFromHash('#/?target=main', page.meta));
+    await waitFor(() => expect(toTop).toBe(1));
+    expect(document.activeElement?.tagName).toBe('MAIN');
   });
 
   it('shows the figures computed from the data, with the date the data runs to', async () => {

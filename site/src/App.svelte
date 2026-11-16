@@ -28,10 +28,12 @@
 
   $effect(() => {
     const route = $selection.route;
+    const section = $selection.section;
     document.title = titles[route];
     // On a page change, start at the top and give the new page focus, as a
-    // full page load would; the first render leaves both alone.
-    if (shownRoute !== undefined && shownRoute !== route) {
+    // full page load would; the first render leaves both alone. An address
+    // naming a section of the methods page is left to that page to move to.
+    if (shownRoute !== undefined && shownRoute !== route && section === null) {
       window.scrollTo(0, 0);
       main.focus({ preventScroll: true });
     }

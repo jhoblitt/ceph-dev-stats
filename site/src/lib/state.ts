@@ -5,6 +5,7 @@
 //     &size=11-100&standing=first&disclosure=disclosed&drafts=exclude&reopened=only
 //     &author=<login>&reviewer=<login>&week=2026-06-01&band=lt7&pr=66600&sort=-size
 //     &authorsort=-lines&reviewersort=first&bots=show
+//   #/methods?target=main&section=disclosure
 //
 // <route> is empty for the report or `methods`. The target is always written;
 // the period only when it differs from the whole window, so a link to the
@@ -29,6 +30,7 @@ import {
   periodRange,
 } from './filters';
 import { findLogin } from './handles';
+import { isMethodsAnchor } from './methods/anchors';
 import { bucketEnd, bucketStart, stepFor } from './stats/buckets';
 import {
   AUTHOR_COLUMNS,
@@ -68,6 +70,8 @@ export interface AppState {
   reviewerSort: Sort<ReviewerColumn>;
   /** Whether the People tables list bot accounts. */
   bots: boolean;
+  /** The section or subheading of the methods page to show; only ever set on that page. */
+  section: string | null;
 }
 
 const KEYS = [
@@ -90,6 +94,7 @@ const KEYS = [
   'authorsort',
   'reviewersort',
   'bots',
+  'section',
 ] as const;
 type Key = (typeof KEYS)[number];
 
@@ -141,6 +146,7 @@ export function defaultState(meta: Meta): AppState {
     authorSort: DEFAULT_AUTHOR_SORT,
     reviewerSort: DEFAULT_REVIEWER_SORT,
     bots: false,
+    section: null,
   };
 }
 
@@ -196,8 +202,9 @@ export function validateState(raw: RawState, meta: Meta): AppState {
     author: p.author === undefined ? null : findLogin(meta, p.author),
     reviewer: p.reviewer === undefined ? null : findLogin(meta, p.reviewer),
   };
+  const route = isRoute(raw.route) ? raw.route : 'report';
   return {
-    route: isRoute(raw.route) ? raw.route : 'report',
+    route,
     filters,
     week: validWeek(p.week, filters),
     band: findChoice(AGE_BANDS, p.band),
@@ -206,6 +213,7 @@ export function validateState(raw: RawState, meta: Meta): AppState {
     authorSort: parseSortOf(AUTHOR_COLUMNS, p.authorsort, DEFAULT_AUTHOR_SORT),
     reviewerSort: parseSortOf(REVIEWER_COLUMNS, p.reviewersort, DEFAULT_REVIEWER_SORT),
     bots: p.bots === 'show',
+    section: route === 'methods' && p.section !== undefined && isMethodsAnchor(p.section) ? p.section : null,
   };
 }
 
@@ -239,12 +247,18 @@ export function hashFromState(state: AppState, meta: Meta): string {
     parts.push(`reviewersort=${enc(sortParam(state.reviewerSort))}`);
   }
   if (state.bots) parts.push('bots=show');
+  if (state.route === 'methods' && state.section !== null) parts.push(`section=${enc(state.section)}`);
   return `#/${state.route === 'report' ? '' : state.route}?${parts.join('&')}`;
 }
 
 /** The hash of a page, keeping the reader's filters and selection. */
 export function routeHash(state: AppState, route: Route, meta: Meta): string {
   return hashFromState({ ...state, route }, meta);
+}
+
+/** The address of a section or subheading of the methods page, keeping the reader's filters and selection. */
+export function sectionHash(state: AppState, section: string, meta: Meta): string {
+  return hashFromState({ ...state, route: 'methods', section }, meta);
 }
 
 /** Where the store reads and writes the hash; a fake in tests. */
