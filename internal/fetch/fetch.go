@@ -46,6 +46,12 @@ type Config struct {
 	// cache holds entries of an older FormatVersion, so that every one of
 	// them is listed and fetched again.
 	SinceIsDefault bool
+	// DefaultSince, when set, is the since a walk without --since would
+	// have used on this run. meta.json's walk_started becomes, through
+	// extract, where the next default walk starts, so a walk from a later
+	// Since, which skipped the pull requests updated in between, leaves
+	// meta.json as it was. Zero, as for --full, lets any Since write it.
+	DefaultSince time.Time
 	// PageSize is the number of pull requests asked for at first; it
 	// halves when a page repeatedly fails. DefaultPageSize when zero.
 	PageSize int
@@ -69,7 +75,8 @@ type walker struct {
 // Run walks pull requests into cfg.CacheDir in three phases: those updated
 // since cfg.Since, most recent first; every open one; then the prior-PR
 // count of each author not yet in authors.json. It ends by writing GitHub's
-// counts to meta.json. A pull request already cached at the listed
+// counts to meta.json, unless cfg.Since is later than a set cfg.DefaultSince,
+// when it leaves meta.json as it was and warns. A pull request already cached at the listed
 // updatedAt, in the current FormatVersion, is not fetched again, so a run
 // that stops early can be repeated. While the cache holds entries of an
 // older FormatVersion, a walk from a default since starts at WindowStart
@@ -103,6 +110,15 @@ func Run(ctx context.Context, client *ghapi.Client, cfg Config) error {
 	}
 	if err := w.baselines(ctx); err != nil {
 		return err
+	}
+	if !cfg.DefaultSince.IsZero() && cfg.Since.After(cfg.DefaultSince) {
+		w.log.WarnContext(ctx, "coverage mark not advanced",
+			slog.String("reason", "the walk started later than the default since, so it may have missed pull requests updated in between"),
+			slog.Time("since", cfg.Since),
+			slog.Time("default_since", cfg.DefaultSince),
+			slog.String("path", filepath.Join(cfg.CacheDir, MetaFile)))
+		w.log.InfoContext(ctx, "walk finished")
+		return nil
 	}
 	meta, err := w.counts(ctx)
 	if err != nil {

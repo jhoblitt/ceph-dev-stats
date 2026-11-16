@@ -20,7 +20,11 @@ func newFetchCmd(v *viper.Viper) *cobra.Command {
 		Long: `Walk ceph/ceph pull requests from GitHub into the local raw cache.
 
 The GitHub token is read from CEPHSTATS_GITHUB_TOKEN, GH_TOKEN or
-GITHUB_TOKEN, in that order.`,
+GITHUB_TOKEN, in that order.
+
+A --since later than the default skips pull requests the next default walk
+would otherwise trust as walked, so it leaves the cache's meta.json, the
+coverage mark, as it was.`,
 		Args: cobra.NoArgs,
 		PreRunE: func(*cobra.Command, []string) error {
 			if v.GetBool("full") && v.GetString("since") != "" {
@@ -33,16 +37,13 @@ GITHUB_TOKEN, in that order.`,
 			if err != nil {
 				return err
 			}
-			since, isDefault, err := fetchSince(v)
+			cfg, err := fetchSince(v)
 			if err != nil {
 				return err
 			}
+			cfg.CacheDir = v.GetString("cache-dir")
 			client := ghapi.NewClient(v.GetString("api-url"), token)
-			return fetch.Run(cmd.Context(), client, fetch.Config{
-				CacheDir:       v.GetString("cache-dir"),
-				Since:          since,
-				SinceIsDefault: isDefault,
-			})
+			return fetch.Run(cmd.Context(), client, cfg)
 		},
 	}
 	f := cmd.Flags()
@@ -54,19 +55,28 @@ GITHUB_TOKEN, in that order.`,
 	return cmd
 }
 
-// fetchSince is where the walk starts, and whether that is the default
-// rather than what --since or --full asked for.
-func fetchSince(v *viper.Viper) (time.Time, bool, error) {
+// fetchSince fills a walk's Since, SinceIsDefault and DefaultSince from
+// --since and --full. A --since is compared with the default so that a
+// narrower walk does not move the coverage mark; --full covers every
+// default and needs no comparison.
+func fetchSince(v *viper.Viper) (fetch.Config, error) {
 	if v.GetBool("full") {
-		return fetch.WindowStart, false, nil
+		return fetch.Config{Since: fetch.WindowStart}, nil
 	}
+	var since time.Time
 	if s := v.GetString("since"); s != "" {
 		t, err := time.Parse(time.RFC3339, s)
 		if err != nil {
-			return time.Time{}, false, fmt.Errorf("parsing --since: %w", err)
+			return fetch.Config{}, fmt.Errorf("parsing --since: %w", err)
 		}
-		return t.UTC(), false, nil
+		since = t.UTC()
 	}
-	since, err := fetch.DefaultSince(v.GetString("data"))
-	return since, true, err
+	def, err := fetch.DefaultSince(v.GetString("data"))
+	if err != nil {
+		return fetch.Config{}, err
+	}
+	if since.IsZero() {
+		return fetch.Config{Since: def, SinceIsDefault: true, DefaultSince: def}, nil
+	}
+	return fetch.Config{Since: since, DefaultSince: def}, nil
 }

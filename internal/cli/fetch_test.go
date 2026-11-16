@@ -124,9 +124,22 @@ var _ = Describe("fetch", func() {
 			Expect(cached()).To(ConsistOf("1.json", "2.json"))
 		})
 
-		It("walks back to --since", func() {
+		It("walks back to --since, and without data/meta.json leaves the coverage mark unwritten", func() {
 			Expect(run("--since", "2026-11-01T00:00:00Z")).To(Succeed())
+
 			Expect(cached()).To(ConsistOf("2.json"))
+			Expect(filepath.Join(cacheDir, fetch.MetaFile)).NotTo(BeAnExistingFile(),
+				"the default since is the window start, earlier than --since")
+			Expect(stderr.String()).To(ContainSubstring(`"msg":"coverage mark not advanced"`))
+		})
+
+		It("walks with --full though data/meta.json is malformed, never reading it", func() {
+			Expect(os.WriteFile(filepath.Join(dataDir, "meta.json"), []byte(`{"fetched_through":"yesterday"}`), 0o600)).To(Succeed())
+
+			Expect(run("--full")).To(Succeed())
+
+			Expect(cached()).To(ConsistOf("1.json", "2.json"))
+			Expect(filepath.Join(cacheDir, fetch.MetaFile)).To(BeAnExistingFile())
 		})
 
 		Context("when the cache holds an entry of an older format", func() {
@@ -152,6 +165,35 @@ var _ = Describe("fetch", func() {
 				Expect(fetch.ReadEntry(cacheDir, 1)).To(HaveField("FormatVersion", 0))
 				Expect(stderr.String()).To(ContainSubstring(`"msg":"cache holds entries of an older format"`))
 			})
+		})
+
+		DescribeTable("writes the cache's meta.json only when the walk covers the default range",
+			func(written bool, args ...string) {
+				Expect(os.WriteFile(filepath.Join(dataDir, "meta.json"),
+					[]byte(`{"fetched_through":"2026-11-14T12:00:00Z"}`), 0o600)).To(Succeed())
+
+				Expect(run(args...)).To(Succeed())
+
+				meta := filepath.Join(cacheDir, fetch.MetaFile)
+				if written {
+					Expect(meta).To(BeAnExistingFile())
+				} else {
+					Expect(meta).NotTo(BeAnExistingFile())
+					Expect(stderr.String()).To(ContainSubstring(`"msg":"coverage mark not advanced"`))
+				}
+			},
+			Entry("without --since", true),
+			Entry("with --full", true, "--full"),
+			Entry("with a --since before the default", true, "--since", "2026-11-01T00:00:00Z"),
+			Entry("with a --since later than the default", false, "--since", "2026-11-14T00:00:00Z"),
+		)
+
+		It("rejects a --since when data/meta.json cannot be read, before any request", func() {
+			path := filepath.Join(dataDir, "meta.json")
+			Expect(os.WriteFile(path, []byte(`{"fetched_through":"yesterday"}`), 0o600)).To(Succeed())
+
+			Expect(run("--since", "2026-11-01T00:00:00Z")).To(MatchError(ContainSubstring(path)))
+			Expect(server.Requests()).To(BeEmpty())
 		})
 
 		It("rejects a --since that is not RFC 3339", func() {

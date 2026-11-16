@@ -81,6 +81,8 @@ var _ = Describe("Run", func() {
 		logs     *bytes.Buffer
 		// defaultSince marks run's since as the default, not the operator's.
 		defaultSince bool
+		// defaultSinceAt is run's Config.DefaultSince.
+		defaultSinceAt time.Time
 	)
 
 	BeforeEach(func() {
@@ -89,6 +91,7 @@ var _ = Describe("Run", func() {
 		waits = nil
 		logs = &bytes.Buffer{}
 		defaultSince = false
+		defaultSinceAt = time.Time{}
 	})
 
 	serve := func(prs ...fetch.Entry) {
@@ -109,6 +112,7 @@ var _ = Describe("Run", func() {
 			CacheDir:       cacheDir,
 			Since:          since,
 			SinceIsDefault: defaultSince,
+			DefaultSince:   defaultSinceAt,
 			PageSize:       pageSize,
 			NestedPageSize: 2,
 			Logger:         logger,
@@ -142,6 +146,20 @@ var _ = Describe("Run", func() {
 			}
 		}
 		return firsts
+	}
+
+	// logged returns the log records with message msg.
+	logged := func(msg string) []map[string]any {
+		GinkgoHelper()
+		var out []map[string]any
+		for line := range bytes.Lines(logs.Bytes()) {
+			var m map[string]any
+			Expect(json.Unmarshal(line, &m)).To(Succeed(), "log line %s", line)
+			if m["msg"] == msg {
+				out = append(out, m)
+			}
+		}
+		return out
 	}
 
 	nestedFor := func(c ghapi.Connection, number int) []string {
@@ -313,20 +331,6 @@ var _ = Describe("Run", func() {
 	Context("when the cache holds an entry of an older format that the since would not reach", func() {
 		var since time.Time
 
-		// logged returns the log records with message msg.
-		logged := func(msg string) []map[string]any {
-			GinkgoHelper()
-			var out []map[string]any
-			for line := range bytes.Lines(logs.Bytes()) {
-				var m map[string]any
-				Expect(json.Unmarshal(line, &m)).To(Succeed(), "log line %s", line)
-				if m["msg"] == msg {
-					out = append(out, m)
-				}
-			}
-			return out
-		}
-
 		BeforeEach(func() {
 			since = at(5)
 			old, recent := pr(1, 1, "CLOSED"), pr(9, 9, "CLOSED")
@@ -390,6 +394,54 @@ var _ = Describe("Run", func() {
 
 		Expect(listed(false)).To(Equal([]int{2, 2}), "phase 1 list requests")
 		Expect(rawFiles()).To(ConsistOf("3.json", "4.json", "5.json"))
+	})
+
+	Describe("meta.json, the coverage mark", func() {
+		metaPath := func() string { return filepath.Join(cacheDir, fetch.MetaFile) }
+
+		BeforeEach(func() {
+			serve(pr(9, 9, "CLOSED"), pr(1, 1, "CLOSED"))
+			defaultSinceAt = at(5)
+		})
+
+		It("is left byte-identical by a walk from a since later than the default, which saves its entries and warns once why", func() {
+			const old = `{"walk_started":"2026-10-01T00:00:00Z","opened_in_window":1,"open":0}` + "\n"
+			Expect(os.WriteFile(metaPath(), []byte(old), 0o600)).To(Succeed())
+
+			Expect(run(at(6))).To(Succeed())
+
+			got, err := os.ReadFile(metaPath())
+			Expect(err).NotTo(HaveOccurred())
+			Expect(string(got)).To(Equal(old))
+			Expect(rawFiles()).To(ConsistOf("9.json"))
+			Expect(logged("coverage mark not advanced")).To(HaveExactElements(And(
+				HaveKeyWithValue("level", "WARN"),
+				HaveKeyWithValue("reason", ContainSubstring("later than the default since")),
+				HaveKeyWithValue("since", "2026-11-01T06:00:00Z"),
+				HaveKeyWithValue("default_since", "2026-11-01T05:00:00Z"),
+			)), "log:\n%s", logs.String())
+		})
+
+		It("is not created by a walk from a since later than the default", func() {
+			Expect(run(at(6))).To(Succeed())
+
+			Expect(metaPath()).NotTo(BeAnExistingFile())
+			Expect(rawFiles()).To(ConsistOf("9.json"))
+		})
+
+		DescribeTable("is written by a walk that covers the default range",
+			func(since, defaultAt time.Time) {
+				defaultSinceAt = defaultAt
+
+				Expect(run(since)).To(Succeed())
+
+				Expect(readJSON(metaPath())).To(HaveKeyWithValue("walk_started", "2026-11-15T12:00:00Z"))
+				Expect(logged("coverage mark not advanced")).To(BeEmpty())
+			},
+			Entry("since at the default", at(5), at(5)),
+			Entry("since before the default", at(4), at(5)),
+			Entry("no default, as for --full, whatever the since", at(6), time.Time{}),
+		)
 	})
 
 	It("caches a PR listed twice once, at the later updatedAt, and skips one listed twice unchanged", func() {
