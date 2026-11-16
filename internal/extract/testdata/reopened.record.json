@@ -27,5 +27,6 @@
     {"at": "2026-08-29T09:00:00Z", "by": "grace-example", "bot": false, "state": "approved"}
   ],
   "comments": [],
-  "disclosure": {"trailers": ["Co-authored-by: Claude <noreply@anthropic.com>"], "description": [], "commit_prose": []}
+  "disclosure": {"trailers": ["Co-authored-by: Claude <noreply@anthropic.com>"], "description": [], "commit_prose": []},
+  "kind_hints": {"checklist": ["references_ticket", "very_recent_bug"], "tickets": [90030]}
 }

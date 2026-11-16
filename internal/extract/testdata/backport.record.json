@@ -24,5 +24,6 @@
   "comments": [
     {"at": "2026-06-03T09:00:00Z", "by": "alice-example", "bot": false, "text": "jenkins test make check"}
   ],
-  "disclosure": {"trailers": ["Assisted-by: Claude Code"], "description": [], "commit_prose": []}
+  "disclosure": {"trailers": ["Assisted-by: Claude Code"], "description": [], "commit_prose": []},
+  "kind_hints": {"tickets": [90000, 90001], "backport_of": 69001}
 }
