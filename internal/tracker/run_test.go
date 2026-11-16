@@ -47,9 +47,9 @@ var _ = Describe("Run", func() {
 	}
 
 	run := func(refresh bool) error {
-		c, err := tracker.NewClient(server.URL, tracker.WithClock(clock), tracker.WithHTTPClient(server.Client()))
+		c, err := tracker.NewClient(server.URL, tracker.WithClock(clock), tracker.WithHTTPClient(server.Client()), tracker.WithLogger(quiet()))
 		Expect(err).NotTo(HaveOccurred())
-		return tracker.Run(context.Background(), c, tracker.Config{DataDir: dataDir, Refresh: refresh})
+		return tracker.Run(context.Background(), c, tracker.Config{DataDir: dataDir, Refresh: refresh, Logger: quiet()})
 	}
 
 	saved := func() map[int]tracker.Ticket {
@@ -65,6 +65,14 @@ var _ = Describe("Run", func() {
 			n = append(n, len(r.IDs))
 		}
 		return n
+	}
+
+	idsOfRequests := func() [][]int {
+		var ids [][]int
+		for _, r := range fake.seen() {
+			ids = append(ids, r.IDs)
+		}
+		return ids
 	}
 
 	// unknown is n tickets from 90000 on, each a Bug to the fake tracker,
@@ -139,6 +147,41 @@ var _ = Describe("Run", func() {
 
 		Expect(fake.seen()).To(ConsistOf(HaveField("IDs", []int{77766})))
 		Expect(saved()).To(HaveKeyWithValue(77766, tracker.Ticket{Type: "Enhancement"}))
+	})
+
+	It("follows a chain of parents, a Backport of a Backport, one request a link", func() {
+		first := relation{ID: 1, IssueID: 77766, IssueToID: 80000, Type: "copied_to"}
+		second := relation{ID: 2, IssueID: 80000, IssueToID: 83186, Type: "copied_to"}
+		fake.add(77766, "Enhancement", first)
+		fake.add(80000, "Backport", first, second)
+		fake.add(83186, "Backport", second)
+		writeRecords([]int{83186})
+
+		Expect(run(false)).To(Succeed())
+
+		Expect(idsOfRequests()).To(Equal([][]int{{83186}, {80000}, {77766}}))
+		Expect(saved()).To(Equal(map[int]tracker.Ticket{
+			77766: {Type: "Enhancement"},
+			80000: {Type: "Backport", Parent: 77766},
+			83186: {Type: "Backport", Parent: 80000},
+		}))
+	})
+
+	It("gives a parent the tracker omits an empty type, and does not ask for it again", func() {
+		fake.add(83186, "Backport", relation{ID: 1, IssueID: 77766, IssueToID: 83186, Type: "copied_to"})
+		writeRecords([]int{83186})
+
+		Expect(run(false)).To(Succeed())
+
+		Expect(idsOfRequests()).To(Equal([][]int{{83186}, {77766}}))
+		Expect(saved()).To(Equal(map[int]tracker.Ticket{
+			77766: {},
+			83186: {Type: "Backport", Parent: 77766},
+		}))
+
+		Expect(run(false)).To(Succeed())
+
+		Expect(fake.seen()).To(HaveLen(2))
 	})
 
 	It("gives a ticket the tracker omits an empty type, skips it next time, and asks again with refresh", func() {

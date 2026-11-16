@@ -10,6 +10,7 @@ import (
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	"github.com/onsi/gomega/types"
 
 	"github.com/jhoblitt/ceph-dev-stats/internal/tracker"
 )
@@ -30,7 +31,7 @@ var _ = Describe("Client", func() {
 
 	newClient := func(opts ...tracker.Option) *tracker.Client {
 		GinkgoHelper()
-		base := []tracker.Option{tracker.WithClock(clock), tracker.WithHTTPClient(server.Client())}
+		base := []tracker.Option{tracker.WithClock(clock), tracker.WithHTTPClient(server.Client()), tracker.WithLogger(quiet())}
 		c, err := tracker.NewClient(server.URL, append(base, opts...)...)
 		Expect(err).NotTo(HaveOccurred())
 		return c
@@ -173,7 +174,141 @@ var _ = Describe("Client", func() {
 		Expect(err).NotTo(HaveOccurred())
 		Expect(got).To(HaveKeyWithValue(90001, tracker.Ticket{Type: "Bug"}))
 		Expect(fake.seen()).To(HaveLen(4))
-		Expect(clock.sleeps()).To(ContainElements(2*time.Second, 4*time.Second, 8*time.Second))
+		Expect(clock.sleeps()).To(Equal([]time.Duration{2 * time.Second, 4 * time.Second, 8 * time.Second}))
+	})
+
+	// status answers with code and, when retryAfter is not empty, a
+	// Retry-After header holding it.
+	status := func(code int, retryAfter string) reply {
+		return func(w http.ResponseWriter, _ time.Time) {
+			if retryAfter != "" {
+				w.Header().Set("Retry-After", retryAfter)
+			}
+			w.WriteHeader(code)
+		}
+	}
+
+	// retryAt answers with code and a Retry-After header holding the date
+	// after on the fake clock.
+	retryAt := func(code int, after time.Duration) reply {
+		return func(w http.ResponseWriter, now time.Time) {
+			w.Header().Set("Retry-After", now.Add(after).UTC().Format(http.TimeFormat))
+			w.WriteHeader(code)
+		}
+	}
+
+	// body answers 200 with b as JSON.
+	body := func(b string) reply {
+		return func(w http.ResponseWriter, _ time.Time) {
+			w.Header().Set("Content-Type", "application/json")
+			_, err := w.Write([]byte(b))
+			Expect(err).NotTo(HaveOccurred())
+		}
+	}
+
+	// cutShort promises more of a body than it sends, so reading it fails.
+	cutShort := func(w http.ResponseWriter, _ time.Time) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Content-Length", "100")
+		_, err := w.Write([]byte(`{"issues": [`))
+		Expect(err).NotTo(HaveOccurred())
+	}
+
+	DescribeTable("answers each odd reply with the requests, the waits and the outcome it calls for",
+		func(rep reply, times, requests int, sleeps []time.Duration, wantErr types.GomegaMatcher) {
+			fake.add(90001, "Bug")
+			fake.script(1, times, rep)
+
+			got, err := newClient().Tickets(context.Background(), []int{90001})
+
+			if wantErr == nil {
+				Expect(err).NotTo(HaveOccurred())
+				Expect(got).To(Equal(map[int]tracker.Ticket{90001: {Type: "Bug"}}))
+			} else {
+				Expect(err).To(wantErr)
+			}
+			Expect(fake.seen()).To(HaveLen(requests), "requests")
+			Expect(clock.sleeps()).To(Equal(sleeps), "sleeps")
+		},
+		Entry("a 429 without Retry-After keeps the schedule",
+			status(http.StatusTooManyRequests, ""), 1, 2, []time.Duration{2 * time.Second}, nil),
+		Entry("a 429 with Retry-After in seconds waits that long",
+			status(http.StatusTooManyRequests, "60"), 1, 2, []time.Duration{60 * time.Second}, nil),
+		Entry("a 429 with Retry-After as a date waits until then",
+			retryAt(http.StatusTooManyRequests, 90*time.Second), 1, 2, []time.Duration{90 * time.Second}, nil),
+		Entry("a 503 with a Retry-After in seconds shorter than the schedule keeps the schedule",
+			status(http.StatusServiceUnavailable, "1"), 2, 3, []time.Duration{2 * time.Second, 4 * time.Second}, nil),
+		Entry("a 503 with Retry-After as a date waits until then, each time",
+			retryAt(http.StatusServiceUnavailable, 30*time.Second), 3, 4, []time.Duration{30 * time.Second, 30 * time.Second, 30 * time.Second}, nil),
+		Entry("a 503 with Retry-After as a date already past keeps the schedule",
+			retryAt(http.StatusServiceUnavailable, -time.Hour), 1, 2, []time.Duration{2 * time.Second}, nil),
+		Entry("a Retry-After the client cannot read keeps the schedule",
+			status(http.StatusTooManyRequests, "soon"), 1, 2, []time.Duration{2 * time.Second}, nil),
+		Entry("a Retry-After over five minutes stops the run, saying how long the tracker asked for",
+			status(http.StatusTooManyRequests, "301"), 1, 1, []time.Duration{},
+			MatchError(And(ContainSubstring("HTTP 429"), ContainSubstring("asked to wait 5m1s")))),
+		Entry("a Retry-After in seconds too large to parse is over five minutes too",
+			status(http.StatusServiceUnavailable, "99999999999999999999"), 1, 1, []time.Duration{},
+			MatchError(And(ContainSubstring("HTTP 503"), ContainSubstring("asked to wait")))),
+		// The redirect leads back to the fake, so a client that followed it
+		// would contact no other host.
+		Entry("a redirect is not followed or retried, and names the host it leads to",
+			func(w http.ResponseWriter, _ time.Time) {
+				w.Header().Set("Location", "/moved/issues.json")
+				w.WriteHeader(http.StatusMovedPermanently)
+			}, 1, 1, []time.Duration{},
+			MatchError(And(ContainSubstring("HTTP 301"), ContainSubstring("127.0.0.1"), ContainSubstring("tracker URL")))),
+		Entry("a read error is retried",
+			reply(cutShort), 4, 4, []time.Duration{2 * time.Second, 4 * time.Second, 8 * time.Second},
+			MatchError(ContainSubstring("reading tracker answer"))),
+		Entry("an empty body is retried",
+			body(""), 4, 4, []time.Duration{2 * time.Second, 4 * time.Second, 8 * time.Second},
+			MatchError(ContainSubstring("empty tracker answer"))),
+		Entry("malformed JSON is retried",
+			body(`{"issues": [`), 4, 4, []time.Duration{2 * time.Second, 4 * time.Second, 8 * time.Second},
+			MatchError(ContainSubstring("malformed tracker answer"))),
+		Entry("null issues are retried",
+			body(`{"issues": null, "total_count": 0}`), 4, 4, []time.Duration{2 * time.Second, 4 * time.Second, 8 * time.Second},
+			MatchError(ContainSubstring("tracker answer without issues"))),
+		Entry("a body without issues is retried",
+			body(`{"total_count": 0}`), 4, 4, []time.Duration{2 * time.Second, 4 * time.Second, 8 * time.Second},
+			MatchError(ContainSubstring("tracker answer without issues"))),
+		Entry("a total_count above the issues returned is a cut-short batch, not unknown tickets, and not retried",
+			body(`{"issues": [{"id": 90001, "tracker": {"id": 1, "name": "Bug"}}], "total_count": 2, "offset": 0, "limit": 100}`), 1, 1, []time.Duration{},
+			MatchError(ContainSubstring("1 of 2"))),
+	)
+
+	It("follows no redirect, through the HTTP client it builds or one given that would", func() {
+		fake.script(1, 2, func(w http.ResponseWriter, _ time.Time) {
+			w.Header().Set("Location", "/moved/issues.json")
+			w.WriteHeader(http.StatusFound)
+		})
+		follows := server.Client()
+		follows.CheckRedirect = func(*http.Request, []*http.Request) error { return nil }
+		built, err := tracker.NewClient(server.URL, tracker.WithClock(clock))
+		Expect(err).NotTo(HaveOccurred())
+		u, err := url.Parse(server.URL)
+		Expect(err).NotTo(HaveOccurred())
+
+		for _, c := range []*tracker.Client{built, newClient(tracker.WithHTTPClient(follows))} {
+			_, err = c.Tickets(context.Background(), []int{90001})
+			Expect(err).To(MatchError(And(ContainSubstring("HTTP 302"), ContainSubstring(u.Host))))
+		}
+
+		Expect(fake.seen()).To(HaveExactElements(HaveField("Path", "/issues.json"), HaveField("Path", "/issues.json")))
+	})
+
+	It("stops waiting to retry when the context ends", func() {
+		ctx, cancel := context.WithCancel(context.Background())
+		DeferCleanup(cancel)
+		clock.onSleep = cancel
+		fake.failRequests(1, 4)
+
+		_, err := newClient().Tickets(ctx, []int{90001})
+
+		Expect(err).To(MatchError(context.Canceled))
+		Expect(fake.seen()).To(HaveLen(1))
+		Expect(clock.sleeps()).To(Equal([]time.Duration{2 * time.Second}))
 	})
 
 	It("gives up after the fourth failure", func() {

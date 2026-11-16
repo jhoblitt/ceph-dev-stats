@@ -1,9 +1,11 @@
 package extract_test
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"io/fs"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -47,9 +49,9 @@ var _ = Describe("Run", func() {
 		}
 	}
 
-	run := func(all bool) {
+	run := func() {
 		GinkgoHelper()
-		Expect(extract.Run(context.Background(), extract.Config{CacheDir: cacheDir, DataDir: dataDir, All: all})).To(Succeed())
+		Expect(extract.Run(context.Background(), extract.Config{CacheDir: cacheDir, DataDir: dataDir, Logger: quiet()})).To(Succeed())
 	}
 
 	files := func() map[string]file {
@@ -108,7 +110,7 @@ var _ = Describe("Run", func() {
 			WalkStarted: time.Date(2026, 11, 15, 12, 0, 0, 123_000_000, time.UTC), OpenedInWindow: 4985, Open: 2019,
 		})
 
-		run(false)
+		run()
 
 		Expect(files()).To(HaveLen(6))
 		Expect(records()).To(HaveLen(4))
@@ -130,7 +132,7 @@ var _ = Describe("Run", func() {
 	})
 
 	It("writes nothing with an empty cache", func() {
-		run(false)
+		run()
 		Expect(files()).To(BeEmpty())
 	})
 
@@ -138,11 +140,11 @@ var _ = Describe("Run", func() {
 		cache(fixture("backport"), fixture("draft-ready"))
 		writeJSON(filepath.Join(cacheDir, "authors.json"), map[string]int{"alice-example": 12})
 		writeJSON(filepath.Join(cacheDir, "meta.json"), fetch.Meta{WalkStarted: day(11, 15)})
-		run(false)
+		run()
 		before := files()
 
 		cacheDir = GinkgoT().TempDir()
-		run(false)
+		run()
 
 		Expect(rewritten(before, files())).To(BeEmpty())
 		Expect(files()).To(HaveLen(len(before)))
@@ -152,31 +154,28 @@ var _ = Describe("Run", func() {
 		cache(fixture("backport"), fixture("draft-ready"), fixture("reopened"), fixture("force-pushed"), fixture("late-commits"), fixture("ghost"))
 		writeJSON(filepath.Join(cacheDir, "authors.json"), map[string]int{"alice-example": 12})
 		writeJSON(filepath.Join(cacheDir, "meta.json"), fetch.Meta{WalkStarted: day(11, 15)})
-		run(false)
+		run()
 		before := files()
 
-		run(false)
+		run()
 		after := files()
 		Expect(rewritten(before, after)).To(BeEmpty())
 		Expect(after).To(HaveLen(len(before)))
 		for name, f := range before {
 			Expect(after[name].content).To(Equal(f.content), "file %s", name)
 		}
-
-		run(true)
-		Expect(rewritten(before, files())).To(BeEmpty(), "with --all")
 	})
 
 	It("rewrites exactly one monthly file after one PR changed", func() {
 		changed := fixture("draft-ready")
 		cache(fixture("backport"), changed, fixture("reopened"), fixture("force-pushed"))
-		run(false)
+		run()
 		before := files()
 
 		changed.UpdatedAt = changed.UpdatedAt.Add(time.Hour)
 		changed.State = "MERGED"
 		cache(changed)
-		run(false)
+		run()
 
 		Expect(rewritten(before, files())).To(ConsistOf(filepath.Join(record.PRsDir, "2026-07.jsonl")))
 		Expect(records()[changed.Number].State).To(Equal(record.StateMerged))
@@ -186,28 +185,46 @@ var _ = Describe("Run", func() {
 		e := fixture("force-pushed")
 		e.FormatVersion = fetch.FormatVersion
 		cache(e)
-		run(false)
+		run()
 
 		e.Title = "a title changed without moving updatedAt"
 		cache(e)
-		run(false)
+		run()
 
 		Expect(records()[e.Number].Title).To(Equal("a title changed without moving updatedAt"))
 	})
 
-	It("keeps a record whose cache entry is older, unless asked for all", func() {
-		e := fixture("force-pushed")
-		cache(e)
-		run(false)
+	It("keeps a record whose cache entry is older, or as old and of an older format, and warns once with their count", func() {
+		older := fixture("force-pushed")
+		oldFormat := fixture("draft-ready")
+		oldFormat.FormatVersion = fetch.FormatVersion
+		cache(older, oldFormat)
+		run()
+		before := records()
 
-		e.UpdatedAt = e.UpdatedAt.Add(-time.Hour)
-		e.Title = "a title from an older entry"
-		cache(e)
-		run(false)
-		Expect(records()[e.Number].Title).To(Equal("mgr/dashboard: page the host list"))
+		older.UpdatedAt = older.UpdatedAt.Add(-time.Hour)
+		older.Title = "a title from an older entry"
+		oldFormat.FormatVersion = fetch.FormatVersion - 1
+		oldFormat.Title = "a title from an entry of an older format"
+		cache(older, oldFormat)
+		var logs bytes.Buffer
+		logger := slog.New(slog.NewJSONHandler(&logs, nil))
+		Expect(extract.Run(context.Background(), extract.Config{CacheDir: cacheDir, DataDir: dataDir, Logger: logger})).To(Succeed())
 
-		run(true)
-		Expect(records()[e.Number].Title).To(Equal("a title from an older entry"))
+		Expect(records()).To(Equal(before))
+		var warnings []map[string]any
+		for line := range bytes.Lines(logs.Bytes()) {
+			var m map[string]any
+			Expect(json.Unmarshal(line, &m)).To(Succeed(), "log line %s", line)
+			if m["level"] == "WARN" {
+				warnings = append(warnings, m)
+			}
+		}
+		Expect(warnings).To(HaveExactElements(And(
+			HaveKeyWithValue("msg", "cache entries older than their records"),
+			HaveKeyWithValue("entries", 2.0),
+			HaveKeyWithValue("example", float64(min(older.Number, oldFormat.Number))),
+		)), "log:\n%s", logs.String())
 	})
 
 	It("counts an author's earlier PRs in the window on top of their baseline", func() {
@@ -220,7 +237,7 @@ var _ = Describe("Run", func() {
 		)
 		writeJSON(filepath.Join(cacheDir, "authors.json"), map[string]int{"kim": 4, "lee": 0})
 
-		run(false)
+		run()
 
 		got := records()
 		Expect(got[10].PriorPRs).To(BeNil(), "PR opened before the window")
@@ -234,7 +251,7 @@ var _ = Describe("Run", func() {
 		cache(entry(1, "kim", fetch.WindowStart))
 		writeJSON(filepath.Join(cacheDir, "authors.json"), map[string]int{"kim": 4})
 
-		run(false)
+		run()
 
 		Expect(records()[1].PriorPRs).To(HaveValue(Equal(4)))
 	})
@@ -242,13 +259,13 @@ var _ = Describe("Run", func() {
 	It("recomputes prior_prs over every record when a backfill adds an earlier PR", func() {
 		cache(entry(30, "kim", day(7, 1)))
 		writeJSON(filepath.Join(cacheDir, "authors.json"), map[string]int{"kim": 4})
-		run(false)
+		run()
 		Expect(records()[30].PriorPRs).To(HaveValue(Equal(4)))
 		before := files()
 
 		cacheDir = GinkgoT().TempDir()
 		cache(entry(20, "kim", day(6, 1)))
-		run(false)
+		run()
 
 		Expect(records()[30].PriorPRs).To(HaveValue(Equal(5)))
 		Expect(rewritten(before, files())).To(ConsistOf(
@@ -263,7 +280,7 @@ var _ = Describe("Run", func() {
 		cache(ghost, entry(2, "dependabot", day(6, 2)))
 		writeJSON(filepath.Join(cacheDir, "authors.json"), map[string]int{"kim": 4})
 
-		run(false)
+		run()
 
 		Expect(records()[1].Author).To(Equal(record.Actor{Login: fetch.GhostLogin}))
 		Expect(records()[1].PriorPRs).To(BeNil())
@@ -274,7 +291,7 @@ var _ = Describe("Run", func() {
 		Expect(record.WriteAuthors(dataDir, map[string]int{"kim": 4, "lee": 1})).To(BeTrue())
 		writeJSON(filepath.Join(cacheDir, "authors.json"), map[string]int{"lee": 2, "max": 7})
 
-		run(false)
+		run()
 
 		Expect(record.ReadAuthors(dataDir)).To(Equal(map[string]int{"kim": 4, "lee": 2, "max": 7}))
 	})
@@ -284,7 +301,7 @@ var _ = Describe("Run", func() {
 		Expect(record.WriteMeta(dataDir, meta)).To(BeTrue())
 		cache(fixture("ghost"))
 
-		run(false)
+		run()
 
 		Expect(record.ReadMeta(dataDir)).To(Equal(meta))
 	})
@@ -294,9 +311,37 @@ var _ = Describe("Run", func() {
 		Expect(os.WriteFile(filepath.Join(cacheDir, fetch.RawDir, ".70007.json.123.tmp"), []byte("{"), 0o600)).To(Succeed())
 		Expect(os.WriteFile(filepath.Join(cacheDir, fetch.RawDir, "notes.txt"), []byte("{"), 0o600)).To(Succeed())
 
-		run(false)
+		run()
 
 		Expect(records()).To(HaveLen(1))
+	})
+
+	It("gives the count of withheld lines by a well-formed domain, other or no address in its closing log line, and no address or name", func() {
+		e := entry(1, "alice", day(6, 1))
+		e.Commits = []fetch.Commit{{
+			AuthoredDate: day(6, 1), CommittedDate: day(6, 1),
+			Message: "rgw: fix\n\nCo-authored-by: Claude Dupont <claude.dupont@example.com>\nCo-authored-by: Claude <noreply@anthropic.com>\nCo-authored-by: Claude Martin\n",
+		}}
+		e.Body = "Original-Author: Claude X <x@y>\nCo-authored-by: Ana Smith <ana.smith@Example.com>, Claude\nGenerated with Claude, ask jo@exa_mple.com\n"
+		cache(e)
+		var logs bytes.Buffer
+		logger := slog.New(slog.NewJSONHandler(&logs, nil))
+
+		Expect(extract.Run(context.Background(), extract.Config{CacheDir: cacheDir, DataDir: dataDir, Logger: logger})).To(Succeed())
+
+		var finished []map[string]any
+		for line := range bytes.Lines(logs.Bytes()) {
+			var m map[string]any
+			Expect(json.Unmarshal(line, &m)).To(Succeed(), "log line %s", line)
+			if m["msg"] == "extract finished" {
+				finished = append(finished, m)
+			}
+		}
+		Expect(finished).To(HaveExactElements(HaveKeyWithValue("withheld_by_domain", map[string]any{"example.com": 2.0, "y": 1.0, "other": 1.0, "no address": 1.0})), "log:\n%s", logs.String())
+		for _, s := range []string{"@", "claude.dupont", "Dupont", "Ana", "Smith", "Martin", "exa_mple"} {
+			Expect(logs.String()).NotTo(ContainSubstring(s), "log:\n%s", logs.String())
+		}
+		Expect(records()[1].Disclosure.Trailers).To(Equal([]string{"Co-authored-by: Claude <noreply@anthropic.com>"}))
 	})
 
 	It("is an error naming the entry when one cannot be read", func() {
@@ -304,7 +349,7 @@ var _ = Describe("Run", func() {
 		Expect(os.MkdirAll(filepath.Dir(path), 0o750)).To(Succeed())
 		Expect(os.WriteFile(path, []byte("{"), 0o600)).To(Succeed())
 
-		err := extract.Run(context.Background(), extract.Config{CacheDir: cacheDir, DataDir: dataDir})
+		err := extract.Run(context.Background(), extract.Config{CacheDir: cacheDir, DataDir: dataDir, Logger: quiet()})
 
 		Expect(err).To(MatchError(ContainSubstring(path)))
 		Expect(files()).To(BeEmpty())

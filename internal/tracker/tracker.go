@@ -1,7 +1,8 @@
 // Package tracker reads the type of each tracker.ceph.com ticket the
 // records reference into data/tickets.json. It asks the tracker, a public
 // Redmine, anonymously, one request at a time, at most one a second, in
-// batches, and never for a ticket the file already holds.
+// batches, and only for the tickets the file does not hold yet, or, when
+// asked to refresh, holds with an empty type.
 package tracker
 
 // File is the ticket file's name under the data directory.

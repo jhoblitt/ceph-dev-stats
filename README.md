@@ -34,8 +34,8 @@ environment variable.
   back to the window start. It reads the GitHub token from
   `CEPHSTATS_GITHUB_TOKEN`, `GH_TOKEN` or `GITHUB_TOKEN`, in that order.
 - `extract` turns the cached pull requests into the committed records under
-  `data/`, rewriting only the files whose content changes. `--all`
-  re-derives every record.
+  `data/`, rewriting only the files whose content changes. Every run
+  re-derives each record from its cached entry in the current format.
 - `tickets` asks tracker.ceph.com for the type of each tracker ticket the
   records reference that `data/tickets.json` does not hold yet. It asks
   anonymously, for up to 100 tickets a request and at most one request a

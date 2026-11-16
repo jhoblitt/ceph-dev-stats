@@ -31,9 +31,9 @@ func Read(dataDir string) (map[int]Ticket, error) {
 }
 
 // Write writes dataDir/tickets.json, one ticket a line in numeric order,
-// unless it already holds tickets, and reports whether it wrote. The file
-// is replaced through a temporary file and a rename, so a reader never
-// sees a partial one.
+// unless the file already holds exactly those bytes, and reports whether it
+// wrote. A file with any other content, tickets or not, is replaced, through
+// a temporary file and a rename, so a reader never sees a partial one.
 func Write(dataDir string, tickets map[int]Ticket) (bool, error) {
 	path := filepath.Join(dataDir, File)
 	b, err := encode(tickets)
