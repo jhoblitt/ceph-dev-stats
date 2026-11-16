@@ -58,8 +58,6 @@ GitHub Pages publishes it.
 
 ## Anti-goals
 
-- Ranking named people: no leaderboard of authors or reviewers, slowest or
-  busiest.
 - Calling a PR "human-written". The page knows only "disclosed" and "not
   disclosed".
 - Durations computed from finished PRs only, as if the unfinished ones did
@@ -90,6 +88,11 @@ GitHub Pages publishes it.
   opening, comments and bot commands, and the time of the final disposition.
 - **Closed and reopened**: the page says whether a PR was closed and then
   reopened. The owner asked for this as a bonus.
+- **Authors and reviewers by name** (added 2026-11-15, during the build):
+  the page sorts and filters by author and by reviewer, shows people by
+  their GitHub handle, and links each handle to its GitHub page. The
+  builder had proposed the opposite, that nothing rank named people; the
+  owner never asked for that and overruled it.
 - **Feature or bug fix** (added 2026-11-15, during the build): besides
   marking backports, the page tries to say whether a PR is a feature or a
   bug fix. The owner chose to read ticket types from tracker.ceph.com for
@@ -126,8 +129,8 @@ GitHub Pages publishes it.
   Measurements), and the methods page says so.
 - **Every comment has a kind**: by another person, by the author, a bot
   command (from the author or from someone else), or from a bot account.
-  The site carries each event's time and kind, not who wrote it; the PR's
-  link leads to GitHub for that.
+  The site carries each event's time and kind, and for a comment or a
+  review by a person, who made it.
 - **Last commit is the latest committer date** among the PR's commits,
   where first commit is the earliest author date. Squashing a fix into an
   existing commit keeps its author date and moves its committer date, and
@@ -166,9 +169,10 @@ GitHub Pages publishes it.
   it was opened as a draft; a response that came earlier counts as no wait.
   A PR that has never been ready is left out of the waiting measures and
   kept in the volume charts.
-- **Named people**: the PR table shows what GitHub shows (number, title,
-  author, link). No view ranks people. Reviewer load is shown as shares
-  ("the ten busiest reviewers did X% of reviews") without names.
+- **A person's figures use the page's own definitions.** An author's row
+  is computed over the PRs they opened; a reviewer's over the reviews and
+  comments they made on other people's PRs. Bot accounts are listed apart
+  from people, so a bot never tops a table of reviewers.
 - **Unfinished PRs count.** Durations are shown as outcome curves (below),
   not as averages over finished PRs.
 - **PR size and author standing are recorded**, so like can be compared with
@@ -393,6 +397,9 @@ such event; none while the PR is open.
 **Backlog at a moment.** PRs open at that moment: opened at or before it,
 and not inside a closed stretch.
 
+**Reviewer.** A human who reviewed or commented on a PR they did not
+open. A bot command is not a review, as it is not a response.
+
 **Kind.** Bug fix, feature, cleanup, documentation, other, or unknown. The
 checklist boxes "New feature", "Very recent bug", "Doc update" and "Code
 cleanup" each name one. A ticket's type names one: Bug is a bug fix,
@@ -426,7 +433,7 @@ one. Which source wins is the table's order.
 │ Ceph pull requests              data as of 2026-11-15         │
 │ Period ▾  [main|backports|all]  Component ▾  Size ▾           │
 │ Author standing ▾   Disclosure ▾   Drafts ▾   Reopened ▾      │
-│ Kind ▾                                                        │
+│ Kind ▾   Author ▾   Reviewer ▾                                │
 ├───────────────────────────────────────────────────────────────┤
 │ Velocity                                                      │
 │   PRs per week: opened (disclosed / not) · merged · closed    │
@@ -446,6 +453,7 @@ one. Which source wins is the table's order.
 ├───────────────────────────────────────────────────────────────┤
 │ Each PR as a dot: opened → days to merge, by disclosure       │
 │ Timelines: the selected PRs as stacked lanes                  │
+│ People: authors · reviewers, each a table sortable by column  │
 │ Table: # · title · author · opened · state · waits · size     │
 │ One PR: its full timeline (below)                             │
 ├───────────────────────────────────────────────────────────────┤
@@ -460,6 +468,10 @@ one. Which source wins is the table's order.
   links to its page on GitHub.
 - A PR shows its kind and what decided it, links to the tracker tickets it
   references, and, for a backport, links to the PR it backports.
+- Authors and reviewers each have a table with one row per person and one
+  column per figure, sortable by any column. A handle links to that
+  account on GitHub, and choosing a person filters the whole page to the
+  PRs they opened or reviewed.
 - Filters and the selection live in the URL, so a view can be linked.
 - The central chart for the thesis sets PRs arriving, split by disclosure,
   against human reviews done and the people doing them.

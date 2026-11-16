@@ -51,9 +51,11 @@ behaviour and records the ruling in the PR description.
 - All times are UTC. A week is an ISO week, Monday 00:00 UTC.
 - Wording on the page: "disclosed" and "not disclosed". Never
   "human-written", "AI-written" or "LLM-generated".
-- No view ranks named people. The site data carries reviewers and
-  commenters only as opaque indexes; author logins ship only for the PR
-  table.
+- People are shown by GitHub handle, each linked to
+  `https://github.com/<login>`. The site data carries the login of every
+  author and of every person who commented or reviewed. The owner asked for
+  sorting by author and by reviewer; an earlier rule against ranking named
+  people was the builder's and is withdrawn.
 - No duration on the page is negative or NaN: a span that cannot be
   measured is unknown.
 - Any Go work: load `go-conventions:go-conventions` first. Any workflow,
@@ -147,7 +149,7 @@ of types `READY_FOR_REVIEW_EVENT`, `CONVERT_TO_DRAFT_EVENT`,
 `MERGED_EVENT`, each with `createdAt`.
 
 For the links back to GitHub the entry also carries: each commit's `oid`;
-each comment's and review's `databaseId`; the `url` of each ready, draft,
+each comment's and review's `fullDatabaseId`; the `url` of each ready, draft,
 closed and merged event; the merged event's `commit{oid}`; and a
 force-push's `beforeCommit{oid}` and `afterCommit{oid}`. Each entry records
 the cache format's version, and an entry of an older version is fetched
@@ -190,7 +192,9 @@ same bytes.
   is left out. Addresses are never stored; the PR's follows from its
   number.
 - `comments[].text` is present only when the comment is a single line of at
-  most 80 characters after trimming. That is what the bot-command table and
+  most 80 characters after trimming and contains no `@`, which a bot
+  command never does and a mention or an address always does. That is what
+  the bot-command table and
   the "looks like a command" report need; longer comments are not stored.
 - `disclosure` holds candidates, not verdicts, de-duplicated:
   - `trailers`: a commit-message line of the form `Key: value`, anywhere
@@ -260,7 +264,9 @@ Under `site/public/data/`, fetched at run time, never bundled.
 - `meta.json`: `repo`, `fetched_through`, `window_start`, `years`, and the
   dictionaries every index below refers to: `bases`, `components`,
   `families`, `commands`, `kinds`, `disclosure` (`none`, `description`,
-  `coauthor`, `trailer`), `event_kinds`.
+  `coauthor`, `trailer`), `event_kinds`, and `people`, the login of every
+  person an `author` or an `actor` index names, with `people_bots`, the
+  indexes among them that are bot accounts.
 - `prs-<year>.json`, the year the PR opened; arrays of equal length, rows
   sorted by number. Times are epoch seconds; `-1` means none or unknown.
 
@@ -270,19 +276,20 @@ Under `site/public/data/`, fetched at run time, never bundled.
   additions deletions files commits
   first_commit last_commit first_response first_approval
   human_reviews bot_reviews bot_commands
-  disclosure families[][] components[][] standing kind
+  disclosure families[][] components[][] standing kind author
   ```
 
-  `kind` indexes `kinds`, a list of `{id, name}`; `-1` is unknown.
+  `kind` indexes `kinds`, a list of `{id, name}`; `-1` is unknown. `author`
+  indexes `people`.
 
 - `events-<year>.json`: arrays `pr` (row in that year's file), `at`, `kind`,
   `sub`, `actor`; sorted by `pr`, then `at`. Kinds: `comment_other`,
   `comment_author`, `command_author`, `command_other`, `bot_account`,
   `review_approved`, `review_changes`, `review_commented`, `bot_review`,
   `ready`, `draft`, `force_push`, `closed`, `reopened`, `merged`. `sub` is
-  the command's index for a command, else `-1`. `actor` is an opaque person
-  index, stable across the dataset, for `comment_other` and the three human
-  review kinds, else `-1`.
+  the command's index for a command, else `-1`. `actor` indexes `people`
+  for `comment_other` and the three human review kinds, else `-1`; the
+  indexes are stable for a given set of records.
 - `table-<year>.json`: `titles` and `authors`, aligned with the PR rows.
   It also carries `commits`, one list per PR row of `[sha, authored,
   committed]`, and `refs`, one string per event of that year's events file
@@ -603,8 +610,8 @@ the records and tables. Per PR:
 out-of-order cases of Review Focus 4 (a response before `ready`, a review by
 a ghost on a ghost's PR); every column of a year file has one length; every
 index is inside its dictionary; events are sorted and each `pr` is a valid
-row; no file contains a commenter's or reviewer's login; two runs write
-identical bytes.
+row; every `author` and `actor` is inside `people`, and `people` holds no
+login twice; two runs write identical bytes.
 
 - [ ] Tests first, implement, pass. `make check`.
 
@@ -673,8 +680,9 @@ reviewerShare(data, rows, top: number): number
   outcomes at that same time. The shares and `S` sum to one at every point.
 - For `merge` the outcomes are merged and closed unmerged. For `response`
   and `approval` they are the event itself and "finished without one".
-- Durations run from `ready` for `response`, `approval` and `merge`. A row
-  whose start is `-1` is left out. A negative duration is zero.
+- Durations run from `ready` for `response` and `approval`, and from
+  `created` for `merge`: the spec's time to merge runs from the opening. A
+  row whose start is `-1` is left out. A negative duration is zero.
 - `firstCommitToOpened` leaves out rows whose `first_commit` is `-1`.
 - Weekly series by calendar week count events; series by week opened use
   only rows with `in_window`. The step is a week for a period of up to 53
@@ -793,7 +801,7 @@ click on a dot or a row sets the selected PR in the URL.
 - One PR's timeline, as sketched in the spec: first commit, opened, each
   event by kind with the spec's legend, last commit, final disposition, and
   the three spans labelled beneath. An unknown first commit is left off and
-  said so. Events show kind and time, never who.
+  said so. Events show kind and time; Task 17 adds who.
 - Lanes: the same line for up to 200 PRs of the current selection, one per
   row, on a canvas; a switch between the calendar and days since opening;
   ordered by opening unless the table is sorted. When the selection is
@@ -813,6 +821,50 @@ time order, each with the address its id or SHA gives; a PR with
 `first_commit` unknown renders without it; an unknown PR number shows "no
 such PR"; lanes cap at 200 and say so.
 
+### Task 17: People
+
+Runs after Tasks 10 and 11, which it edits. The owner asked for it during
+the build.
+
+**Files:** `site/src/lib/{data,filters,state,select}.ts`,
+`site/src/lib/stats/people.ts`,
+`site/src/components/{People,FilterBar,PrTable,PrTimeline}.svelte`, the
+page's section list, their tests.
+
+**Behaviour:**
+- `data.ts` reads `meta.people` and `meta.people_bots` and the `author`
+  column, and checks every `author` and `actor` is inside `people`.
+- `stats/people.ts`, pure, over a selection:
+  - authors: one row per author of the selected PRs, with PRs opened,
+    merged, closed unmerged and still open; the median days to a first
+    response and to merge, from the outcome curves over that author's PRs,
+    `null` where not yet known; the share disclosing; lines changed.
+  - reviewers: one row per person who reviewed or commented on a selected
+    PR they did not open, with PRs reviewed; reviews by verdict; comments;
+    first responses given; and the median days from a PR being ready to
+    their first response on it.
+- A People section with the two tables: every column sortable, ascending
+  and descending, by a control a keyboard can reach; virtualised; a `null`
+  sorts last either way. Each handle is a link to
+  `https://github.com/<login>`, opened in a new tab. Bot accounts are
+  hidden until a "show bots" control is set, and marked when shown.
+- Two filters, Author and Reviewer, each a handle chosen from the people
+  the data names, kept in the URL as the login; an unknown login falls back
+  to no filter. `select` applies them: Author keeps the PRs that person
+  opened; Reviewer keeps the PRs that person reviewed or commented on
+  without being the author. A row's "filter" control sets the matching
+  filter.
+- The PR table's author is a handle linking to GitHub, with a control that
+  sets the Author filter. A mark on the one-PR timeline says who made it
+  where the event has an `actor`, the handle a link.
+
+**Tests:** an author's and a reviewer's row hand-computed from the fixture;
+sorting by each column both ways with a `null` last; the filters round-trip
+through the hash and an unknown login yields none; the Reviewer filter
+selects exactly the hand-counted PRs; a handle's address; bots hidden by
+default; a year file whose `author` is outside `people` is rejected by
+name.
+
 ### Task 12: Methods page
 
 **Files:** `site/src/content/methods/*.md`, the prose route.
@@ -825,6 +877,8 @@ such PR"; lanes cap at 200 and say so.
 - [ ] What six months cannot show: no pre-LLM baseline, and unknown author
   standing for PRs opened before the window.
 - [ ] The hand-edited tables, linked to their files in the repository.
+- [ ] What an author's and a reviewer's row counts, that a bot command is
+  not a review, and which accounts are treated as bots.
 - [ ] How a PR's kind is decided, how many PRs each source decided and how
   many are unknown, computed from the data; that a ticket's type is the
   tracker's and may be wrong; and that the tracker lists the motion on the
@@ -846,8 +900,9 @@ such PR"; lanes cap at 200 and say so.
   headline figure; selecting a week narrows the table; opening a PR shows
   its timeline; a hash with an unknown filter value loads defaults; the
   footer shows a version and the repository link; a mark on the timeline
-  links to that PR on github.com; the methods page renders. Wire it into
-  CI.
+  links to that PR on github.com; sorting the reviewers table by a column
+  reorders it, and a handle links to github.com; the methods page renders.
+  Wire it into CI.
 - [ ] Enable Pages with source "GitHub Actions"; allow the `github-pages`
   environment to deploy from `v*` tags.
 - [ ] Merge; watch release, then deploy, with one background watcher.
@@ -864,14 +919,15 @@ such PR"; lanes cap at 200 and say so.
 1 ─┬─ 2 ─ 3 ─┬─ 14 ─┬─ 4 ─ 5 ─ 6 ─────────┐
    │         └─ 15 ─┘                     ├─ 13
    └─ 7 ─ 8 ─ 16 ─ 9 ─┬─ 10 ─┐            │
-                      └─ 11 ─┴─ 12 ───────┘
+                      └─ 11 ─┴─ 17 ─ 12 ──┘
 ```
 
 The Go line (2–6, with 14 and 15 after 3) and the site line (7–11, with 16
 after 8) run side by side. Tasks 14 and 15 both extend the record and
 `extract`, in different fields; the second to merge rebases. Task 10 needs
 Task 9's shared chart parts; Tasks 10 and 11 are independent of each other.
-Task 13 needs all of them.
+Task 17 edits the table and the timeline, so it follows both. Task 13 needs
+all of them.
 
 ## Self-review notes
 
@@ -887,6 +943,11 @@ Task 13 needs all of them.
 - The spec leaves author standing's source to the builder; this plan takes
   a per-author baseline at the window start (Tasks 2, 3) and marks older
   PRs unknown. The full history removes the baseline.
+- Sorting by author and by reviewer was asked for by the owner during the
+  build, with people shown and linked by GitHub handle: Task 6 ships the
+  logins, Task 17 adds the tables and the two filters, Task 12 explains the
+  figures. It replaces a rule of the builder's against ranking named
+  people.
 - The kind of change was added by the owner during the build, with the
   tracker as a source: Task 15 gathers the hints and the ticket types,
   Task 4 decides, Task 6 ships the column, Task 16 filters on it, Task 10
