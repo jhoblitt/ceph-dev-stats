@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { bucketTable, withCoverage } from '../lib/charts';
+  import { bucketLegend, bucketTable, withCoverage } from '../lib/charts';
   import { COLOURS } from '../lib/colours';
   import { DISCLOSED, NOT_DISCLOSED, dayStart, periodRange } from '../lib/filters';
   import {
@@ -89,6 +89,7 @@
     summary={describeShares(familyModel)}
     {empty}
     nothing={familyNothing}
+    legend={bucketLegend(familyModel)}
     table={bucketTable(familyModel, percent)}
   >
     <BucketChart
@@ -96,7 +97,7 @@
       format={percent}
       label={familyTitle}
       panels={families.panels}
-      height={Math.max(160, 40 + families.panels.length * 84)}
+      height={200}
       {selected}
       onselect={onbucket}
       {zoom}

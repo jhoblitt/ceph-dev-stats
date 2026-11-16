@@ -97,28 +97,50 @@ describe('the tool families', () => {
   const manyRows = all(many);
   const counts = disclosureCounts(many, manyRows);
 
-  it('draws every family named, however rarely, on one scale in the disclosed colour, most named first and "unspecified" last', () => {
+  it('draws every family named, however rarely, in one panel on one scale, most named first and "unspecified" last', () => {
     const chart = familiesModel(weekly(many, manyRows, p, 'disclosureShare'), FIVE, counts);
-    expect(chart.model.lines.map((l) => l.key)).toEqual(['claude', 'copilot', 'cursor', 'gemini', 'unspecified']);
-    expect(chart.model.lines.every((l) => l.color === COLOURS.disclosed)).toBe(true);
-    expect(chart.panels).toEqual([
-      { keys: ['claude'], unit: 'Claude: 10 PRs, 10% of those opened' },
-      { keys: ['copilot'], unit: 'Copilot: 3 PRs, 3% of those opened' },
-      { keys: ['cursor'], unit: 'Cursor: 1 PR, 1% of those opened' },
-      { keys: ['gemini'], unit: 'Gemini: 1 PR, 1% of those opened' },
-      { keys: ['unspecified'], unit: 'Unspecified: 5 PRs, 5% of those opened' },
-    ]);
+    const keys = ['claude', 'copilot', 'cursor', 'gemini', 'unspecified'];
+    expect(chart.model.lines.map((l) => l.key)).toEqual(keys);
+    expect(chart.panels).toEqual([{ keys, unit: '% of PRs opened' }]);
     expect(chart.model.lines[2]?.values).toEqual([1]);
   });
 
-  it('draws the fixture’s two families each in a panel', () => {
+  it('tells each family’s line apart by colour and again by marker and dash, "unspecified" in a neutral', () => {
+    const chart = familiesModel(weekly(many, manyRows, p, 'disclosureShare'), FIVE, counts);
+    const lines = chart.model.lines;
+    expect(new Set(lines.map((l) => l.color)).size).toBe(lines.length);
+    expect(new Set(lines.map((l) => `${l.shape} ${l.dashed === true}`)).size).toBe(lines.length);
+    expect(lines.find((l) => l.key === 'unspecified')?.color).toBe(COLOURS.statistic);
+    for (const l of lines) expect([COLOURS.disclosed, COLOURS.notDisclosed]).not.toContain(l.color);
+  });
+
+  it('gives every family of the tools table its own colour and its own marker and dash', () => {
+    const SEVEN = ['copilot', 'cursor', 'ibm-bob', 'claude', 'openai', 'gemini', 'unspecified'].map((id) => ({ id, name: id }));
+    const each = dataset(
+      SEVEN.map((_, f) => ({ created: t, disclosure: 3, families: [f] })),
+      [],
+      { families: SEVEN },
+    );
+    const lines = familiesModel(weekly(each, all(each), p, 'disclosureShare'), SEVEN, disclosureCounts(each, all(each))).model.lines;
+    expect(lines).toHaveLength(7);
+    expect(new Set(lines.map((l) => l.color)).size).toBe(7);
+    expect(new Set(lines.map((l) => `${l.shape} ${l.dashed === true}`)).size).toBe(7);
+  });
+
+  it('keeps a family’s colour and marker whichever other families the selection names', () => {
+    const style = (l: { key: string; color: string; shape: string; dashed?: boolean }) => [l.key, l.color, l.shape, l.dashed === true];
+    const wide = familiesModel(weekly(many, manyRows, p, 'disclosureShare'), FIVE, counts).model.lines.map(style);
+    const claudeOnly = manyRows.filter((r) => (many.prs.families[r] ?? []).every((f) => f === 0));
+    const narrow = familiesModel(weekly(many, claudeOnly, p, 'disclosureShare'), FIVE, disclosureCounts(many, claudeOnly)).model.lines.map(style);
+    expect(narrow).toEqual([wide[0]]);
+  });
+
+  it('draws the fixture’s two families in one panel', () => {
     // Claude: 66500 and 67100; GitHub Copilot: 67000; unspecified: none.
     const shares = weekly(data, rows, period, 'disclosureShare');
     const chart = familiesModel(shares, META.families, disclosureCounts(data, opened));
-    expect(chart.panels).toEqual([
-      { keys: ['claude'], unit: 'Claude: 2 PRs, 29% of those opened' },
-      { keys: ['copilot'], unit: 'GitHub Copilot: 1 PR, 14% of those opened' },
-    ]);
+    expect(chart.panels).toEqual([{ keys: ['claude', 'copilot'], unit: '% of PRs opened' }]);
+    expect(chart.model.lines.map((l) => l.label)).toEqual(['Claude', 'GitHub Copilot']);
     expect(chart.model.lines[0]?.values).toEqual((shares.values['claude'] ?? []).map((v) => (v === null ? null : v * 100)));
   });
 });

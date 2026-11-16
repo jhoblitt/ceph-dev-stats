@@ -2,8 +2,8 @@
 // statistics library's results. Every figure of the comparison is the
 // library's, over the two sub-selections; nothing here computes one.
 
-import { type BucketModel, type LineSeries, type Panel } from './charts';
-import { COLOURS } from './colours';
+import { type BucketModel, type LineSeries, type Panel, type Shape } from './charts';
+import { COLOURS, FAMILY_LINES, type FamilyLine } from './colours';
 import type { Dataset, Named } from './data';
 import { DISCLOSED, NOT_DISCLOSED, dayOf } from './filters';
 import { bucketPhrase, formatCount, formatMean, formatShare } from './format';
@@ -20,15 +20,22 @@ export function percent(v: number): string {
 }
 
 /** The value axis reads in percent, so a share is drawn as one. */
-function shareLine(key: string, label: string, color: string, values: readonly (number | null)[]): LineSeries {
-  return {
+function shareLine(
+  key: string,
+  label: string,
+  mark: { color: string; shape: Shape; dashed?: boolean },
+  values: readonly (number | null)[],
+): LineSeries {
+  const l: LineSeries = {
     key,
     label,
-    color,
-    shape: 'circle',
+    color: mark.color,
+    shape: mark.shape,
     values: values.map((v) => (v === null ? null : v * 100)),
     missing: values.map((v) => (v === null ? 'no PRs opened' : null)),
   };
+  if (mark.dashed) l.dashed = true;
+  return l;
 }
 
 /** The share of the PRs opened in each bucket that disclose, as one line in the disclosed colour. */
@@ -37,7 +44,7 @@ export function shareModel(shares: Weekly<number | null>): BucketModel {
     step: shares.step,
     buckets: shares.week,
     bars: [],
-    lines: [shareLine('disclosed', DISCLOSED, COLOURS.disclosed, shares.values['disclosed'] ?? [])],
+    lines: [shareLine('disclosed', DISCLOSED, { color: COLOURS.disclosed, shape: 'circle' }, shares.values['disclosed'] ?? [])],
   };
 }
 
@@ -45,19 +52,22 @@ export function shareModel(shares: Weekly<number | null>): BucketModel {
 const UNSPECIFIED = 'unspecified';
 
 export interface FamilyChart {
-  /** One line per panel: each family named in the selection, then "unspecified". */
+  /** A line for each family named in the selection, then "unspecified". */
   model: BucketModel;
+  /** The one panel every line is drawn in. */
   panels: Panel[];
 }
 
+/** A family the tools table gained after `FAMILY_LINES` was drawn up: neutral, and dashed. */
+const OTHER_FAMILY: FamilyLine = { color: COLOURS.statistic, shape: 'circle', dashed: true };
+
 /**
- * The share of the PRs opened in each bucket that name each tool family, on
- * one scale and in the disclosed colour, since every such PR discloses: a
- * panel for each family named in the selection, most named first, ties by
- * name, and "unspecified" last. Each panel's title gives its count and share.
+ * The share of the PRs opened in each bucket that name each tool family, a
+ * line for each family named in the selection, all in one panel on one scale:
+ * most named first, ties by name, and "unspecified" last. Each family is drawn
+ * as `FAMILY_LINES` gives it.
  */
 export function familiesModel(shares: Weekly<number | null>, families: readonly Named[], counts: DisclosureCounts): FamilyChart {
-  const share = (n: number) => `${plural(n, 'PR')}, ${formatShare(n / counts.rows)} of those opened`;
   const used = families
     .map((_, i) => i)
     .filter((i) => (counts.families[i] ?? 0) > 0)
@@ -67,14 +77,13 @@ export function familiesModel(shares: Weekly<number | null>, families: readonly 
         (counts.families[b] ?? 0) - (counts.families[a] ?? 0) ||
         (families[a]?.name ?? '').localeCompare(families[b]?.name ?? '', 'en'),
     );
-  const parts = used.map((i) => {
+  const lines = used.map((i) => {
     const f = families[i] as Named;
-    const n = counts.families[i] ?? 0;
-    return { line: shareLine(f.id, f.name, COLOURS.disclosed, shares.values[f.id] ?? []), panel: { keys: [f.id], unit: `${f.name}: ${share(n)}` } };
+    return shareLine(f.id, f.name, FAMILY_LINES[f.id] ?? OTHER_FAMILY, shares.values[f.id] ?? []);
   });
   return {
-    model: { step: shares.step, buckets: shares.week, bars: [], lines: parts.map((p) => p.line) },
-    panels: parts.map((p) => p.panel),
+    model: { step: shares.step, buckets: shares.week, bars: [], lines },
+    panels: [{ keys: lines.map((l) => l.key), unit: '% of PRs opened' }],
   };
 }
 
