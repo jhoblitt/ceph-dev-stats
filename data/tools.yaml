@@ -38,6 +38,9 @@ phrases:
   # Claude helped, an LLM that wrote this test, …
   - '\b(claude|copilot|codex|cursor|gemini|chatgpt|llm|ai)\b[\w -]{0,12}?\b(wrote|helped)\b'
   - '\bwith an? (llm|ai)\b'
+  # Fix suggested by Claude Code, I have followed Claude/Sonnet in …
+  - '\bsuggested by claude\b'
+  - '\bfollowed claude\b'
   # The link Claude Code on the web adds to what it writes.
   - 'claude\.ai/code/session_'
   # The markers the Copilot coding agent leaves in the pull requests it opens.
