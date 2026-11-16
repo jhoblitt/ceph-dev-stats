@@ -173,10 +173,22 @@ describe('People', () => {
     render(App, props);
     expect(people('Authors')).not.toContain('fixture-author-j');
     expect(section().getByText(/1 bot account not shown/)).toBeTruthy();
-    await fireEvent.click(section().getByRole('checkbox', { name: 'Show bot accounts' }));
+    await fireEvent.click(section().getByRole('checkbox', { name: 'Show bot accounts among the authors' }));
     expect(loc.hash()).toBe('#/?target=all&bots=show');
     const bot = cells('Authors').find((r) => r[1]?.startsWith('fixture-author-j'));
     expect(bot?.[1]).toBe('fixture-author-j bot');
+  });
+
+  it('says the bot control is the Authors table’s, and why the Reviewers table lists no bot', async () => {
+    render(App, (await fixturePage('#/?target=all')).props);
+    const authors = section().getByRole('heading', { level: 3, name: 'Authors' }).closest('.part') as HTMLElement;
+    expect(within(authors).getByRole('checkbox', { name: 'Show bot accounts among the authors' })).toBeTruthy();
+    const reviewers = section().getByRole('heading', { level: 3, name: 'Reviewers' }).closest('.part') as HTMLElement;
+    expect(within(reviewers).queryByRole('checkbox')).toBeNull();
+    expect(within(reviewers).getByRole('status').textContent?.replace(/\s+/g, ' ').trim()).toBe(
+      '5 reviewers of the selected PRs in the period, none of them a bot: the data keeps no login for a bot’s comment or review.',
+    );
+    expect(within(reviewers).queryByText(/not shown/)).toBeNull();
   });
 
   it("sets the Reviewer filter from a row, and every section follows it", async () => {

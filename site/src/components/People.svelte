@@ -2,7 +2,9 @@
   The people behind the selected PRs: who opened them and what those PRs came
   to, and who reviewed or commented on them. Each person is named by their
   GitHub login, linked to their page there, with a control that filters the
-  whole page by them. Bot accounts are left out until asked for.
+  whole page by them. Bot accounts among the authors are left out until
+  asked for; the data keeps no login for a bot's comment or review, so the
+  reviewers are never bots.
 -->
 <script lang="ts">
   import { formatCount } from '../lib/format';
@@ -35,9 +37,8 @@
   const bots = $derived($selection.bots);
 
   const shownAuthors = $derived(sortPeople(shownPeople(authors, meta, bots), AUTHOR_TABLE, authorSort, meta));
-  const shownReviewers = $derived(sortPeople(shownPeople(reviewers, meta, bots), REVIEWER_TABLE, reviewerSort, meta));
+  const shownReviewers = $derived(sortPeople(reviewers, REVIEWER_TABLE, reviewerSort, meta));
   const hiddenBots = $derived(bots ? 0 : authors.length - shownPeople(authors, meta, false).length);
-  const hiddenReviewerBots = $derived(bots ? 0 : reviewers.length - shownPeople(reviewers, meta, false).length);
 
   // A count sorts the most first; a handle, from A.
   const onAuthorSort = (column: AuthorColumn) =>
@@ -58,11 +59,6 @@
 <section id="people" aria-labelledby="people-heading" class:stale={$data.loading}>
   <h2 id="people-heading">People</h2>
 
-  <label class="bots">
-    <input type="checkbox" checked={bots} onchange={(e) => setBots(e.currentTarget.checked)} />
-    Show bot accounts
-  </label>
-
   {#if empty}
     <p class="muted">no PRs match</p>
   {:else}
@@ -71,6 +67,10 @@
       <p role="status">
         {count(shownAuthors.length, 'author', 'authors')} of the selected PRs opened in the period{hiddenText(hiddenBots)}
       </p>
+      <label class="bots">
+        <input type="checkbox" checked={bots} onchange={(e) => setBots(e.currentTarget.checked)} />
+        Show bot accounts among the authors
+      </label>
       {#if shownAuthors.length > 0}
         <PeopleTable
           name="Authors"
@@ -102,9 +102,8 @@
     <div class="part">
       <h3 id="{uid}-reviewers">Reviewers</h3>
       <p role="status">
-        {count(shownReviewers.length, 'reviewer', 'reviewers')} of the selected PRs in the period{hiddenText(
-          hiddenReviewerBots,
-        )}
+        {count(shownReviewers.length, 'reviewer', 'reviewers')} of the selected PRs in the period, none of them a bot: the
+        data keeps no login for a bot’s comment or review.
       </p>
       {#if shownReviewers.length > 0}
         <PeopleTable

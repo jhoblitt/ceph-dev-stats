@@ -24,6 +24,6 @@ On the report's default view, the {{view.prs}} pull requests on main open at som
 
 ## Bot accounts and deleted accounts
 
-An account is a bot account when GitHub types it as one or `data/bots.yaml` lists it, as in [People and bots](#people). Both tables leave bot accounts out until "Show bot accounts" is ticked. The Reviewers table never lists one: the data keeps no login for a bot's comment or review.
+An account is a bot account when GitHub types it as one or `data/bots.yaml` lists it, as in [People and bots](#people). The Authors table leaves bot accounts out until "Show bot accounts among the authors" is ticked. The Reviewers table never lists one, so that control is the Authors table's alone: the data keeps no login for a bot's comment or review.
 
 Every deleted account shares one login, so the tables show deleted accounts together as one row, "deleted account", with no link. As on the rest of the site, a comment or review by a deleted account on a pull request opened by a deleted account counts as another person's, since the two are not known to be the same: the Reviewers table counts it in the "deleted account" row, and when it was the pull request's first response, credits that row with it.
