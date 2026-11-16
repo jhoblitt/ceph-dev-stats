@@ -103,13 +103,14 @@ var _ = Describe("Run", func() {
 
 	run := func(since time.Time) error {
 		logger := slog.New(slog.NewJSONHandler(logs, &slog.HandlerOptions{Level: slog.LevelDebug}))
-		client := ghapi.NewClient(server.URL, token,
+		client, err := ghapi.NewClient(server.URL, token,
 			ghapi.WithHTTPClient(server.Client()),
 			ghapi.WithLogger(logger),
 			ghapi.WithBackoff(func(_ context.Context, attempt int) error {
 				waits = append(waits, attempt)
 				return nil
 			}))
+		Expect(err).NotTo(HaveOccurred())
 		return fetch.Run(context.Background(), client, fetch.Config{
 			CacheDir:       cacheDir,
 			Since:          since,

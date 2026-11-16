@@ -42,7 +42,10 @@ coverage mark, as it was.`,
 				return err
 			}
 			cfg.CacheDir = v.GetString("cache-dir")
-			client := ghapi.NewClient(v.GetString("api-url"), token)
+			client, err := ghapi.NewClient(v.GetString("api-url"), token)
+			if err != nil {
+				return err
+			}
 			return fetch.Run(cmd.Context(), client, cfg)
 		},
 	}

@@ -196,6 +196,14 @@ var _ = Describe("fetch", func() {
 			Expect(server.Requests()).To(BeEmpty())
 		})
 
+		// The host is under .invalid, so a regression fails at name
+		// resolution rather than reaching anyone.
+		It("refuses a plain-http --api-url to a host that is not loopback, saying why", func() {
+			err := run("--api-url", "http://api.example.invalid/graphql")
+
+			Expect(err).To(MatchError("API URL http://api.example.invalid/graphql: scheme must be https, or http to a loopback host, so that the token is not sent in clear text"))
+		})
+
 		It("rejects a --since that is not RFC 3339", func() {
 			Expect(run("--since", "2026-11-01")).To(MatchError(ContainSubstring("--since")))
 			Expect(server.Requests()).To(BeEmpty())
