@@ -21,9 +21,11 @@ var _ = Describe("Check", func() {
 		out *bytes.Buffer
 	)
 
+	// meta's window falls between the clean dataset's PR opened on May 1
+	// and the others, opened on June 1, so that one is not counted.
 	meta := func(openedInWindow, open int) *record.Meta {
 		return &record.Meta{
-			WindowStart:  fetch.WindowStart,
+			WindowStart:  time.Date(2026, 5, 15, 0, 0, 0, 0, time.UTC),
 			GitHubCounts: record.Counts{OpenedInWindow: openedInWindow, Open: open},
 		}
 	}
@@ -106,6 +108,19 @@ Accounts with the most comments, not typed bots by GitHub: 0
 Base branches: 0
 `))
 	})
+
+	DescribeTable("compares the counts over every record when the window is the default",
+		func(windowStart time.Time) {
+			in.Records[0].Created = time.Date(2011, 9, 22, 0, 0, 0, 0, time.UTC)
+			in.Records[1].Created = time.Date(2018, 3, 1, 0, 0, 0, 0, time.UTC)
+			in.Meta = &record.Meta{WindowStart: windowStart, GitHubCounts: record.Counts{OpenedInWindow: 3, Open: 1}}
+
+			Expect(classify.Check(in, out)).To(Succeed())
+			Expect(out.String()).To(HavePrefix("Counts: 3 opened in the window (GitHub: 3), 1 open (GitHub: 1)\n"))
+		},
+		Entry("meta.json's window_start, as extract writes it", fetch.WindowStart),
+		Entry("a meta.json without window_start", time.Time{}),
+	)
 
 	It("hints at neighboring candidates that match a phrase only when joined, without failing", func() {
 		in.Records[1].Disclosure.Description = []string{"Docs assisted", "by Gemini."}

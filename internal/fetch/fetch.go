@@ -23,8 +23,12 @@ const (
 	Name  = "ceph"
 )
 
-// WindowStart is the start of the data window. It never moves.
-var WindowStart = time.Date(2026, 5, 15, 0, 0, 0, 0, time.UTC)
+// WindowStart is the start of the data window: 2011-09-01, the day ceph/ceph
+// was created on GitHub, three weeks before its first pull request. A
+// window that starts before every pull request makes the data the whole
+// history: each author's baseline of earlier pull requests is zero, and
+// prior_prs counts the author's earlier records.
+var WindowStart = time.Date(2011, 9, 1, 0, 0, 0, 0, time.UTC)
 
 // Defaults for Config's zero values.
 const (
@@ -38,11 +42,15 @@ const (
 type Config struct {
 	// CacheDir holds raw/, authors.json and meta.json.
 	CacheDir string
+	// WindowStart is the start of the data window, WindowStart when zero.
+	// The baselines count each author's pull requests opened before it,
+	// and meta.json's opened_in_window those opened from it on.
+	WindowStart time.Time
 	// Since ends the walk over recently updated pull requests at the first
 	// one updated before it.
 	Since time.Time
 	// SinceIsDefault says Since is the default rather than the operator's
-	// choice. The walk then goes back to WindowStart instead when the
+	// choice. The walk then goes back to the window start instead when the
 	// cache holds entries of an older FormatVersion, so that every one of
 	// them is listed and fetched again.
 	SinceIsDefault bool
@@ -79,8 +87,8 @@ type walker struct {
 // when it leaves meta.json as it was and warns. A pull request already cached at the listed
 // updatedAt, in the current FormatVersion, is not fetched again, so a run
 // that stops early can be repeated. While the cache holds entries of an
-// older FormatVersion, a walk from a default since starts at WindowStart
-// instead, so that it reaches them all.
+// older FormatVersion, a walk from a default since starts at the window
+// start instead, so that it reaches them all.
 func Run(ctx context.Context, client *ghapi.Client, cfg Config) error {
 	if cfg.PageSize == 0 {
 		cfg.PageSize = DefaultPageSize
@@ -93,6 +101,9 @@ func Run(ctx context.Context, client *ghapi.Client, cfg Config) error {
 	}
 	if cfg.Now == nil {
 		cfg.Now = time.Now
+	}
+	if cfg.WindowStart.IsZero() {
+		cfg.WindowStart = WindowStart
 	}
 	if err := reachStale(ctx, &cfg); err != nil {
 		return err
@@ -134,15 +145,15 @@ func Run(ctx context.Context, client *ghapi.Client, cfg Config) error {
 }
 
 // reachStale warns when the cache holds entries of an older FormatVersion,
-// and then moves a default cfg.Since back to WindowStart so that the walk
-// lists, and fetches again, every one of them.
+// and then moves a default cfg.Since back to cfg.WindowStart so that the
+// walk lists, and fetches again, every one of them.
 func reachStale(ctx context.Context, cfg *Config) error {
 	stale, err := staleEntries(cfg.CacheDir)
 	if err != nil || stale == 0 {
 		return err
 	}
 	if cfg.SinceIsDefault {
-		cfg.Since = WindowStart
+		cfg.Since = cfg.WindowStart
 	}
 	cfg.Logger.WarnContext(ctx, "cache holds entries of an older format",
 		slog.Int("entries", stale),
@@ -435,7 +446,7 @@ func (w *walker) baselines(ctx context.Context) error {
 	slices.Sort(todo)
 	w.log.InfoContext(ctx, "counting prior pull requests", slog.Int("authors", len(todo)))
 
-	before := WindowStart.Format(time.DateOnly)
+	before := w.cfg.WindowStart.Format(time.DateOnly)
 	for batch := range slices.Chunk(todo, authorsPerRequest) {
 		vars := make(map[string]any, len(batch))
 		for i, login := range batch {
@@ -471,7 +482,7 @@ func (w *walker) baselines(ctx context.Context) error {
 func (w *walker) counts(ctx context.Context) (Meta, error) {
 	vars := map[string]any{
 		"owner": Owner, "name": Name,
-		"search": fmt.Sprintf("repo:%s/%s is:pr created:>=%s", Owner, Name, WindowStart.Format(time.DateOnly)),
+		"search": fmt.Sprintf("repo:%s/%s is:pr created:>=%s", Owner, Name, w.cfg.WindowStart.Format(time.DateOnly)),
 	}
 	var resp struct {
 		Search struct {

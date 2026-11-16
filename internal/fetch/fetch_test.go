@@ -85,6 +85,8 @@ var _ = Describe("Run", func() {
 		defaultSince bool
 		// defaultSinceAt is run's Config.DefaultSince.
 		defaultSinceAt time.Time
+		// window is run's Config.WindowStart; zero takes the default.
+		window time.Time
 	)
 
 	BeforeEach(func() {
@@ -94,6 +96,7 @@ var _ = Describe("Run", func() {
 		logs = &bytes.Buffer{}
 		defaultSince = false
 		defaultSinceAt = time.Time{}
+		window = time.Date(2026, 5, 15, 0, 0, 0, 0, time.UTC)
 	})
 
 	serve := func(prs ...fetch.Entry) {
@@ -113,6 +116,7 @@ var _ = Describe("Run", func() {
 		Expect(err).NotTo(HaveOccurred())
 		return fetch.Run(context.Background(), client, fetch.Config{
 			CacheDir:       cacheDir,
+			WindowStart:    window,
 			Since:          since,
 			SinceIsDefault: defaultSince,
 			DefaultSince:   defaultSinceAt,
@@ -778,6 +782,22 @@ var _ = Describe("Run", func() {
 		}
 		Expect(sizes).To(Equal([]int{25, 2}))
 		Expect(readJSON(filepath.Join(cacheDir, "authors.json"))).To(HaveLen(27))
+	})
+
+	It("asks for the baselines and counts from ceph/ceph's creation by default", func() {
+		window = time.Time{}
+		serve(pr(1, 1, "OPEN"))
+
+		Expect(run(fetch.WindowStart)).To(Succeed())
+
+		baselines := server.Operations(ghapi.AuthorBaselines(0).Name)
+		Expect(baselines).To(HaveLen(1))
+		Expect(baselines[0].Variables).To(Equal(map[string]any{
+			"q0": "repo:ceph/ceph is:pr author:alice created:<2011-09-01",
+		}))
+		counts := server.Operations(ghapi.Counts.Name)
+		Expect(counts).To(HaveLen(1))
+		Expect(counts[0].Variables).To(HaveKeyWithValue("search", "repo:ceph/ceph is:pr created:>=2011-09-01"))
 	})
 })
 

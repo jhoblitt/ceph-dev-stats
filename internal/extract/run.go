@@ -13,6 +13,7 @@ import (
 	"regexp"
 	"slices"
 	"strconv"
+	"time"
 
 	"github.com/jhoblitt/ceph-dev-stats/internal/fetch"
 	"github.com/jhoblitt/ceph-dev-stats/internal/record"
@@ -24,6 +25,10 @@ type Config struct {
 	CacheDir string
 	// DataDir holds the committed prs/, authors.json and meta.json.
 	DataDir string
+	// WindowStart is the start of the data window; fetch.WindowStart when
+	// zero. The cache's baselines must count the pull requests opened
+	// before it, since prior_prs adds the author's records from it on.
+	WindowStart time.Time
 	// Logger receives progress; slog.Default() when nil.
 	Logger *slog.Logger
 }
@@ -47,6 +52,9 @@ func Run(ctx context.Context, cfg Config) error {
 	log := cfg.Logger
 	if log == nil {
 		log = slog.Default()
+	}
+	if cfg.WindowStart.IsZero() {
+		cfg.WindowStart = fetch.WindowStart
 	}
 	numbers, err := cachedNumbers(cfg.CacheDir)
 	if err != nil {
@@ -72,7 +80,7 @@ func Run(ctx context.Context, cfg Config) error {
 		return err
 	}
 	recs := slices.SortedFunc(maps.Values(u.byNumber), func(a, b record.Record) int { return cmp.Compare(a.Number, b.Number) })
-	setPriorPRs(recs, authors)
+	setPriorPRs(recs, authors, cfg.WindowStart)
 
 	written, err := record.WriteRecords(cfg.DataDir, recs)
 	if err != nil {
@@ -219,9 +227,10 @@ func mergeAuthors(cfg Config) (authors map[string]int, inCache bool, err error) 
 }
 
 // setPriorPRs sets each record's prior_prs: its author's baseline plus the
-// author's records opened at or after the window start and before it. It
-// stays nil before the window start and for an author with no baseline.
-func setPriorPRs(recs []record.Record, baselines map[string]int) {
+// author's records opened at or after windowStart and before it. It stays
+// nil before windowStart and for an author with no baseline, as for a bot
+// or a deleted account.
+func setPriorPRs(recs []record.Record, baselines map[string]int, windowStart time.Time) {
 	order := make([]*record.Record, len(recs))
 	for i := range recs {
 		order[i] = &recs[i]
@@ -232,7 +241,7 @@ func setPriorPRs(recs []record.Record, baselines map[string]int) {
 	inWindow := map[string]int{}
 	for _, r := range order {
 		r.PriorPRs = nil
-		if r.Created.Before(fetch.WindowStart) {
+		if r.Created.Before(windowStart) {
 			continue
 		}
 		if base, ok := baselines[r.Author.Login]; ok {
@@ -254,7 +263,7 @@ func copyMeta(cfg Config) error {
 	}
 	_, err = record.WriteMeta(cfg.DataDir, record.Meta{
 		Repo:           fetch.Owner + "/" + fetch.Name,
-		WindowStart:    fetch.WindowStart,
+		WindowStart:    cfg.WindowStart,
 		FetchedThrough: utc(m.WalkStarted),
 		GitHubCounts:   record.Counts{OpenedInWindow: m.OpenedInWindow, Open: m.Open},
 	})

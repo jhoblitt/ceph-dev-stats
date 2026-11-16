@@ -26,12 +26,21 @@ type file struct {
 	info    os.FileInfo
 }
 
+// specWindow is the window the specs' 2026 fixtures are dated around,
+// some PRs before it and some after.
+var specWindow = time.Date(2026, 5, 15, 0, 0, 0, 0, time.UTC)
+
 var _ = Describe("Run", func() {
-	var cacheDir, dataDir string
+	var (
+		cacheDir, dataDir string
+		// window is run's Config.WindowStart; zero takes the default.
+		window time.Time
+	)
 
 	BeforeEach(func() {
 		cacheDir = GinkgoT().TempDir()
 		dataDir = GinkgoT().TempDir()
+		window = specWindow
 	})
 
 	writeJSON := func(path string, v any) {
@@ -51,7 +60,7 @@ var _ = Describe("Run", func() {
 
 	run := func() {
 		GinkgoHelper()
-		Expect(extract.Run(context.Background(), extract.Config{CacheDir: cacheDir, DataDir: dataDir, Logger: quiet()})).To(Succeed())
+		Expect(extract.Run(context.Background(), extract.Config{CacheDir: cacheDir, DataDir: dataDir, WindowStart: window, Logger: quiet()})).To(Succeed())
 	}
 
 	files := func() map[string]file {
@@ -248,7 +257,7 @@ var _ = Describe("Run", func() {
 	})
 
 	It("counts a PR opened exactly at the window start as in the window", func() {
-		cache(entry(1, "kim", fetch.WindowStart))
+		cache(entry(1, "kim", window))
 		writeJSON(filepath.Join(cacheDir, "authors.json"), map[string]int{"kim": 4})
 
 		run()
@@ -287,6 +296,56 @@ var _ = Describe("Run", func() {
 		Expect(records()[2].PriorPRs).To(BeNil())
 	})
 
+	Context("with the default window", func() {
+		BeforeEach(func() {
+			window = time.Time{}
+		})
+
+		It("starts it when ceph/ceph was created, leaving prior_prs null only before that", func() {
+			cache(
+				entry(1, "kim", time.Date(2011, 8, 31, 23, 59, 59, 0, time.UTC)),
+				entry(2, "kim", time.Date(2011, 9, 1, 0, 0, 0, 0, time.UTC)),
+			)
+			writeJSON(filepath.Join(cacheDir, "authors.json"), map[string]int{"kim": 0})
+			writeJSON(filepath.Join(cacheDir, "meta.json"), fetch.Meta{WalkStarted: day(11, 15)})
+
+			run()
+
+			Expect(records()[1].PriorPRs).To(BeNil(), "PR opened a second before the window")
+			Expect(records()[2].PriorPRs).To(HaveValue(Equal(0)), "PR opened at the window start")
+			Expect(record.ReadMeta(dataDir)).To(HaveField("WindowStart", time.Date(2011, 9, 1, 0, 0, 0, 0, time.UTC)))
+		})
+
+		It("counts every earlier record of a human author, and leaves a bot's and a deleted account's null", func() {
+			bot := entry(5, "dependabot", time.Date(2019, 3, 1, 0, 0, 0, 0, time.UTC))
+			bot.Author.Typename = "Bot"
+			ghost := entry(6, "ghost", time.Date(2020, 1, 1, 0, 0, 0, 0, time.UTC))
+			ghost.Author = nil
+			cache(
+				entry(1, "kim", time.Date(2013, 2, 1, 0, 0, 0, 0, time.UTC)),
+				entry(2, "lee", time.Date(2015, 6, 1, 0, 0, 0, 0, time.UTC)),
+				entry(3, "kim", time.Date(2018, 4, 1, 0, 0, 0, 0, time.UTC)),
+				bot,
+				ghost,
+				entry(4, "kim", day(4, 1)),
+				entry(7, "kim", day(8, 1)),
+			)
+			writeJSON(filepath.Join(cacheDir, "authors.json"), map[string]int{"kim": 0, "lee": 0})
+
+			run()
+
+			got := records()
+			Expect(got[1].PriorPRs).To(HaveValue(Equal(0)), "kim's first PR, in 2013")
+			Expect(got[3].PriorPRs).To(HaveValue(Equal(1)), "kim's second PR")
+			Expect(got[4].PriorPRs).To(HaveValue(Equal(2)), "kim's third PR")
+			Expect(got[7].PriorPRs).To(HaveValue(Equal(3)), "kim's fourth PR")
+			Expect(got[2].PriorPRs).To(HaveValue(Equal(0)), "lee's first PR")
+			Expect(got[5].PriorPRs).To(BeNil(), "a bot's PR")
+			Expect(got[6].Author).To(Equal(record.Actor{Login: fetch.GhostLogin}))
+			Expect(got[6].PriorPRs).To(BeNil(), "a deleted account's PR")
+		})
+	})
+
 	It("adds the cache's baselines to the committed ones", func() {
 		Expect(record.WriteAuthors(dataDir, map[string]int{"kim": 4, "lee": 1})).To(BeTrue())
 		writeJSON(filepath.Join(cacheDir, "authors.json"), map[string]int{"lee": 2, "max": 7})
@@ -297,7 +356,7 @@ var _ = Describe("Run", func() {
 	})
 
 	It("leaves the committed meta alone when the cache has none", func() {
-		meta := record.Meta{Repo: "ceph/ceph", WindowStart: fetch.WindowStart, FetchedThrough: day(11, 1)}
+		meta := record.Meta{Repo: "ceph/ceph", WindowStart: window, FetchedThrough: day(11, 1)}
 		Expect(record.WriteMeta(dataDir, meta)).To(BeTrue())
 		cache(fixture("ghost"))
 
