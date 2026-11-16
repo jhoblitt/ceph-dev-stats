@@ -52,6 +52,7 @@ function synthetic(): Dataset {
     families: Array.from({ length: ROWS }, () => []),
     components: Array.from({ length: ROWS }, () => []),
     standing: new Int32Array(ROWS),
+    kind: new Int32Array(ROWS).fill(-1),
   };
   const n = ROWS * EVENTS_PER_ROW;
   const pr = new Int32Array(n);

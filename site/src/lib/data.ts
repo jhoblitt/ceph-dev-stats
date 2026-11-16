@@ -19,6 +19,8 @@ export interface Meta {
   components: Named[];
   families: Named[];
   commands: Named[];
+  /** What a PR is: a bug fix, a feature, …; the `kind` column indexes it. */
+  kinds: Named[];
   /** Holds `none`; every other value is a form of disclosure. */
   disclosure: string[];
   event_kinds: string[];
@@ -65,6 +67,8 @@ const PR_SPEC = {
   families: 'lists',
   components: 'lists',
   standing: 'int',
+  /** An index into meta's `kinds`, or -1 for unknown. */
+  kind: 'int',
 } as const satisfies Record<string, ColumnKind>;
 
 const EVENT_SPEC = {
@@ -171,6 +175,7 @@ export function parseMeta(raw: unknown, file = 'meta.json'): Meta {
     components: field('components', isNamedArray, 'a list of {id, name}'),
     families: field('families', isNamedArray, 'a list of {id, name}'),
     commands: field('commands', isNamedArray, 'a list of {id, name}'),
+    kinds: field('kinds', isNamedArray, 'a list of {id, name}'),
     disclosure: field('disclosure', isStringArray, 'a list of strings'),
     event_kinds: field('event_kinds', isStringArray, 'a list of strings'),
   };
@@ -231,23 +236,65 @@ function parseColumns<Spec extends Record<string, ColumnKind>>(raw: unknown, fil
   return out as Columns<Spec>;
 }
 
-export function parsePrs(raw: unknown, file: string): PrColumns {
-  return parseColumns(raw, file, PR_SPEC);
+/**
+ * A check that a value indexes `dictionary`, which meta calls `name`; -1 also
+ * passes where `unknown` allows it. `at` names the row or event holding it.
+ */
+function checkIndex(file: string, column: string, dictionary: readonly unknown[], name: string, unknown: boolean) {
+  return (value: number, at: string) => {
+    if ((value >= 0 && value < dictionary.length) || (unknown && value === -1)) return;
+    throw new DataError(
+      file,
+      `column "${column}" has ${value} at ${at}, outside "${name}" of ${dictionary.length} entries`,
+    );
+  };
 }
 
-/** Reads an events file whose `pr` must be a row of a year with `rows` PRs. */
-export function parseEvents(raw: unknown, file: string, rows: number): EventColumns {
+/** Reads a prs file; every index must be inside its dictionary in `meta`. */
+export function parsePrs(raw: unknown, file: string, meta: Meta): PrColumns {
+  const prs = parseColumns(raw, file, PR_SPEC);
+  const scalars = [
+    ['base', meta.bases, 'bases', false],
+    ['disclosure', meta.disclosure, 'disclosure', false],
+    ['kind', meta.kinds, 'kinds', true],
+  ] as const;
+  for (const [column, dictionary, name, unknown] of scalars) {
+    const check = checkIndex(file, column, dictionary, name, unknown);
+    prs[column].forEach((v, r) => check(v, `row ${r}`));
+  }
+  for (const column of ['families', 'components'] as const) {
+    const check = checkIndex(file, column, meta[column], column, false);
+    prs[column].forEach((list, r) => list.forEach((v) => check(v, `row ${r}`)));
+  }
+  return prs;
+}
+
+const COMMAND_KINDS = ['command_author', 'command_other'];
+
+/**
+ * Reads an events file whose `pr` must be a row of a year with `rows` PRs,
+ * whose `kind` must be in meta's `event_kinds`, and whose `sub` must be in
+ * its `commands` for a command.
+ */
+export function parseEvents(raw: unknown, file: string, rows: number, meta: Meta): EventColumns {
   const events = parseColumns(raw, file, EVENT_SPEC);
   const bad = events.pr.findIndex((r) => r < 0 || r >= rows);
   if (bad !== -1) {
     throw new DataError(file, `column "pr" names row ${events.pr[bad]} at ${bad}, but the year has ${rows} rows`);
   }
+  const kind = checkIndex(file, 'kind', meta.event_kinds, 'event_kinds', false);
+  const sub = checkIndex(file, 'sub', meta.commands, 'commands', false);
+  const commands = COMMAND_KINDS.map((k) => meta.event_kinds.indexOf(k)).filter((k) => k !== -1);
+  events.kind.forEach((k, i) => {
+    kind(k, `event ${i}`);
+    if (commands.includes(k)) sub(events.sub[i] as number, `event ${i}`);
+  });
   return events;
 }
 
-export function parseYear(year: number, prsRaw: unknown, eventsRaw: unknown): YearData {
-  const prs = parsePrs(prsRaw, prsFile(year));
-  return { year, prs, events: parseEvents(eventsRaw, eventsFile(year), prs.number.length) };
+export function parseYear(year: number, prsRaw: unknown, eventsRaw: unknown, meta: Meta): YearData {
+  const prs = parsePrs(prsRaw, prsFile(year), meta);
+  return { year, prs, events: parseEvents(eventsRaw, eventsFile(year), prs.number.length, meta) };
 }
 
 /** Reads a table, which must have `rows` entries, one per row of its year. */
@@ -361,7 +408,7 @@ export class DataLoader {
       p = Promise.all([
         fetchJson(this.#fetch, this.#baseUrl, prsFile(year)),
         fetchJson(this.#fetch, this.#baseUrl, eventsFile(year)),
-      ]).then(([prs, events]) => parseYear(year, prs, events));
+      ]).then(([prs, events]) => parseYear(year, prs, events, this.meta));
       this.#years.set(year, p);
     }
     return p;

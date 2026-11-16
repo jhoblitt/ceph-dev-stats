@@ -12,7 +12,7 @@ import { all, at, dataset } from './stats/testing';
 import { weekly } from './stats/weekly';
 
 const meta = parseMeta(rawMeta);
-const data = combine(meta, [parseYear(2025, prs2025, events2025), parseYear(2026, prs2026, events2026)]);
+const data = combine(meta, [parseYear(2025, prs2025, events2025, meta), parseYear(2026, prs2026, events2026, meta)]);
 
 // Rows in the fixture: 0 #64010, 1 #65220, 2 #66100, 3 #66500, 4 #66510,
 // 5 #66600, 6 #66700, 7 #66800, 8 #66900, 9 #67000, 10 #67100, 11 #67250.

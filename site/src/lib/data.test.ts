@@ -27,12 +27,25 @@ describe('parseMeta', () => {
     expect(meta.years).toEqual([2025, 2026]);
     expect(meta.components.map((c) => c.id)).toEqual(['cephfs', 'mgr', 'rbd', 'rgw']);
     expect(meta.disclosure).toEqual(['none', 'description', 'coauthor', 'trailer']);
+    expect(meta.kinds).toEqual([
+      { id: 'bugfix', name: 'Bug fix' },
+      { id: 'feature', name: 'Feature' },
+      { id: 'cleanup', name: 'Cleanup' },
+      { id: 'docs', name: 'Documentation' },
+      { id: 'other', name: 'Other' },
+    ]);
   });
 
   it('rejects a meta without a dictionary, naming the file and the field', () => {
     const { bases: _, ...withoutBases } = rawMeta;
     expect(() => parseMeta(withoutBases)).toThrow(DataError);
     expect(() => parseMeta(withoutBases)).toThrow(/meta\.json.*bases/);
+  });
+
+  it('rejects a meta without kinds, or with kinds that are not {id, name}', () => {
+    const { kinds: _, ...withoutKinds } = rawMeta;
+    expect(() => parseMeta(withoutKinds)).toThrow(/meta\.json.*kinds/);
+    expect(() => parseMeta({ ...rawMeta, kinds: ['bugfix'] })).toThrow(/meta\.json.*kinds/);
   });
 
   it('rejects a time that is not a number', () => {
@@ -42,7 +55,7 @@ describe('parseMeta', () => {
 
 describe('parsePrs', () => {
   it('reads the columns into typed arrays', () => {
-    const prs = parsePrs(prs2026, 'prs-2026.json');
+    const prs = parsePrs(prs2026, 'prs-2026.json', meta);
     expect(prs.number).toBeInstanceOf(Int32Array);
     expect(prs.created).toBeInstanceOf(Float64Array);
     expect([...prs.number]).toEqual(prs2026.number);
@@ -50,46 +63,89 @@ describe('parsePrs', () => {
     expect(prs.components).toEqual(prs2026.components);
   });
 
+  it('reads the kind column, -1 for unknown', () => {
+    const prs = parsePrs(prs2026, 'prs-2026.json', meta);
+    expect(prs.kind).toBeInstanceOf(Int32Array);
+    expect([...prs.kind]).toEqual([2, 0, 3, 2, 1, 0, 1, 4, 1, 3]);
+    expect([...parsePrs(prs2025, 'prs-2025.json', meta).kind]).toEqual([0, -1]);
+  });
+
   it('rejects a year file whose columns differ in length, naming the file and the column', () => {
     const short = { ...prs2026, deletions: prs2026.deletions.slice(1) };
-    expect(() => parsePrs(short, 'prs-2026.json')).toThrow(DataError);
-    expect(() => parsePrs(short, 'prs-2026.json')).toThrow(/prs-2026\.json.*deletions/);
+    expect(() => parsePrs(short, 'prs-2026.json', meta)).toThrow(DataError);
+    expect(() => parsePrs(short, 'prs-2026.json', meta)).toThrow(/prs-2026\.json.*deletions/);
   });
 
   it('rejects a ragged column of a different length too', () => {
     const short = { ...prs2026, families: prs2026.families.slice(1) };
-    expect(() => parsePrs(short, 'prs-2026.json')).toThrow(/families/);
+    expect(() => parsePrs(short, 'prs-2026.json', meta)).toThrow(/families/);
   });
 
   it('rejects a missing column', () => {
     const { standing: _, ...withoutStanding } = prs2026;
-    expect(() => parsePrs(withoutStanding, 'prs-2026.json')).toThrow(/standing/);
+    expect(() => parsePrs(withoutStanding, 'prs-2026.json', meta)).toThrow(/standing/);
   });
 
   it('rejects a value that is not an integer, which would become NaN', () => {
     const bad = { ...prs2026, ready: prs2026.ready.map((v, i) => (i === 3 ? null : v)) };
-    expect(() => parsePrs(bad, 'prs-2026.json')).toThrow(/ready/);
+    expect(() => parsePrs(bad, 'prs-2026.json', meta)).toThrow(/ready/);
   });
 
   it('rejects a file that is not an object of columns', () => {
-    expect(() => parsePrs([1, 2, 3], 'prs-2026.json')).toThrow(/prs-2026\.json/);
+    expect(() => parsePrs([1, 2, 3], 'prs-2026.json', meta)).toThrow(/prs-2026\.json/);
+  });
+
+  // Each index column against its dictionary in the fixture's meta: 4 bases,
+  // 4 disclosures, 3 families, 4 components and 5 kinds.
+  const at3 = <T>(column: readonly T[], value: T) => column.map((v, i) => (i === 3 ? value : v));
+  it.each([
+    ['kind past the last kind', 'kind', { kind: at3(prs2026.kind, 5) }],
+    ['kind below -1', 'kind', { kind: at3(prs2026.kind, -2) }],
+    ['base past the last base', 'base', { base: at3(prs2026.base, 4) }],
+    ['base of -1', 'base', { base: at3(prs2026.base, -1) }],
+    ['disclosure past the last form', 'disclosure', { disclosure: at3(prs2026.disclosure, 4) }],
+    ['family past the last family', 'families', { families: at3(prs2026.families, [0, 3]) }],
+    ['component past the last component', 'components', { components: at3(prs2026.components, [4]) }],
+  ])('rejects a %s, naming the file and the column', (_name, column, patch) => {
+    const bad = { ...prs2026, ...patch };
+    expect(() => parsePrs(bad, 'prs-2026.json', meta)).toThrow(DataError);
+    expect(() => parsePrs(bad, 'prs-2026.json', meta)).toThrow(new RegExp(`prs-2026\\.json.*"${column}".*row 3`));
+  });
+
+  it('accepts every kind in the dictionary and -1', () => {
+    const kinds = [-1, 0, 1, 2, 3, 4, 4, 4, 4, 4];
+    expect([...parsePrs({ ...prs2026, kind: kinds }, 'prs-2026.json', meta).kind]).toEqual(kinds);
   });
 });
 
 describe('parseEvents', () => {
   it('rejects columns of different lengths', () => {
     const short = { ...events2026, actor: events2026.actor.slice(1) };
-    expect(() => parseEvents(short, 'events-2026.json', 10)).toThrow(/events-2026\.json.*actor/);
+    expect(() => parseEvents(short, 'events-2026.json', 10, meta)).toThrow(/events-2026\.json.*actor/);
   });
 
   it('rejects an event on a row the year does not have', () => {
-    expect(() => parseEvents(events2026, 'events-2026.json', 3)).toThrow(/events-2026\.json.*pr/);
+    expect(() => parseEvents(events2026, 'events-2026.json', 3, meta)).toThrow(/events-2026\.json.*pr/);
+  });
+
+  // Event 16 is a command_author with sub 0; meta has 15 event kinds and 2 commands.
+  const at16 = (column: readonly number[], value: number) => column.map((v, i) => (i === 16 ? value : v));
+  it.each([
+    ['kind past the last event kind', 'kind', { kind: at16(events2026.kind, 15) }],
+    ['command past the last command', 'sub', { sub: at16(events2026.sub, 2) }],
+    ['command without a command', 'sub', { sub: at16(events2026.sub, -1) }],
+  ])('rejects a %s, naming the file and the column', (_name, column, patch) => {
+    const bad = { ...events2026, ...patch };
+    expect(() => parseEvents(bad, 'events-2026.json', 10, meta)).toThrow(DataError);
+    expect(() => parseEvents(bad, 'events-2026.json', 10, meta)).toThrow(
+      new RegExp(`events-2026\\.json.*"${column}".*16`),
+    );
   });
 });
 
 describe('combine', () => {
-  const y2025 = parseYear(2025, prs2025, events2025);
-  const y2026 = parseYear(2026, prs2026, events2026);
+  const y2025 = parseYear(2025, prs2025, events2025, meta);
+  const y2026 = parseYear(2026, prs2026, events2026, meta);
   const data = combine(meta, [y2025, y2026]);
 
   it('appends the years in order, so a row id is global', () => {
