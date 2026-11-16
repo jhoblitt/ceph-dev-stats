@@ -163,7 +163,12 @@ export function withCoverage(model: BucketModel, period: Period, fetchedThrough:
 }
 
 export function partialText(c: Coverage): string {
-  return `partial: ${c.days === 0 ? 'under 1' : formatCount(c.days)} of ${formatCount(c.of)} days`;
+  return `partial: ${coveredText(c)}`;
+}
+
+/** How much of a bucket the data covers: "15 of 30 days". */
+function coveredText(c: Coverage): string {
+  return `${c.days === 0 ? 'under 1' : formatCount(c.days)} of ${formatCount(c.of)} days`;
 }
 
 /** A bucket's name, with how much of it the data covers when that is not all of it. */
@@ -294,7 +299,7 @@ function countSentence(model: BucketModel, label: string, values: readonly numbe
 function partialSentence(model: BucketModel): string {
   const parts = model.buckets.flatMap((start, i) => {
     const c = model.partial?.[i];
-    return c ? [`${bucketName(start, model.step)}, ${partialText(c)}`] : [];
+    return c ? [`${bucketName(start, model.step)}, ${coveredText(c)}`] : [];
   });
   return parts.length === 0 ? '' : `Partial: ${parts.join('; ')}.`;
 }
@@ -327,8 +332,13 @@ export function describeWaits(model: BucketModel): string {
     const known = l.values.filter((v): v is number => v !== null);
     const unknown = l.values.filter((v, i) => v === null && missingText(model, l, i) === NOT_YET_KNOWN).length;
     const unreached = l.unreached?.filter(Boolean).length ?? 0;
+    const [lo, hi] = [formatDays(Math.min(...known)), formatDays(Math.max(...known))];
     const clauses = [
-      known.length > 0 ? `from ${formatDays(Math.min(...known))} to ${formatDays(Math.max(...known))}` : 'no value known',
+      known.length === 0
+        ? 'no value known'
+        : lo === hi
+          ? `${lo} in ${plural(known.length, model.step)}`
+          : `from ${lo} to ${hi}`,
       ...(unknown > 0 ? [`not yet known in ${plural(unknown, model.step)}`] : []),
       ...(unreached > 0 ? [`not reached in ${plural(unreached, model.step)}`] : []),
     ];
