@@ -41,6 +41,11 @@ type Config struct {
 	// Since ends the walk over recently updated pull requests at the first
 	// one updated before it.
 	Since time.Time
+	// SinceIsDefault says Since is the default rather than the operator's
+	// choice. The walk then goes back to WindowStart instead when the
+	// cache holds entries of an older FormatVersion, so that every one of
+	// them is listed and fetched again.
+	SinceIsDefault bool
 	// PageSize is the number of pull requests asked for at first; it
 	// halves when a page repeatedly fails. DefaultPageSize when zero.
 	PageSize int
@@ -65,8 +70,10 @@ type walker struct {
 // since cfg.Since, most recent first; every open one; then the prior-PR
 // count of each author not yet in authors.json. It ends by writing GitHub's
 // counts to meta.json. A pull request already cached at the listed
-// updatedAt is not fetched again, so a run that stops early can be
-// repeated.
+// updatedAt, in the current FormatVersion, is not fetched again, so a run
+// that stops early can be repeated. While the cache holds entries of an
+// older FormatVersion, a walk from a default since starts at WindowStart
+// instead, so that it reaches them all.
 func Run(ctx context.Context, client *ghapi.Client, cfg Config) error {
 	if cfg.PageSize == 0 {
 		cfg.PageSize = DefaultPageSize
@@ -79,6 +86,9 @@ func Run(ctx context.Context, client *ghapi.Client, cfg Config) error {
 	}
 	if cfg.Now == nil {
 		cfg.Now = time.Now
+	}
+	if err := reachStale(ctx, &cfg); err != nil {
+		return err
 	}
 	w := &walker{client: client, cfg: cfg, log: cfg.Logger, started: cfg.Now().UTC(), pageSize: cfg.PageSize}
 	w.log.InfoContext(ctx, "walk started",
@@ -98,12 +108,30 @@ func Run(ctx context.Context, client *ghapi.Client, cfg Config) error {
 	if err != nil {
 		return err
 	}
-	if err := writeJSON(filepath.Join(cfg.CacheDir, "meta.json"), meta); err != nil {
+	if err := writeJSON(filepath.Join(cfg.CacheDir, MetaFile), meta); err != nil {
 		return err
 	}
 	w.log.InfoContext(ctx, "walk finished",
 		slog.Int("opened_in_window", meta.OpenedInWindow),
 		slog.Int("open", meta.Open))
+	return nil
+}
+
+// reachStale warns when the cache holds entries of an older FormatVersion,
+// and then moves a default cfg.Since back to WindowStart so that the walk
+// lists, and fetches again, every one of them.
+func reachStale(ctx context.Context, cfg *Config) error {
+	stale, err := staleEntries(cfg.CacheDir)
+	if err != nil || stale == 0 {
+		return err
+	}
+	if cfg.SinceIsDefault {
+		cfg.Since = WindowStart
+	}
+	cfg.Logger.WarnContext(ctx, "cache holds entries of an older format",
+		slog.Int("entries", stale),
+		slog.Int("format_version", FormatVersion),
+		slog.Time("since", cfg.Since))
 	return nil
 }
 
@@ -136,15 +164,40 @@ type commitNode struct {
 	Commit Commit `json:"commit"`
 }
 
+// commentNode and reviewNode take fullDatabaseId as GitHub sent it,
+// shadowing the parsed field, so that a value that is not a number is an
+// error naming its pull request rather than a page that will not decode.
+type commentNode struct {
+	Comment
+	FullDatabaseID *string `json:"fullDatabaseId"`
+}
+
+type reviewNode struct {
+	Review
+	FullDatabaseID *string `json:"fullDatabaseId"`
+}
+
 // prNode is a listed pull request. Its connection fields shadow Entry's
 // lists when decoding.
 type prNode struct {
 	Entry
-	Labels        connection[Label]      `json:"labels"`
-	Commits       connection[commitNode] `json:"commits"`
-	Comments      connection[Comment]    `json:"comments"`
-	Reviews       connection[Review]     `json:"reviews"`
-	TimelineItems connection[Event]      `json:"timelineItems"`
+	Labels        connection[Label]       `json:"labels"`
+	Commits       connection[commitNode]  `json:"commits"`
+	Comments      connection[commentNode] `json:"comments"`
+	Reviews       connection[reviewNode]  `json:"reviews"`
+	TimelineItems connection[Event]       `json:"timelineItems"`
+}
+
+// databaseID parses a fullDatabaseId of pull request number; null is no id.
+func databaseID(number int, id *string) (int64, error) {
+	if id == nil {
+		return 0, nil
+	}
+	n, err := strconv.ParseInt(*id, 10, 64)
+	if err != nil {
+		return 0, fmt.Errorf("pull request %d: fullDatabaseId %q: %w", number, *id, err)
+	}
+	return n, nil
 }
 
 // walk lists pull requests in states (all when nil) from the most recently
@@ -221,11 +274,12 @@ func (w *walker) listPage(ctx context.Context, states []string, after string) (c
 }
 
 // store fetches the rest of n's connections and caches it, unless the
-// cache already holds it at the same or a later updatedAt.
+// cache already holds it in the current format at the same or a later
+// updatedAt.
 func (w *walker) store(ctx context.Context, n *prNode) (bool, error) {
 	cached, err := ReadEntry(w.cfg.CacheDir, n.Number)
 	switch {
-	case err == nil && !n.UpdatedAt.After(cached.UpdatedAt):
+	case err == nil && cached.FormatVersion >= FormatVersion && !n.UpdatedAt.After(cached.UpdatedAt):
 		return false, nil
 	case err != nil && !errors.Is(err, fs.ErrNotExist):
 		return false, err
@@ -243,11 +297,27 @@ func (w *walker) store(ctx context.Context, n *prNode) (bool, error) {
 	for i, c := range commits {
 		e.Commits[i] = c.Commit
 	}
-	if e.Comments, err = rest(ctx, w, n.Number, ghapi.Comments, n.Comments); err != nil {
+	comments, err := rest(ctx, w, n.Number, ghapi.Comments, n.Comments)
+	if err != nil {
 		return false, err
 	}
-	if e.Reviews, err = rest(ctx, w, n.Number, ghapi.Reviews, n.Reviews); err != nil {
+	e.Comments = make([]Comment, len(comments))
+	for i, c := range comments {
+		e.Comments[i] = c.Comment
+		if e.Comments[i].DatabaseID, err = databaseID(n.Number, c.FullDatabaseID); err != nil {
+			return false, err
+		}
+	}
+	reviews, err := rest(ctx, w, n.Number, ghapi.Reviews, n.Reviews)
+	if err != nil {
 		return false, err
+	}
+	e.Reviews = make([]Review, len(reviews))
+	for i, r := range reviews {
+		e.Reviews[i] = r.Review
+		if e.Reviews[i].DatabaseID, err = databaseID(n.Number, r.FullDatabaseID); err != nil {
+			return false, err
+		}
 	}
 	if e.TimelineItems, err = rest(ctx, w, n.Number, ghapi.TimelineItems, n.TimelineItems); err != nil {
 		return false, err
@@ -261,6 +331,7 @@ func (w *walker) store(ctx context.Context, n *prNode) (bool, error) {
 		e.Reviews[i].Author = orGhost(e.Reviews[i].Author)
 	}
 	e.FetchedAt = w.started
+	e.FormatVersion = FormatVersion
 
 	if err := writeJSON(entryPath(w.cfg.CacheDir, e.Number), e); err != nil {
 		return false, err
@@ -306,9 +377,9 @@ func orGhost(a *Actor) *Actor {
 // baselines records, for each human author in the cache not yet in
 // authors.json, how many pull requests they opened before the window.
 func (w *walker) baselines(ctx context.Context) error {
-	path := filepath.Join(w.cfg.CacheDir, "authors.json")
+	path := filepath.Join(w.cfg.CacheDir, AuthorsFile)
 	known := map[string]int{}
-	if err := readJSON(path, &known); err != nil && !errors.Is(err, fs.ErrNotExist) {
+	if err := ReadJSON(path, &known); err != nil && !errors.Is(err, fs.ErrNotExist) {
 		return err
 	}
 	paths, err := cachedEntries(w.cfg.CacheDir)

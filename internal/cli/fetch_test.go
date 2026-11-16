@@ -3,6 +3,7 @@ package cli_test
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -126,6 +127,31 @@ var _ = Describe("fetch", func() {
 		It("walks back to --since", func() {
 			Expect(run("--since", "2026-11-01T00:00:00Z")).To(Succeed())
 			Expect(cached()).To(ConsistOf("2.json"))
+		})
+
+		Context("when the cache holds an entry of an older format", func() {
+			BeforeEach(func() {
+				Expect(os.WriteFile(filepath.Join(dataDir, "meta.json"),
+					[]byte(`{"fetched_through":"2026-11-14T12:00:00Z"}`), 0o600)).To(Succeed())
+				b, err := json.Marshal(closedPR(1, time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC)))
+				Expect(err).NotTo(HaveOccurred())
+				Expect(os.MkdirAll(filepath.Join(cacheDir, fetch.RawDir), 0o750)).To(Succeed())
+				Expect(os.WriteFile(filepath.Join(cacheDir, fetch.RawDir, "1.json"), b, 0o600)).To(Succeed())
+			})
+
+			It("walks back to the window start without --since, refetching it", func() {
+				Expect(run()).To(Succeed())
+
+				Expect(fetch.ReadEntry(cacheDir, 1)).To(HaveField("FormatVersion", fetch.FormatVersion))
+				Expect(stderr.String()).To(ContainSubstring(`"msg":"cache holds entries of an older format"`))
+			})
+
+			It("walks back only to --since, and warns", func() {
+				Expect(run("--since", "2026-11-01T00:00:00Z")).To(Succeed())
+
+				Expect(fetch.ReadEntry(cacheDir, 1)).To(HaveField("FormatVersion", 0))
+				Expect(stderr.String()).To(ContainSubstring(`"msg":"cache holds entries of an older format"`))
+			})
 		})
 
 		It("rejects a --since that is not RFC 3339", func() {

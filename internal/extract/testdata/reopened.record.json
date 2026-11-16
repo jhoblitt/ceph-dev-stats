@@ -12,7 +12,9 @@
   "deletions": 3,
   "files": 1,
   "labels": [],
-  "commits": {"count": 1, "first_authored": "2026-08-09T22:00:00Z", "last_committed": "2026-08-25T10:00:00Z"},
+  "commits": {"count": 1, "first_authored": "2026-08-09T22:00:00Z", "last_committed": "2026-08-25T10:00:00Z", "list": [
+    {"authored": "2026-08-09T22:00:00Z", "committed": "2026-08-25T10:00:00Z"}
+  ]},
   "prior_prs": null,
   "events": [
     {"at": "2026-08-15T00:00:00Z", "kind": "closed"},

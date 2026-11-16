@@ -93,9 +93,10 @@ func labels(ls []fetch.Label) []string {
 }
 
 func commits(cs []fetch.Commit) record.Commits {
-	out := record.Commits{Count: len(cs)}
-	for _, c := range cs {
+	out := record.Commits{Count: len(cs), List: make([]record.Commit, len(cs))}
+	for i, c := range cs {
 		authored, committed := utc(c.AuthoredDate), utc(c.CommittedDate)
+		out.List[i] = record.Commit{SHA: c.OID, Authored: authored, Committed: committed}
 		if out.FirstAuthored == nil || authored.Before(*out.FirstAuthored) {
 			out.FirstAuthored = &authored
 		}
@@ -113,7 +114,8 @@ func lifecycle(items []fetch.Event) ([]record.Event, error) {
 		if !ok {
 			return nil, fmt.Errorf("unknown event %q", it.Typename)
 		}
-		out = append(out, record.Event{At: utc(it.CreatedAt), Kind: kind})
+		id, _ := eventID(it.URL)
+		out = append(out, record.Event{At: utc(it.CreatedAt), Kind: kind, ID: id, SHA: eventSHA(it)})
 	}
 	slices.SortStableFunc(out, func(a, b record.Event) int { return a.At.Compare(b.At) })
 	return out, nil
@@ -128,7 +130,7 @@ func reviews(rs []fetch.Review) []record.Review {
 			continue
 		}
 		a := actor(r.Author)
-		out = append(out, record.Review{At: utc(*r.SubmittedAt), By: a.Login, Bot: a.Bot, State: strings.ToLower(r.State)})
+		out = append(out, record.Review{At: utc(*r.SubmittedAt), ID: r.DatabaseID, By: a.Login, Bot: a.Bot, State: strings.ToLower(r.State)})
 	}
 	slices.SortStableFunc(out, func(a, b record.Review) int { return a.At.Compare(b.At) })
 	return out
@@ -138,7 +140,7 @@ func comments(cs []fetch.Comment) []record.Comment {
 	out := make([]record.Comment, len(cs))
 	for i, c := range cs {
 		a := actor(c.Author)
-		out[i] = record.Comment{At: utc(c.CreatedAt), By: a.Login, Bot: a.Bot, Text: commentText(c.Body)}
+		out[i] = record.Comment{At: utc(c.CreatedAt), ID: c.DatabaseID, By: a.Login, Bot: a.Bot, Text: commentText(c.Body)}
 	}
 	slices.SortStableFunc(out, func(a, b record.Comment) int { return a.At.Compare(b.At) })
 	return out

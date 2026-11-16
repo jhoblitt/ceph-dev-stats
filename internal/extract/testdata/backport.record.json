@@ -12,7 +12,10 @@
   "deletions": 12,
   "files": 3,
   "labels": ["rgw", "squid"],
-  "commits": {"count": 2, "first_authored": "2026-02-10T08:00:00Z", "last_committed": "2026-06-01T12:05:00Z"},
+  "commits": {"count": 2, "first_authored": "2026-02-10T08:00:00Z", "last_committed": "2026-06-01T12:05:00Z", "list": [
+    {"authored": "2026-02-10T08:00:00Z", "committed": "2026-06-01T12:00:00Z"},
+    {"authored": "2026-02-11T10:00:00Z", "committed": "2026-06-01T12:05:00Z"}
+  ]},
   "prior_prs": null,
   "events": [
     {"at": "2026-06-20T17:00:00Z", "kind": "merged"},

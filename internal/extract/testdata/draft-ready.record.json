@@ -12,7 +12,9 @@
   "deletions": 1,
   "files": 1,
   "labels": ["cephfs", "needs-review"],
-  "commits": {"count": 1, "first_authored": "2026-07-01T09:30:00Z", "last_committed": "2026-07-05T08:00:00Z"},
+  "commits": {"count": 1, "first_authored": "2026-07-01T09:30:00Z", "last_committed": "2026-07-05T08:00:00Z", "list": [
+    {"authored": "2026-07-01T09:30:00Z", "committed": "2026-07-05T08:00:00Z"}
+  ]},
   "prior_prs": null,
   "events": [
     {"at": "2026-07-03T12:00:00Z", "kind": "ready"},

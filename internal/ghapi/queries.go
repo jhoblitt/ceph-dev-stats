@@ -37,18 +37,21 @@ var (
 		TimelineItems: `itemTypes: [READY_FOR_REVIEW_EVENT, CONVERT_TO_DRAFT_EVENT, HEAD_REF_FORCE_PUSHED_EVENT, CLOSED_EVENT, REOPENED_EVENT, MERGED_EVENT]`,
 	}
 	connectionNodes = map[Connection]string{
-		Labels:   `name`,
-		Commits:  `commit { authoredDate committedDate message }`,
-		Comments: `createdAt body ` + actorFields,
-		Reviews:  `submittedAt state ` + actorFields,
-		// createdAt lives on each event type, so each needs its own fragment.
+		Labels:  `name`,
+		Commits: `commit { oid authoredDate committedDate message }`,
+		// databaseId is deprecated for 64-bit ids; fullDatabaseId is a
+		// BigInt, which GitHub sends as a JSON string.
+		Comments: `fullDatabaseId createdAt body ` + actorFields,
+		Reviews:  `fullDatabaseId submittedAt state ` + actorFields,
+		// createdAt lives on each event type, so each needs its own
+		// fragment. ReopenedEvent has no url: asking for one is an error.
 		TimelineItems: `__typename
-          ... on ReadyForReviewEvent { createdAt }
-          ... on ConvertToDraftEvent { createdAt }
-          ... on HeadRefForcePushedEvent { createdAt }
-          ... on ClosedEvent { createdAt }
+          ... on ReadyForReviewEvent { createdAt url }
+          ... on ConvertToDraftEvent { createdAt url }
+          ... on HeadRefForcePushedEvent { createdAt beforeCommit { oid } afterCommit { oid } }
+          ... on ClosedEvent { createdAt url }
           ... on ReopenedEvent { createdAt }
-          ... on MergedEvent { createdAt }`,
+          ... on MergedEvent { createdAt url commit { oid } }`,
 	}
 )
 

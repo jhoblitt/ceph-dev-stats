@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"time"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -44,10 +45,13 @@ func pr(number, updated int, state string) fetch.Entry {
 	return e
 }
 
+// sha is a commit id that tells commit i apart.
+func sha(i int) string { return fmt.Sprintf("%040x", 0xc0ffee00+i) }
+
 func commits(n int) []fetch.Commit {
 	out := make([]fetch.Commit, n)
 	for i := range out {
-		out[i] = fetch.Commit{AuthoredDate: at(-90 + i), CommittedDate: at(-80 + i), Message: fmt.Sprintf("commit %d", i)}
+		out[i] = fetch.Commit{OID: sha(i), AuthoredDate: at(-90 + i), CommittedDate: at(-80 + i), Message: fmt.Sprintf("commit %d", i)}
 	}
 	return out
 }
@@ -55,7 +59,7 @@ func commits(n int) []fetch.Commit {
 func comments(n int) []fetch.Comment {
 	out := make([]fetch.Comment, n)
 	for i := range out {
-		out[i] = fetch.Comment{CreatedAt: at(-70 + i), Body: fmt.Sprintf("comment %d", i), Author: user("bob")}
+		out[i] = fetch.Comment{DatabaseID: 4854682435 + int64(i), CreatedAt: at(-70 + i), Body: fmt.Sprintf("comment %d", i), Author: user("bob")}
 	}
 	return out
 }
@@ -63,7 +67,7 @@ func comments(n int) []fetch.Comment {
 func reviews(n int) []fetch.Review {
 	out := make([]fetch.Review, n)
 	for i := range out {
-		out[i] = fetch.Review{SubmittedAt: new(at(-60 + i)), State: "COMMENTED", Author: user("carol")}
+		out[i] = fetch.Review{DatabaseID: 3954682435 + int64(i), SubmittedAt: new(at(-60 + i)), State: "COMMENTED", Author: user("carol")}
 	}
 	return out
 }
@@ -75,6 +79,8 @@ var _ = Describe("Run", func() {
 		pageSize int
 		waits    []int
 		logs     *bytes.Buffer
+		// defaultSince marks run's since as the default, not the operator's.
+		defaultSince bool
 	)
 
 	BeforeEach(func() {
@@ -82,6 +88,7 @@ var _ = Describe("Run", func() {
 		pageSize = 0
 		waits = nil
 		logs = &bytes.Buffer{}
+		defaultSince = false
 	})
 
 	serve := func(prs ...fetch.Entry) {
@@ -101,6 +108,7 @@ var _ = Describe("Run", func() {
 		return fetch.Run(context.Background(), client, fetch.Config{
 			CacheDir:       cacheDir,
 			Since:          since,
+			SinceIsDefault: defaultSince,
 			PageSize:       pageSize,
 			NestedPageSize: 2,
 			Logger:         logger,
@@ -162,6 +170,7 @@ var _ = Describe("Run", func() {
 		Expect(run(fetch.WindowStart)).To(Succeed())
 
 		want.FetchedAt = walkStart
+		want.FormatVersion = fetch.FormatVersion
 		Expect(entry(1)).To(Equal(want))
 		Expect(nestedFor(ghapi.Commits, 1)).To(Equal([]string{"o2", "o4"}))
 		Expect(nestedFor(ghapi.Comments, 1)).To(Equal([]string{"o2"}))
@@ -184,6 +193,193 @@ var _ = Describe("Run", func() {
 		Expect(e.Author).To(Equal(ghost))
 		Expect(e.Comments[0].Author).To(Equal(ghost))
 		Expect(e.Reviews[0].Author).To(Equal(ghost))
+	})
+
+	// serveLinksPage answers the walk's first list request with the page in
+	// testdata/links-page.json, after edit.
+	serveLinksPage := func(edit func(string) string) {
+		GinkgoHelper()
+		page, err := os.ReadFile(filepath.Join("testdata", "links-page.json"))
+		Expect(err).NotTo(HaveOccurred())
+		body := edit(string(page))
+		serve()
+		server.Intercept(func(_ int, r fetchtest.Request) *fetchtest.Reply {
+			if _, open := r.Variables["states"]; r.Operation == ghapi.PullRequests.Name && !open {
+				return &fetchtest.Reply{Status: 200, Body: body}
+			}
+			return nil
+		})
+	}
+
+	It("is an error naming the PR when a fullDatabaseId is not a number, and does not retry it", func() {
+		serveLinksPage(func(s string) string {
+			return strings.Replace(s, `"fullDatabaseId": "4854682435"`, `"fullDatabaseId": "48x"`, 1)
+		})
+
+		err := run(fetch.WindowStart)
+
+		Expect(err).To(MatchError(And(ContainSubstring("pull request 69877"), ContainSubstring(`"48x"`))))
+		Expect(err).NotTo(MatchError(ghapi.ErrUnavailable))
+		Expect(server.Operations(ghapi.PullRequests.Name)).To(HaveLen(1))
+	})
+
+	It("caches no id for a comment whose fullDatabaseId is null", func() {
+		serveLinksPage(func(s string) string {
+			return strings.Replace(s, `"fullDatabaseId": "4854682435"`, `"fullDatabaseId": null`, 1)
+		})
+
+		Expect(run(fetch.WindowStart)).To(Succeed())
+
+		Expect(entry(69877).Comments).To(HaveExactElements(HaveField("DatabaseID", BeZero())))
+	})
+
+	It("caches the ids, addresses and SHAs that links to GitHub are built from, under GitHub's names", func() {
+		serveLinksPage(func(s string) string { return s })
+
+		Expect(run(fetch.WindowStart)).To(Succeed())
+
+		ts := func(s string) time.Time {
+			GinkgoHelper()
+			t, err := time.Parse(time.RFC3339, s)
+			Expect(err).NotTo(HaveOccurred())
+			return t
+		}
+		ref := func(oid string) *fetch.CommitRef { return &fetch.CommitRef{OID: oid} }
+		const addr = "https://github.com/ceph/ceph/pull/69877#event-"
+		e := entry(69877)
+		Expect(e.FormatVersion).To(Equal(fetch.FormatVersion))
+		Expect(e.Commits).To(HaveExactElements(
+			HaveField("OID", "3f9a1c0d2b4e6f8a0c1e3d5b7f9a1c3e5d7b9f1a"),
+			HaveField("OID", "8b2d4f6a8c0e2a4c6e8a0c2e4a6c8e0a2c4e6a8c"),
+		))
+		Expect(e.Comments).To(HaveExactElements(HaveField("DatabaseID", int64(4854682435))))
+		Expect(e.Reviews).To(HaveExactElements(HaveField("DatabaseID", int64(3412345678))))
+		Expect(e.TimelineItems).To(Equal([]fetch.Event{
+			{Typename: "ReadyForReviewEvent", CreatedAt: ts("2026-10-28T20:00:00Z"), URL: addr + "28644873432"},
+			{
+				Typename: "HeadRefForcePushedEvent", CreatedAt: ts("2026-10-29T18:00:00Z"),
+				BeforeCommit: ref("1111111111111111111111111111111111111111"),
+				AfterCommit:  ref("8b2d4f6a8c0e2a4c6e8a0c2e4a6c8e0a2c4e6a8c"),
+			},
+			{Typename: "HeadRefForcePushedEvent", CreatedAt: ts("2026-10-29T19:00:00Z")},
+			{Typename: "ClosedEvent", CreatedAt: ts("2026-10-30T01:00:00Z"), URL: addr + "28644900001"},
+			{Typename: "ReopenedEvent", CreatedAt: ts("2026-10-30T02:00:00Z")},
+			{Typename: "ConvertToDraftEvent", CreatedAt: ts("2026-10-30T03:00:00Z"), URL: addr + "28644900002"},
+			{
+				Typename: "MergedEvent", CreatedAt: ts("2026-11-01T05:00:00Z"), URL: addr + "28644900003",
+				Commit: ref("c0ffee0000000000000000000000000000000001"),
+			},
+			{Typename: "ClosedEvent", CreatedAt: ts("2026-11-01T05:00:00Z"), URL: addr + "28644900004"},
+		}))
+		raw := readJSON(filepath.Join(cacheDir, "raw", "69877.json"))
+		Expect(raw).To(HaveKeyWithValue("formatVersion", float64(fetch.FormatVersion)))
+		Expect(raw).To(HaveKeyWithValue("comments", HaveExactElements(HaveKeyWithValue("fullDatabaseId", "4854682435"))),
+			"the cache keeps GitHub's BigInt as a string")
+		Expect(raw).To(HaveKeyWithValue("reviews", HaveExactElements(HaveKeyWithValue("fullDatabaseId", "3412345678"))))
+	})
+
+	It("fetches again an entry of an older format though its updatedAt is unchanged, and not one of the current format", func() {
+		unversioned := pr(3, 3, "CLOSED")
+		unversioned.Comments = comments(3)
+		older := pr(4, 4, "CLOSED")
+		older.Comments = comments(3)
+		serve(unversioned, older)
+		Expect(run(fetch.WindowStart)).To(Succeed())
+		rewrite := func(number int, f func(map[string]any)) {
+			GinkgoHelper()
+			path := filepath.Join(cacheDir, "raw", strconv.Itoa(number)+".json")
+			e := readJSON(path)
+			f(e)
+			b, err := json.Marshal(e)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(os.WriteFile(path, b, 0o600)).To(Succeed())
+		}
+		rewrite(3, func(e map[string]any) { delete(e, "formatVersion") })
+		rewrite(4, func(e map[string]any) { e["formatVersion"] = fetch.FormatVersion - 1 })
+
+		Expect(run(fetch.WindowStart)).To(Succeed())
+
+		Expect(nestedFor(ghapi.Comments, 3)).To(HaveLen(2), "PR 3, without a version, is fetched by both runs")
+		Expect(nestedFor(ghapi.Comments, 4)).To(HaveLen(2), "PR 4, of an older version, is fetched by both runs")
+		Expect(entry(3).FormatVersion).To(Equal(fetch.FormatVersion))
+		Expect(entry(4).FormatVersion).To(Equal(fetch.FormatVersion))
+
+		Expect(run(fetch.WindowStart)).To(Succeed())
+
+		Expect(nestedFor(ghapi.Comments, 3)).To(HaveLen(2), "PR 3, now current, is not fetched by a third run")
+		Expect(nestedFor(ghapi.Comments, 4)).To(HaveLen(2), "PR 4, now current, is not fetched by a third run")
+	})
+
+	Context("when the cache holds an entry of an older format that the since would not reach", func() {
+		var since time.Time
+
+		// logged returns the log records with message msg.
+		logged := func(msg string) []map[string]any {
+			GinkgoHelper()
+			var out []map[string]any
+			for line := range bytes.Lines(logs.Bytes()) {
+				var m map[string]any
+				Expect(json.Unmarshal(line, &m)).To(Succeed(), "log line %s", line)
+				if m["msg"] == msg {
+					out = append(out, m)
+				}
+			}
+			return out
+		}
+
+		BeforeEach(func() {
+			since = at(5)
+			old, recent := pr(1, 1, "CLOSED"), pr(9, 9, "CLOSED")
+			old.Comments, recent.Comments = comments(3), comments(3)
+			serve(old, recent)
+			Expect(run(fetch.WindowStart)).To(Succeed())
+			path := filepath.Join(cacheDir, "raw", "1.json")
+			e := readJSON(path)
+			delete(e, "formatVersion")
+			b, err := json.Marshal(e)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(os.WriteFile(path, b, 0o600)).To(Succeed())
+			logs.Reset()
+		})
+
+		It("walks back to the window start from a default since, refetching it, and warns once why", func() {
+			defaultSince = true
+
+			Expect(run(since)).To(Succeed())
+
+			Expect(nestedFor(ghapi.Comments, 1)).To(HaveLen(2), "PR 1 is fetched again")
+			Expect(entry(1).FormatVersion).To(Equal(fetch.FormatVersion))
+			Expect(logged("cache holds entries of an older format")).To(HaveExactElements(And(
+				HaveKeyWithValue("level", "WARN"),
+				HaveKeyWithValue("entries", 1.0),
+				HaveKeyWithValue("since", "2026-05-15T00:00:00Z"),
+			)), "log:\n%s", logs.String())
+		})
+
+		It("walks from an explicit since as given, with the same warning", func() {
+			Expect(run(since)).To(Succeed())
+
+			Expect(nestedFor(ghapi.Comments, 1)).To(HaveLen(1), "PR 1 is not reached")
+			Expect(entry(1).FormatVersion).To(BeZero())
+			Expect(logged("cache holds entries of an older format")).To(HaveExactElements(And(
+				HaveKeyWithValue("level", "WARN"),
+				HaveKeyWithValue("entries", 1.0),
+				HaveKeyWithValue("since", "2026-11-01T05:00:00Z"),
+			)), "log:\n%s", logs.String())
+		})
+
+		It("walks from a default since as before once every entry is current", func() {
+			defaultSince = true
+			Expect(run(since)).To(Succeed())
+			logs.Reset()
+
+			Expect(run(since)).To(Succeed())
+
+			Expect(logged("cache holds entries of an older format")).To(BeEmpty())
+			Expect(logged("reached since")).To(ContainElement(HaveKeyWithValue("phase", "updated")),
+				"the walk stops at the default since, before PR 1; log:\n%s", logs.String())
+			Expect(nestedFor(ghapi.Comments, 1)).To(HaveLen(2), "PR 1 is not fetched a third time")
+		})
 	})
 
 	It("stops at the first PR updated before --since and does not request the next page", func() {
