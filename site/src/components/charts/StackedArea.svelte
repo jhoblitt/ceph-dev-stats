@@ -3,7 +3,8 @@
   stock is measured once, at the bucket's end. Each layer of each bucket is a
   hit target: hovering or focusing it shows the bucket's every layer, the
   arrow keys move between buckets (left, right) and layers (up, down), and a
-  click, Enter or Space chooses it. The chart takes its columns from
+  click, Enter or Space chooses it. Given a zoom, dragging across the plot
+  sets the period (`PeriodBrush`). The chart takes its columns from
   `timeColumns`, as every chart over the period does, so a bucket sits at
   the same x as in the other charts.
 -->
@@ -14,7 +15,9 @@
   import { bucketName, formatCount } from '../../lib/format';
   import { PLOT_LEFT as LEFT, type Tick, bucketTicks, timeColumns } from '../../lib/plot';
   import AxisX from './AxisX.svelte';
+  import { type PeriodZoom, columnAxis } from '../../lib/zoom';
   import AxisY from './AxisY.svelte';
+  import PeriodBrush from './PeriodBrush.svelte';
   import Tooltip from './Tooltip.svelte';
   import { focusSibling, measureWidth } from './measure';
 
@@ -28,9 +31,11 @@
     /** Called with a bucket's first instant and a layer's key when that layer of that bucket is chosen. */
     onselect: (bucket: number, key: string) => void;
     height?: number;
+    /** Sets the period from a drag across the plot. */
+    zoom?: PeriodZoom;
   }
 
-  let { model, label, unit, selected, onselect, height = 220 }: Props = $props();
+  let { model, label, unit, selected, onselect, height = 220, zoom }: Props = $props();
 
   let measured = $state(0);
   const width = $derived(measured > 0 ? measured : 640);
@@ -40,6 +45,8 @@
 
   const n = $derived(model.buckets.length);
   const x = $derived(timeColumns(width, n));
+  const zoomAxis = $derived(columnAxis(x, model.buckets, model.step));
+  let dragging = $state(false);
   // Each layer's lower and upper edge per bucket.
   const bands = $derived.by(() => {
     const below = model.buckets.map(() => 0);
@@ -149,54 +156,56 @@
 </script>
 
 <div class="plot" {@attach measureWidth((w) => (measured = w))}>
-  <svg {width} {height} role="group" aria-label={label}>
-    <AxisY ticks={yTicks} x0={LEFT} x1={x.right} {unit} unitY={12} />
-    <g aria-hidden="true">
-      {#each shapes as s, k (k)}
-        {@const fill = (model.layers[k] as AreaModel['layers'][number]).fill}
-        <path class="layer" d={s.fill} style:fill />
-        <path class="edge" d={s.edge} style:stroke={fill} />
-      {/each}
-      {#if selectedIndex >= 0}
-        <rect class="selected-rule" x={x.start(selectedIndex)} y={base - 3} width={x.step} height={3} />
-        {#if selectedLayer >= 0}
-          {@const c = cell(selectedIndex, selectedLayer)}
-          <rect class="selected" x={c.x + 1} y={c.y + 1} width={Math.max(0, x.step - 2)} height={Math.max(2, c.height - 2)} />
-        {/if}
-      {/if}
-      {#if active !== null}
-        {@const c = cell(active.i, active.k)}
-        <rect class="cursor" x={c.x} y={c.y} width={x.step} height={Math.max(2, c.height)} />
-      {/if}
-    </g>
-    <AxisX ticks={xTicks} y={base} x0={LEFT} x1={x.right} />
-    <g>
-      {#each model.buckets as start, i (start)}
-        {#each model.layers as layer, k (layer.key)}
-          {@const c = cell(i, k)}
-          <rect
-            class="hit"
-            class:zero={c.height <= 0}
-            x={c.x}
-            y={c.y}
-            width={x.step}
-            height={Math.max(0, c.height)}
-            role="button"
-            tabindex={i === tabStop.i && k === tabStop.k ? 0 : -1}
-            aria-pressed={i === selectedIndex && k === selectedLayer}
-            aria-label={name(i, k)}
-            onpointerenter={() => (active = { i, k })}
-            onpointerleave={() => (active = null)}
-            onfocus={() => (active = focused = { i, k })}
-            onblur={() => (active = null)}
-            onclick={() => choose(i, k)}
-            onkeydown={(e) => onkeydown(e, i, k)}
-          />
+  <PeriodBrush {zoom} axis={zoomAxis} {top} bottom={base} bind:dragging>
+    <svg {width} {height} role="group" aria-label={label} class:zoomable={zoom !== undefined}>
+      <AxisY ticks={yTicks} x0={LEFT} x1={x.right} {unit} unitY={12} />
+      <g aria-hidden="true">
+        {#each shapes as s, k (k)}
+          {@const fill = (model.layers[k] as AreaModel['layers'][number]).fill}
+          <path class="layer" d={s.fill} style:fill />
+          <path class="edge" d={s.edge} style:stroke={fill} />
         {/each}
-      {/each}
-    </g>
-  </svg>
-  {#if active !== null}
+        {#if selectedIndex >= 0}
+          <rect class="selected-rule" x={x.start(selectedIndex)} y={base - 3} width={x.step} height={3} />
+          {#if selectedLayer >= 0}
+            {@const c = cell(selectedIndex, selectedLayer)}
+            <rect class="selected" x={c.x + 1} y={c.y + 1} width={Math.max(0, x.step - 2)} height={Math.max(2, c.height - 2)} />
+          {/if}
+        {/if}
+        {#if active !== null && !dragging}
+          {@const c = cell(active.i, active.k)}
+          <rect class="cursor" x={c.x} y={c.y} width={x.step} height={Math.max(2, c.height)} />
+        {/if}
+      </g>
+      <AxisX ticks={xTicks} y={base} x0={LEFT} x1={x.right} />
+      <g>
+        {#each model.buckets as start, i (start)}
+          {#each model.layers as layer, k (layer.key)}
+            {@const c = cell(i, k)}
+            <rect
+              class="hit"
+              class:zero={c.height <= 0}
+              x={c.x}
+              y={c.y}
+              width={x.step}
+              height={Math.max(0, c.height)}
+              role="button"
+              tabindex={i === tabStop.i && k === tabStop.k ? 0 : -1}
+              aria-pressed={i === selectedIndex && k === selectedLayer}
+              aria-label={name(i, k)}
+              onpointerenter={() => (active = { i, k })}
+              onpointerleave={() => (active = null)}
+              onfocus={() => (active = focused = { i, k })}
+              onblur={() => (active = null)}
+              onclick={() => choose(i, k)}
+              onkeydown={(e) => onkeydown(e, i, k)}
+            />
+          {/each}
+        {/each}
+      </g>
+    </svg>
+  </PeriodBrush>
+  {#if active !== null && !dragging}
     <Tooltip
       title={bucketName(model.buckets[active.i] as number, model.step)}
       rows={areaReadout(model, active.i, active.k)}
@@ -245,6 +254,10 @@
   .hit {
     fill: transparent;
     cursor: pointer;
+  }
+
+  .zoomable .hit {
+    cursor: crosshair;
   }
 
   .zero {

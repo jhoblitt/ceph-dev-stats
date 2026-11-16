@@ -16,8 +16,10 @@
   import { type Sort, sameSort } from '../lib/sort';
   import { ALL_TABLE_ROWS, narrowing, rowText, sortWords, tableOrder } from '../lib/table';
   import { tableLoads } from '../lib/tables';
+  import { periodZoom } from '../lib/zoom';
 
   const { data, selection, view, loader } = getPage();
+  const { zoomed } = periodZoom(getPage());
 
   // The lanes list the PR table's rows in the PR table's order. Choosing a
   // PR leaves the order, and so the lanes, alone; titles count only when the
@@ -62,7 +64,8 @@
   // A period is never shown over fewer years than it needs: while its years
   // load, or after one failed, the sections keep the last period that loaded
   // whole, and the line says which. A large recompute keeps the figures
-  // shown until it is done.
+  // shown until it is done. A zoom from a chart is said once its figures are
+  // shown.
   const status = $derived(
     $data.loading
       ? $view.pending && !$view.first
@@ -74,9 +77,11 @@
           : 'Recomputing the figures for the filters chosen; everything below is still for the filters chosen before.'
         : $view.pending
           ? `The data for the period chosen could not be loaded, so everything below is still for ${$view.filters.from} to ${$view.filters.to}, with the filters then chosen. ${remedy}`
-          : $data.retry.state === 'succeeded'
-            ? 'All the data for this period has loaded.'
-            : '',
+          : $zoomed !== null && $zoomed.from === $view.filters.from && $zoomed.to === $view.filters.to
+            ? `The period is now ${$zoomed.from} to ${$zoomed.to}.`
+            : $data.retry.state === 'succeeded'
+              ? 'All the data for this period has loaded.'
+              : '',
   );
   const retrying = $derived($data.retry.state === 'running');
   const clock = (at: number) => new Date(at).toTimeString().slice(0, 5);

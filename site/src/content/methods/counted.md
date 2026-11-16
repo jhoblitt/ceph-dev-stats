@@ -2,7 +2,7 @@
 
 The data holds the pull requests of [ceph/ceph](https://github.com/ceph/ceph) that were open at some point in a window that starts on {{windowStart}} and runs to {{asOf}}, the day the last complete fetch from GitHub began. A pull request opened before the window is in it when it was still open in the window.
 
-The report opens on the whole window, from {{windowStart}} to {{asOf}}, and a reader can choose a shorter period inside it. The figures on this page are over the last {{const.recentMonths}} months of the window instead, so that the page loads only their data. On the data as of {{asOf}}, {{prs.active}} pull requests, on every branch, were open at some point in the last {{const.recentMonths}} months, {{periodStart}} to {{asOf}}: {{prs.openedInPeriod}} opened in them and {{prs.openedBeforePeriod}} before them.
+The report opens on the whole window, from {{windowStart}} to {{asOf}}, and a reader can choose a shorter period inside it. Besides the period's From and To dates, dragging across a chart drawn over the period sets the period to the weeks or months dragged over, and a double-click on such a chart widens the period to twice its length around its middle, within the window. The figures on this page are over the last {{const.recentMonths}} months of the window instead, so that the page loads only their data. On the data as of {{asOf}}, {{prs.active}} pull requests, on every branch, were open at some point in the last {{const.recentMonths}} months, {{periodStart}} to {{asOf}}: {{prs.openedInPeriod}} opened in them and {{prs.openedBeforePeriod}} before them.
 
 ## How the pull requests are found
 
