@@ -1,0 +1,154 @@
+// Package extract turns the pull requests in the raw cache into the
+// committed records.
+package extract
+
+import (
+	"fmt"
+	"slices"
+	"strings"
+	"time"
+	"unicode/utf8"
+
+	"github.com/jhoblitt/ceph-dev-stats/internal/fetch"
+	"github.com/jhoblitt/ceph-dev-stats/internal/record"
+)
+
+// maxCommentText is the most characters a comment may have, on one line
+// after trimming, for its text to be kept: enough for any bot command.
+const maxCommentText = 80
+
+var states = map[string]string{
+	"OPEN":   record.StateOpen,
+	"MERGED": record.StateMerged,
+	"CLOSED": record.StateClosed,
+}
+
+var eventKinds = map[string]string{
+	"ReadyForReviewEvent":     record.KindReady,
+	"ConvertToDraftEvent":     record.KindDraft,
+	"HeadRefForcePushedEvent": record.KindForcePush,
+	"ClosedEvent":             record.KindClosed,
+	"ReopenedEvent":           record.KindReopened,
+	"MergedEvent":             record.KindMerged,
+}
+
+// FromEntry turns one cached pull request into its record. PriorPRs is
+// left nil: it depends on the other records.
+func FromEntry(e fetch.Entry) (record.Record, error) {
+	state, ok := states[e.State]
+	if !ok {
+		return record.Record{}, fmt.Errorf("pull request %d: unknown state %q", e.Number, e.State)
+	}
+	events, err := lifecycle(e.TimelineItems)
+	if err != nil {
+		return record.Record{}, fmt.Errorf("pull request %d: %w", e.Number, err)
+	}
+	messages := make([]string, len(e.Commits))
+	for i, c := range e.Commits {
+		messages[i] = c.Message
+	}
+	return record.Record{
+		Number:      e.Number,
+		Updated:     utc(e.UpdatedAt),
+		Title:       e.Title,
+		Author:      actor(e.Author),
+		Association: strings.ToLower(e.AuthorAssociation),
+		Base:        e.BaseRefName,
+		Created:     utc(e.CreatedAt),
+		State:       state,
+		Draft:       e.IsDraft,
+		Additions:   e.Additions,
+		Deletions:   e.Deletions,
+		Files:       e.ChangedFiles,
+		Labels:      labels(e.Labels),
+		Commits:     commits(e.Commits),
+		Events:      events,
+		Reviews:     reviews(e.Reviews),
+		Comments:    comments(e.Comments),
+		Disclosure:  Candidates(messages, e.Body),
+	}, nil
+}
+
+// utc is t as the records hold every time: UTC, to the second.
+func utc(t time.Time) time.Time {
+	return t.UTC().Truncate(time.Second)
+}
+
+// actor is a's record form; a null author is GitHub's ghost.
+func actor(a *fetch.Actor) record.Actor {
+	if a == nil {
+		return record.Actor{Login: fetch.GhostLogin}
+	}
+	return record.Actor{Login: a.Login, Bot: a.Typename == "Bot"}
+}
+
+func labels(ls []fetch.Label) []string {
+	out := make([]string, len(ls))
+	for i, l := range ls {
+		out[i] = l.Name
+	}
+	slices.Sort(out)
+	return out
+}
+
+func commits(cs []fetch.Commit) record.Commits {
+	out := record.Commits{Count: len(cs)}
+	for _, c := range cs {
+		authored, committed := utc(c.AuthoredDate), utc(c.CommittedDate)
+		if out.FirstAuthored == nil || authored.Before(*out.FirstAuthored) {
+			out.FirstAuthored = &authored
+		}
+		if out.LastCommitted == nil || committed.After(*out.LastCommitted) {
+			out.LastCommitted = &committed
+		}
+	}
+	return out
+}
+
+func lifecycle(items []fetch.Event) ([]record.Event, error) {
+	out := make([]record.Event, 0, len(items))
+	for _, it := range items {
+		kind, ok := eventKinds[it.Typename]
+		if !ok {
+			return nil, fmt.Errorf("unknown event %q", it.Typename)
+		}
+		out = append(out, record.Event{At: utc(it.CreatedAt), Kind: kind})
+	}
+	slices.SortStableFunc(out, func(a, b record.Event) int { return a.At.Compare(b.At) })
+	return out, nil
+}
+
+// reviews keeps the submitted reviews; a pending one has no submission
+// time.
+func reviews(rs []fetch.Review) []record.Review {
+	out := make([]record.Review, 0, len(rs))
+	for _, r := range rs {
+		if r.SubmittedAt == nil {
+			continue
+		}
+		a := actor(r.Author)
+		out = append(out, record.Review{At: utc(*r.SubmittedAt), By: a.Login, Bot: a.Bot, State: strings.ToLower(r.State)})
+	}
+	slices.SortStableFunc(out, func(a, b record.Review) int { return a.At.Compare(b.At) })
+	return out
+}
+
+func comments(cs []fetch.Comment) []record.Comment {
+	out := make([]record.Comment, len(cs))
+	for i, c := range cs {
+		a := actor(c.Author)
+		out[i] = record.Comment{At: utc(c.CreatedAt), By: a.Login, Bot: a.Bot, Text: commentText(c.Body)}
+	}
+	slices.SortStableFunc(out, func(a, b record.Comment) int { return a.At.Compare(b.At) })
+	return out
+}
+
+// commentText is the comment's text when it is short enough to be a bot
+// command, and empty otherwise.
+func commentText(body string) string {
+	t := strings.TrimSpace(body)
+	if strings.ContainsAny(t, "\r\n") || utf8.RuneCountInString(t) > maxCommentText {
+		return ""
+	}
+	return t
+}
