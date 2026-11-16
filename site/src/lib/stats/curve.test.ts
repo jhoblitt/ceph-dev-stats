@@ -15,7 +15,7 @@ function expectClose(actual: readonly number[] | undefined, expected: readonly n
 }
 
 describe('outcomeCurve for merge', () => {
-  // Durations from ready: merged at 1 day, closed at 2, open at age 3, merged at 5.
+  // Durations from the opening: merged at 1 day, closed at 2, open at age 3, merged at 5.
   const four: Row[] = [
     { created: T0, state: MERGED, closed: T0 + 1 * DAY },
     { created: T0, state: CLOSED, closed: T0 + 2 * DAY },
