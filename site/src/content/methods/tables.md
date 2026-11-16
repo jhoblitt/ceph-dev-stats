@@ -18,7 +18,7 @@ It runs on every pull request to the repository and every push to its `main`, an
 - a trailer kept as a candidate has a key that is neither a disclosing key nor `Co-authored-by`, and the table does not list the line as ignored;
 - a ticket type read from the tracker has no kind;
 - a counted disclosure names no tool family, or the table has no family for a disclosure that names no tool;
-- the number of pull requests opened in the window, or open now, differs by more than 0.5% from GitHub's own count, which a fetch reads as it ends;
+- the number of pull requests opened since the window's start, {{windowStart}}, or open now, differs by more than 0.5% from GitHub's own count, which a fetch reads as it ends;
 - a table does not load, or holds a key it does not define.
 
 ## What it does not catch

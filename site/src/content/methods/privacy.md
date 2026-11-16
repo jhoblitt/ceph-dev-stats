@@ -10,7 +10,7 @@ About people, the page's data holds GitHub logins and the times of what they did
 
 The page's data is built from records under `data/` in [the site's repository](https://github.com/jhoblitt/ceph-dev-stats), which are public. They keep more:
 
-- each account's login and whether GitHub types it as a bot; for a pull request's author, GitHub's author association, such as member or contributor; and in `data/authors.json`, each author's count of pull requests opened before the window;
+- each account's login and whether GitHub types it as a bot; for a pull request's author, GitHub's author association, such as member or contributor; and in `data/authors.json`, each author's count of pull requests opened before the window's start, {{windowStart}};
 - each pull request's title, and the lines of its description and commit messages that might disclose LLM use, quoted as written and cut at 200 characters;
 - the text of every comment that is a single line of at most 80 characters with no `@` in it, whatever it says; this is how a bot command is recognised. The text of any other comment is not kept. The raw responses from GitHub are not published.
 

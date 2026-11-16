@@ -2,11 +2,11 @@
 
 The People section has two tables over the current filters: the Authors table, of who opened the selected pull requests and what those pull requests came to, and the Reviewers table, of who reviewed or commented on them. A person is named by their GitHub login and nothing else. Ordering a table by a column orders people by that count or median; people with the same value are ordered by their login, a deleted account by the words "deleted account", and people with no median to show come last whichever way the column is ordered; a count of pull requests, commits or lines is not a measure of anyone's contribution, and the tables are not one.
 
-On the report's default view, the {{view.prs}} pull requests on main open at some point in the window as of {{asOf}}, the Authors table lists {{people.authors}} people, with {{people.botAuthors}} bot accounts not shown, and the Reviewers table lists {{people.reviewers}}.
+On the report's default view, the {{view.prs}} pull requests on main open at some point in the default period as of {{asOf}}, the Authors table lists {{people.authors}} people, with {{people.botAuthors}} bot accounts not shown, and the Reviewers table lists {{people.reviewers}}.
 
 ## The Authors table
 
-- **Which pull requests.** A person's row counts the selected pull requests they opened in the window during the period: the same pull requests the counts of pull requests opened and the outcome curves use. A pull request they opened before the period is not in their row, even when it was still open in the period.
+- **Which pull requests.** A person's row counts the selected pull requests they opened during the period: the same pull requests the counts of pull requests opened and the outcome curves use. A pull request they opened before the period is not in their row, even when it was still open in the period.
 - **Opened, merged, closed unmerged and still open** are those pull requests by their state at the last fetch.
 - **Commits and lines** are those of the pull requests the person opened, not of the commits the person wrote: the data records each pull request's commits, but not who wrote each one. So a backport's commits and lines count for whoever opened the backport, though the work in them is the original's; the Target filter keeps original work on `main` apart from backports.
 - **Lines** are each pull request's whole diff, lines added plus lines deleted, as GitHub counts them. One large change can dominate a total: on the default view, the largest single pull request is {{people.largestLines}} lines, {{people.largestShare}} of all the lines the Authors table counts with bot accounts not shown.

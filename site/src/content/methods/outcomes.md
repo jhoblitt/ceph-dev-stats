@@ -4,7 +4,7 @@ How long pull requests take is measured without dropping the ones that have not 
 
 ## Outcome curves
 
-An outcome curve is drawn over the pull requests opened in the window during the period. For each number of days since a pull request was opened, or since it was ready for review for responses and approvals, it gives the share that had reached each outcome: merged, closed unmerged or still open; or responded, finished without a response, or still waiting. The outcomes compete, so a pull request closed unmerged can no longer merge. A pull request younger than a given number of days counts only up to its age, and the shares of the rest are estimated from those that were still at risk. This is the cumulative incidence (Aalen–Johansen) estimate.
+An outcome curve is drawn over the pull requests opened during the period. For each number of days since a pull request was opened, or since it was ready for review for responses and approvals, it gives the share that had reached each outcome: merged, closed unmerged or still open; or responded, finished without a response, or still waiting. The outcomes compete, so a pull request closed unmerged can no longer merge. A pull request younger than a given number of days counts only up to its age, and the shares of the rest are estimated from those that were still at risk. This is the cumulative incidence (Aalen–Johansen) estimate.
 
 ## Medians and percentiles
 

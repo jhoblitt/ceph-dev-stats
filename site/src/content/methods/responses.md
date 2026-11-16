@@ -12,9 +12,9 @@ A pull request's first response is the earliest comment or review on it by a per
 
 The clock starts when the pull request is opened or, for one opened as a draft, when it is first marked ready for review. It does not stop if the pull request is later converted back to a draft: the time it then spends as a draft counts as waiting. A response or an approval made before then counts as made at that moment: no wait.
 
-Whether a pull request was opened as a draft is read from its first "marked ready" or "converted to draft" event: a pull request first marked ready was opened as a draft, and one first converted to a draft was not. One with neither that is a draft now was opened as a draft and has never been ready.
+Whether a pull request was opened as a draft is read from its first "marked ready" or "converted to draft" event: a pull request first marked ready was opened as a draft, and one first converted to a draft was not. One with neither that is a draft now was opened as a draft and has never been ready, and one with neither that is not a draft now was opened ready.
 
-A pull request never made ready has no response or approval time. It is left out of those measures and kept in the counts of pull requests opened, merged and closed. On the data as of {{asOf}}, {{prs.neverReady}} of the {{prs.active}} pull requests open at some point in the window had never been made ready.
+A pull request never made ready has no response or approval time. It is left out of those measures and kept in the counts of pull requests opened, merged and closed. On the data as of {{asOf}}, {{prs.neverReady}} of the {{prs.active}} pull requests open at some point in the default period had never been made ready.
 
 ## Finished pull requests, and those still open
 

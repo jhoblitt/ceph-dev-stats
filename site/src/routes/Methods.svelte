@@ -126,7 +126,8 @@
     <h1 bind:this={heading} tabindex="-1">Methods</h1>
     <p>
       How each figure on this site is arrived at, and what it cannot show. The figures on this page are computed in
-      your browser from the same data as the report, as of {dayOf(meta.fetched_through)}.
+      your browser from the same data as the report, as of {dayOf(meta.fetched_through)}, over the report's default
+      period, {days.from} to {days.to}.
     </p>
     {#if failures.length > 0}
       <p class="notice" role="alert">

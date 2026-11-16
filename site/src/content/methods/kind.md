@@ -18,7 +18,7 @@ A kind is a bug fix, a feature, a cleanup, documentation, other, or unknown. A b
 - **A tracker ticket's type.** The tracker.ceph.com tickets a pull request links to, first those on a commit's `Fixes:` line, then those in its description, are tried in that order, and the first whose type gives a kind decides. A Bug is a bug fix; a Feature or an Enhancement a feature; a Cleanup a cleanup; Documentation documentation; a Backport ticket stands for the ticket it was copied from; every other type the table lists is other. A type the table does not list gives no kind, and `cephstats check` fails on it.
 - **A label.** The labels `bug-fix`, `feature` and `cleanup` name a kind, and decide only when every such label on the pull request names the same one.
 
-A pull request that none of these decides is unknown. On the data as of {{asOf}}, {{kind.unknown}} of the {{prs.active}} pull requests open at some point in the window are of unknown kind ({{kind.unknownShare}}).
+A pull request that none of these decides is unknown. On the data as of {{asOf}}, {{kind.unknown}} of the {{prs.active}} pull requests open at some point in the default period are of unknown kind ({{kind.unknownShare}}).
 
 {{table.kindSources}}
 

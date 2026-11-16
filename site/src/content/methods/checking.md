@@ -4,7 +4,7 @@ Every figure on the site is computed in your browser from per-pull-request data,
 
 ## From a figure to the pull requests
 
-The table of pull requests lists every pull request open at some point in the period under the current filters, the Author and Reviewer filters among them. Choosing a week of a chart, or a month over a long period, narrows it to the pull requests opened during the part of that week or month that lies inside both the window and the period, so a first week that starts earlier leaves out those opened before. Choosing an age band of the backlog narrows it to the pull requests behind that band. Each row's number links to the pull request on GitHub.
+The table of pull requests lists every pull request open at some point in the period under the current filters, the Author and Reviewer filters among them. Choosing a week of a chart, or a month over a long period, narrows it to the pull requests opened during the part of that week or month that lies inside the period, so a first week that starts earlier leaves out those opened before. Choosing an age band of the backlog narrows it to the pull requests behind that band. Each row's number links to the pull request on GitHub.
 
 Choosing a pull request, by its title in the table or by its dot, shows a link to it on GitHub, its kind and what decided it, links to the tracker tickets it references, and, for a backport, a link to the pull request it backports. It also shows the pull request's timeline: its first commit, its opening, each comment, bot command and review, each lifecycle event, its last commit, and its final disposition or that it was still open at the last fetch, with the stretches it spent closed, the three spans, and the list of its commits.
 
@@ -23,7 +23,7 @@ A mark whose address the data does not have is drawn without a link and says "ad
 
 GitHub records a merge as a merge and a close at nearly the same moment. A close at or within 5 seconds after a merge is that record of the merge: the site's data leaves it out, and the timeline draws the merge alone. When GitHub reports a pull request merged but recorded no merge event for it, its last close is written as its merge, with no commit to link to.
 
-An event can lack its address when GitHub returned none for it, or when its record was written before the data kept addresses. On the data as of {{asOf}}, {{refs.forcePushesWithoutCommit}} of the {{refs.forcePushes}} force-pushes in the window ({{refs.forcePushShareWithoutCommit}}) and {{refs.mergesWithoutCommit}} of the {{refs.merges}} merges in the window have no commit to link to.
+An event can lack its address when GitHub returned none for it, or when its record was written before the data kept addresses. GitHub can also begin to return a force-push's commit later without moving the pull request's last-updated time, and neither a refresh nor a walk back to the start of the window fetches the pull request again, so its record stays without that commit until the pull request changes for another reason or the data is fetched afresh: see [How the pull requests are found](#counted-how-the-pull-requests-are-found). On the data as of {{asOf}}, {{refs.forcePushesWithoutCommit}} of the {{refs.forcePushes}} force-pushes in the default period ({{refs.forcePushShareWithoutCommit}}) and {{refs.mergesWithoutCommit}} of the {{refs.merges}} merges in it have no commit to link to.
 
 {{table.eventRefs}}
 

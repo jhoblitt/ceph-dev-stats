@@ -164,9 +164,10 @@ describe('the methods page', () => {
     expect(text).toContain(
       "On the data as of 2026-11-15, 12 pull requests, on every branch, were open at some point in the report's default period, 2026-05-15 to 2026-11-15: 9 opened in it and 3 before it.",
     );
-    expect(text).toContain('1 of the 12 pull requests open at some point in the window are of unknown kind (8.3%)');
+    expect(text).toContain('1 of the 12 pull requests open at some point in the default period are of unknown kind (8.3%)');
     expect(text).toContain('3 (27%) were bot commands, 2 of them by the pull request');
-    expect(text).toContain('0 of the 7 force-pushes in the window (0%) and 0 of the 6 merges in the window have no commit to link to');
+    expect(text).toContain('0 of the 7 force-pushes in the default period (0%) and 0 of the 6 merges in it have no commit to link to');
+    expect(text.replace(/\s+/g, ' ')).toContain("as of 2026-11-15, over the report's default period, 2026-05-15 to 2026-11-15.");
     const kinds = screen.getByRole('table', { name: /Where each pull request’s kind came from/ });
     expect(within(kinds).getByRole('row', { name: /the PR’s checklist/ }).textContent).toMatch(/the PR’s checklist\s*4\s*0\s*4/);
   });

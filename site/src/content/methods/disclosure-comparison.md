@@ -1,6 +1,6 @@
 # Disclosed against not disclosed
 
-The LLM-use section sets the pull requests that disclose LLM use against those that do not, figure by figure, among the selected pull requests opened in the window during the period. A pull request is in the disclosed group when it discloses in any of the [forms](#disclosure), and in the other group otherwise. Each figure says how many pull requests it rests on, where there are any.
+The LLM-use section sets the pull requests that disclose LLM use against those that do not, figure by figure, among the selected pull requests opened during the period. A pull request is in the disclosed group when it discloses in any of the [forms](#disclosure), and in the other group otherwise. Each figure says how many pull requests it rests on, where there are any.
 
 ## The figures
 
@@ -13,7 +13,7 @@ There is no median time to merge: the groups can differ in age, and a median far
 
 ## What else sets the groups apart
 
-This table sets the two groups side by side on things other than disclosure: the pull requests on `main` opened in the window, which are those the LLM-use section compares on the report's default view, as of {{asOf}}:
+This table sets the two groups side by side on things other than disclosure: the pull requests on `main` opened in the default period, which are those the LLM-use section compares on the report's default view, as of {{asOf}}:
 
 {{table.disclosureGroups}}
 
