@@ -1,8 +1,10 @@
-// The open backlog at the end of each week (or month), in age bands.
+// The open backlog at the end of each week (or month), in age bands, and the
+// part of it waiting for a first response.
 
 import type { Dataset } from '../data';
 import { AGE_BANDS, type AgeBand, DAY } from '../filters';
 import { type Period, type Step, bucketEnd, buckets, stepFor } from './buckets';
+import type { Weekly } from './weekly';
 
 /** Each band's ages in days since opening, the lower bound inclusive. */
 const AGE_DAYS: Record<AgeBand, readonly [number, number]> = {
@@ -65,6 +67,38 @@ function openStretches(data: Dataset): (r: number, fn: Stretch) => void {
   };
 }
 
+/** A stretch of time a row was out of draft: the instants t with from <= t < to. */
+type Ready = (from: number, to: number) => void;
+
+/**
+ * Walks a row's stretches out of draft. At an instant the row is out of draft
+ * when its latest `ready` or `draft` event at or before it is a `ready`, or,
+ * with neither yet, when it was opened ready. Events of the same second take
+ * effect in their order in the events file, which keeps GitHub's timeline
+ * order, so the later of the two wins.
+ */
+function readyStretches(data: Dataset): (r: number, fn: Ready) => void {
+  const p = data.prs;
+  const ev = data.events;
+  const readyKind = data.meta.event_kinds.indexOf('ready');
+  const draftKind = data.meta.event_kinds.indexOf('draft');
+  return (r, fn) => {
+    let ready = (p.opened_draft[r] as number) === 0;
+    let from = -Infinity;
+    for (let e = lowerBound(ev.pr, r); e < ev.pr.length && ev.pr[e] === r; e++) {
+      const kind = ev.kind[e];
+      if (ready && kind === draftKind) {
+        fn(from, ev.at[e] as number);
+        ready = false;
+      } else if (!ready && kind === readyKind) {
+        from = ev.at[e] as number;
+        ready = true;
+      }
+    }
+    if (ready) fn(from, Infinity);
+  };
+}
+
 /**
  * The instant the backlog of the period's bucket starting at `bucket` is
  * measured: the bucket's end, or the period's end or `fetched_through` when
@@ -112,6 +146,47 @@ export function backlog(data: Dataset, rows: Uint32Array, period: Period): Backl
     bands[band.id] = b.starts.map((_, w) => (running += d[w] as number));
   });
   return { week: b.starts, step: b.step, bands };
+}
+
+/**
+ * The rows waiting for a first response at each bucket's `backlogMoment`,
+ * under `waiting`: open then, out of draft then by their `ready` and `draft`
+ * events, and with no first response yet. A row that is a draft at the
+ * moment does not count, whatever came before; one never made ready never
+ * counts; one closed unanswered stops counting when it closes, and counts
+ * again if reopened; one put back into draft counts again from its next
+ * `ready`.
+ */
+export function awaitingResponse(data: Dataset, rows: Uint32Array, period: Period): Weekly<number> {
+  const b = buckets(period);
+  if (rows.length === 0) return { week: [], step: b.step, values: { waiting: [] } };
+  const p = data.prs;
+  const moments = Float64Array.from(b.starts, (s) => backlogMoment(data, period, s));
+  const diff = new Int32Array(moments.length + 1);
+  const readyWalk = readyStretches(data);
+
+  // The moments in each open stretch that are also in a stretch out of draft
+  // and before the answer. Both kinds of stretch are disjoint, so each moment
+  // is counted at most once.
+  const count: Stretch = (r, from, to) => {
+    const answered = p.first_response[r] as number;
+    const until = Math.min(to + 1, answered < 0 ? Infinity : answered);
+    readyWalk(r, (readyFrom, readyTo) => {
+      // Waiting at t when from < t <= to, readyFrom <= t < readyTo, and t < answered.
+      const first = lowerBound(moments, Math.max(from + 1, readyFrom));
+      const last = lowerBound(moments, Math.min(until, readyTo));
+      if (first < last) {
+        diff[first] = (diff[first] as number) + 1;
+        diff[last] = (diff[last] as number) - 1;
+      }
+    });
+  };
+
+  const walk = openStretches(data);
+  for (let i = 0; i < rows.length; i++) walk(rows[i] as number, count);
+
+  let running = 0;
+  return { week: b.starts, step: b.step, values: { waiting: b.starts.map((_, w) => (running += diff[w] as number)) } };
 }
 
 /**
