@@ -86,8 +86,11 @@ func Run(ctx context.Context, cfg Config) error {
 	if err := copyMeta(cfg); err != nil {
 		return err
 	}
-	// withheld_by_domain's keys are only a plain domain, "other" or "no
-	// address", never the withheld text: the lines may name a person.
+	// withheld_by_domain's keys are a plain domain, "other" or "no address",
+	// never a whole withheld line. A plain domain is whatever run of letters,
+	// digits, dots and hyphens someone wrote after an @, so it may be a login
+	// or a fragment of a name; it goes only to this local run's log, never
+	// into data/.
 	log.InfoContext(ctx, "extract finished",
 		slog.Int("cached", len(numbers)),
 		slog.Int("replaced", u.replaced),
