@@ -5,19 +5,28 @@
 
 import type { Dataset, Meta, TableYear } from '../data';
 import { dayOf } from '../filters';
-import { formatCount, formatShare } from '../format';
+import { formatCount, formatDays, formatShare } from '../format';
+import { HORIZONS, MIN_FOLLOWED } from '../llm';
+import { openedIn } from '../select';
+import { COMPARE_WEEKS } from '../stats/capacity';
+import { MIN_PRS } from '../stats/people';
 import {
   type CommentCounts,
   type Coverage,
   type EventRefs,
   type FamilyCount,
+  type GroupProfile,
   KIND_SOURCE_ROWS,
+  type PeopleFigures,
+  TOP_AUTHORS,
   type KindSourceRow,
   type Split,
   baseRows,
   commentCounts,
   coverage,
+  defaultRows,
   disclosureForms,
+  disclosureGroups,
   eventRefs,
   familyCounts,
   firstCommitUnknown,
@@ -25,7 +34,9 @@ import {
   noCommits,
   kindUnknown,
   neverReady,
+  peopleFigures,
   standingUnknown,
+  windowPeriod,
 } from './figures';
 
 /** The figures computed from the PR and event files. */
@@ -39,6 +50,19 @@ export interface DataFigures {
   disclosure: Record<string, Split>;
   families: FamilyCount[];
   comments: CommentCounts;
+  /** The People tables on the report's default view. */
+  people: PeopleFigures;
+  /**
+   * The PRs the LLM-use section compares on the report's default view, those
+   * on main opened in the window, split by disclosure.
+   */
+  groups: { notDisclosed: GroupProfile; disclosed: GroupProfile };
+  /** How many PRs that comparison holds. */
+  compared: number;
+  /** The whole default view split by disclosure, for the share of each group opened in the window. */
+  viewGroups: { notDisclosed: GroupProfile; disclosed: GroupProfile };
+  /** How many PRs the default view holds. */
+  defaultView: number;
 }
 
 /** The figures that also need each year's table file. */
@@ -49,6 +73,8 @@ export interface TableFigures {
 
 export function dataFigures(data: Dataset): DataFigures {
   const rows = baseRows(data);
+  const view = defaultRows(data);
+  const compared = openedIn(data, view, windowPeriod(data.meta));
   return {
     coverage: coverage(data, rows),
     neverReady: neverReady(data, rows),
@@ -59,6 +85,11 @@ export function dataFigures(data: Dataset): DataFigures {
     disclosure: disclosureForms(data, rows),
     families: familyCounts(data, rows),
     comments: commentCounts(data, rows),
+    people: peopleFigures(data, view),
+    groups: disclosureGroups(data, compared),
+    compared: compared.length,
+    viewGroups: disclosureGroups(data, view),
+    defaultView: view.length,
   };
 }
 
@@ -87,6 +118,11 @@ const disclosed = (d: DataFigures) =>
 const refsOf = (t: TableFigures, kind: string) => t.eventRefs.find((r) => r.kind === kind) ?? { events: 0, missing: 0 };
 const forcePushes = (t: TableFigures) => refsOf(t, 'force_push');
 const count = (f: (d: DataFigures) => number): Figure<string> => ({ needs: 'data', show: (_m, d) => formatCount(f(d)) });
+/** A constant of the method, written from the code that applies it. */
+const constant = (text: string): Figure<string> => ({ needs: 'meta', show: () => text });
+/** "7, 30 and 90". */
+const listed = (items: readonly string[]) =>
+  items.length < 2 ? (items[0] ?? '') : `${items.slice(0, -1).join(', ')} and ${items.at(-1) as string}`;
 
 /** Every value a sentence can name, by the name it is written under. */
 export const INLINE_FIGURES: Record<string, Figure<string>> = {
@@ -119,6 +155,31 @@ export const INLINE_FIGURES: Record<string, Figure<string>> = {
   'refs.forcePushShareWithoutCommit': {
     needs: 'tables',
     show: (_m, _d, t) => share(forcePushes(t).missing, forcePushes(t).events),
+  },
+  'const.minPrs': constant(formatCount(MIN_PRS)),
+  'const.horizons': constant(listed(HORIZONS.map(formatCount))),
+  'const.minFollowed': constant(formatCount(MIN_FOLLOWED)),
+  'const.topAuthors': constant(formatCount(TOP_AUTHORS)),
+  'view.prs': count((d) => d.defaultView),
+  'view.openedBefore': count((d) => d.defaultView - d.compared),
+  'view.notDisclosedInWindow': {
+    needs: 'data',
+    show: (_m, d) => (d.viewGroups.notDisclosed.openedInWindow === null ? '–' : formatShare(d.viewGroups.notDisclosed.openedInWindow)),
+  },
+  'view.disclosedInWindow': {
+    needs: 'data',
+    show: (_m, d) => (d.viewGroups.disclosed.openedInWindow === null ? '–' : formatShare(d.viewGroups.disclosed.openedInWindow)),
+  },
+  'const.compareWeeks': constant(formatCount(COMPARE_WEEKS)),
+  'const.compareNeeded': constant(formatCount(2 * COMPARE_WEEKS)),
+  'people.authors': count((d) => d.people.authors),
+  'people.botAuthors': count((d) => d.people.botAuthors),
+  'people.reviewers': count((d) => d.people.reviewers),
+  'people.authorsTooFew': count((d) => d.people.authorsTooFew),
+  'people.largestLines': count((d) => d.people.largestLines),
+  'people.largestShare': {
+    needs: 'data',
+    show: (_m, d) => (d.people.largestShare === null ? '–' : formatShare(d.people.largestShare)),
   },
 };
 
@@ -200,6 +261,26 @@ export const TABLE_FIGURES: Record<string, Figure<TableModel>> = {
       head: ['family', ...SPLIT_HEAD],
       rows: d.families.map((f) => [f.name, ...splitCells(f.count)]),
     }),
+  },
+  'table.disclosureGroups': {
+    needs: 'data',
+    show: (m, d) => {
+      const { notDisclosed: a, disclosed: b } = d.groups;
+      const cells = (f: (g: GroupProfile) => string) => [f(a), f(b)];
+      const pct = (v: number | null | undefined) => (v === null || v === undefined ? '–' : formatShare(v));
+      const kinds = [...m.kinds.map((k) => ({ id: k.id, name: k.name })), { id: 'unknown', name: 'Unknown' }];
+      return {
+        caption: `The ${formatCount(d.compared)} pull requests on main opened in the window, those the LLM-use section compares on the report's default view, by disclosure, as of ${dayOf(m.fetched_through)}`,
+        head: ['', 'not disclosed', 'disclosed'],
+        rows: [
+          ['pull requests', ...cells((g) => formatCount(g.prs))],
+          ['median lines changed', ...cells((g) => (g.medianLines === null ? '–' : formatCount(g.medianLines)))],
+          ['median time since opened, at the last fetch', ...cells((g) => (g.medianAgeDays === null ? '–' : formatDays(g.medianAgeDays)))],
+          [`opened by the group's ${formatCount(TOP_AUTHORS)} most active authors`, ...cells((g) => pct(g.topAuthors))],
+          ...kinds.map((k) => [`kind: ${k.name.toLowerCase()}`, ...cells((g) => pct(g.kinds?.[k.id]))]),
+        ],
+      };
+    },
   },
   'table.eventRefs': {
     needs: 'tables',

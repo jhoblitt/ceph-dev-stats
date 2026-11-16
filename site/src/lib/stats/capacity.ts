@@ -68,6 +68,9 @@ export interface WindowMean {
   missing: number;
 }
 
+/** How many complete buckets each end of the comparison takes. */
+export const COMPARE_WEEKS = 4;
+
 /**
  * The means of the first `n` and the last `n` complete buckets, or null with
  * fewer than `2n` complete buckets to compare.
@@ -75,7 +78,7 @@ export interface WindowMean {
 export function compareEnds(
   values: readonly (number | null)[],
   complete: readonly boolean[],
-  n = 4,
+  n = COMPARE_WEEKS,
 ): { first: WindowMean; last: WindowMean } | null {
   const whole = values.flatMap((_, i) => (complete[i] ? [i] : []));
   if (whole.length < 2 * n) return null;

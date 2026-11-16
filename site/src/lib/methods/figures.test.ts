@@ -8,8 +8,11 @@ import events2025 from '../__fixtures__/data/events-2025.json';
 import events2026 from '../__fixtures__/data/events-2026.json';
 import { META, at, dataset, fixture } from '../stats/testing';
 import {
+  TOP_AUTHORS,
   baseRows,
   commentCounts,
+  defaultRows,
+  disclosureGroups,
   coverage,
   disclosureForms,
   eventRefs,
@@ -19,6 +22,7 @@ import {
   kindUnknown,
   neverReady,
   noCommits,
+  peopleFigures,
   standingUnknown,
   windowPeriod,
 } from './figures';
@@ -229,5 +233,109 @@ describe('eventRefs', () => {
     expect(eventRefs(d, new Map([[2026, table]]), baseRows(d))).toEqual([
       { kind: 'force_push', events: 2, missing: 1 },
     ]);
+  });
+});
+
+describe('defaultRows', () => {
+  it("keeps the report's default view: PRs on main open at some point in the window", () => {
+    expect([...defaultRows(data)]).toEqual([0, 2, 3, 4, 5, 6, 8, 9, 10]);
+  });
+});
+
+describe('peopleFigures', () => {
+  // On the default view the People tables count the PRs opened in the window
+  // on main (rows 3, 4, 5, 6, 8, 9, 10) for the Authors table, and every
+  // event in the window on rows 0, 2–6 and 8–10 for the Reviewers table.
+  it('counts the authors, the bot accounts hidden among them and the reviewers, as the People tables do', () => {
+    const f = peopleFigures(data, defaultRows(data));
+    // Authors d (rows 3 and 10), e, f, g, a and i.
+    expect(f.authors).toBe(6);
+    expect(f.botAuthors).toBe(0);
+    // f (rows 0, 3, 10), a (2, 6), e (2, 10), i (5, 8) and the reviewer k (9).
+    expect(f.reviewers).toBe(5);
+    // Every author has fewer than five PRs behind a median to merge.
+    expect(f.authorsTooFew).toBe(6);
+  });
+
+  it('finds the largest pull request and its share of all lines changed', () => {
+    const f = peopleFigures(data, defaultRows(data));
+    // #67000 is 1,500 + 700 lines of the 30 + 4 + 1,050 + 70 + 250 + 2,200 + 90 = 3,694.
+    expect(f.largestLines).toBe(2200);
+    expect(f.largestShare).toBeCloseTo(2200 / 3694, 10);
+  });
+
+  it("leaves bot accounts' pull requests out of the largest pull request and its share, as the Authors table does by default", () => {
+    const d = dataset(
+      [
+        { created: at('2026-06-01T00:00:00Z'), author: 0, additions: 60, deletions: 40 },
+        { created: at('2026-06-01T00:00:00Z'), author: 1, additions: 1000 },
+        { created: at('2026-06-01T00:00:00Z'), author: 2, additions: 300 },
+      ],
+      [],
+      { people_bots: [1] },
+    );
+    const f = peopleFigures(d, defaultRows(d));
+    expect(f.largestLines).toBe(300);
+    expect(f.largestShare).toBe(300 / 400);
+  });
+
+  it('hides a bot account among the authors and counts it apart', () => {
+    const f = peopleFigures(data, baseRows(data));
+    // On every branch the authors add h (row 7) and the bot j (row 11).
+    expect(f.authors).toBe(7);
+    expect(f.botAuthors).toBe(1);
+  });
+
+  it('gives no largest pull request when no PR was opened in the period', () => {
+    const d = dataset([{ created: at('2026-01-01T00:00:00Z'), in_window: 0, author: 0 }]);
+    const f = peopleFigures(d, defaultRows(d));
+    expect(f.authors).toBe(0);
+    expect(f.largestLines).toBe(0);
+    expect(f.largestShare).toBeNull();
+  });
+});
+
+describe('disclosureGroups', () => {
+  const g = disclosureGroups(data, defaultRows(data));
+
+  it('splits the default view into the PRs that do not disclose and those that do', () => {
+    expect(g.notDisclosed.prs).toBe(6);
+    expect(g.disclosed.prs).toBe(3);
+  });
+
+  it('gives the share of each group opened in the window', () => {
+    // Rows 0 and 2 were opened before it.
+    expect(g.notDisclosed.openedInWindow).toBeCloseTo(4 / 6, 10);
+    expect(g.disclosed.openedInWindow).toBe(1);
+  });
+
+  it('gives the median lines changed, a nearest-rank median', () => {
+    // 4, 70, 150, 250, 600, 1,050 and 30, 90, 2,200.
+    expect(g.notDisclosed.medianLines).toBe(150);
+    expect(g.disclosed.medianLines).toBe(90);
+  });
+
+  it('gives the median days since opening at the last fetch', () => {
+    // #66600, opened 2026-06-02T07:00Z, and #67000, opened 2026-08-06T12:00Z.
+    expect(g.notDisclosed.medianAgeDays).toBeCloseTo((1794722400 - 1780383600) / 86400, 10);
+    expect(g.disclosed.medianAgeDays).toBeCloseTo((1794722400 - 1785931200) / 86400, 10);
+  });
+
+  it(`gives the share of each group opened by its ${TOP_AUTHORS} most active authors`, () => {
+    // Not disclosed: a opened two, c, e, f and g one each; disclosed: d two, i one.
+    expect(g.notDisclosed.topAuthors).toBeCloseTo(4 / 6, 10);
+    expect(g.disclosed.topAuthors).toBe(1);
+  });
+
+  it('gives the mix of kinds in each group', () => {
+    expect(g.notDisclosed.kinds).toEqual({ bugfix: 1 / 6, feature: 2 / 6, cleanup: 2 / 6, docs: 1 / 6, other: 0, unknown: 0 });
+    expect(g.disclosed.kinds).toEqual({ bugfix: 1 / 3, feature: 1 / 3, cleanup: 0, docs: 0, other: 1 / 3, unknown: 0 });
+  });
+
+  it('gives an empty group nothing to divide', () => {
+    const d = dataset([{ created: at('2026-06-01T00:00:00Z'), author: 0 }]);
+    const e = disclosureGroups(d, defaultRows(d));
+    expect(e.disclosed).toEqual({ prs: 0, openedInWindow: null, medianLines: null, medianAgeDays: null, topAuthors: null, kinds: null });
+    expect(e.notDisclosed.prs).toBe(1);
   });
 });
