@@ -4,7 +4,7 @@ The window starts on {{windowStart}}. A pull request opened before then is count
 
 ## No comparison across years
 
-This page draws no comparison between the years before AI tools were common and the years since. Where the data reaches back that far, a reader can move the period and look. But years can differ in ways that have nothing to do with tools: in the project's size and who was active in it, in the bots and automation it ran, and in what GitHub itself recorded at the time (see [Older pull requests](#limits-older-pull-requests)). So a difference between years is not, on its own, an effect of a tool.
+The report gives no figure comparing the years before AI tools were common with the years since. It opens on the whole window, so its charts draw both, and a reader can narrow the period to either. But years differ in ways that have nothing to do with tools: in the project's size and who was active in it, in the bots and automation it ran, and in what GitHub itself recorded at the time (see [Older pull requests](#limits-older-pull-requests)). The report also counts AI use only where a pull request discloses it (see [Disclosure of AI use](#disclosure)), so a year with no disclosures is not a year without AI use. A difference between years is therefore not, on its own, an effect of a tool.
 
 ## Author standing
 
