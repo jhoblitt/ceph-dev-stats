@@ -794,6 +794,397 @@ var _ = Describe("Run", func() {
 		})
 	})
 
+	Describe("an older-format entry of a pull request GitHub no longer has", func() {
+		const (
+			fromWindow  = "2026-05-15T00:00:00Z"
+			fromDefault = "2026-11-01T05:00:00Z"
+			goneMsg     = "cache holds older-format entries of pull requests github no longer has"
+			notFound    = `{"data":{"repository":{"pullRequest":null}},"errors":[{"type":"NOT_FOUND","path":["repository","pullRequest"],"message":"Could not resolve to a PullRequest with the number of 2."}]}`
+			// notFoundP0 is GitHub's answer to PullRequestNumbers asked about
+			// PR 2 alone, which it cannot resolve.
+			notFoundP0 = `{"data":{"repository":{"p0":null}},"errors":[{"type":"NOT_FOUND","path":["repository","p0"],"message":"Could not resolve to a PullRequest with the number of 2."}]}`
+		)
+		var (
+			held   []fetch.Entry
+			before []byte
+			// hidden answers in place of the server while PR 2 is gone in a
+			// way the server's state does not show.
+			hidden func(fetchtest.Request) *fetchtest.Reply
+		)
+		metaPath := func() string { return filepath.Join(cacheDir, fetch.MetaFile) }
+		rawPath := func(number int) string { return filepath.Join(cacheDir, "raw", strconv.Itoa(number)+".json") }
+		// age rewrites entry number as a fetch from before entries carried a
+		// format version left it.
+		age := func(number int) {
+			GinkgoHelper()
+			e := readJSON(rawPath(number))
+			delete(e, "formatVersion")
+			b, err := json.Marshal(e)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(os.WriteFile(rawPath(number), b, 0o600)).To(Succeed())
+		}
+		// walkedFrom returns each run's since, as its first log line gives it.
+		walkedFrom := func() []any {
+			var out []any
+			for _, m := range logged("walk started") {
+				out = append(out, m["since"])
+			}
+			return out
+		}
+		// intercept answers as hidden does, and otherwise as f does.
+		intercept := func(f func(fetchtest.Request) *fetchtest.Reply) {
+			server.Intercept(func(_ int, r fetchtest.Request) *fetchtest.Reply {
+				if hidden != nil {
+					if rep := hidden(r); rep != nil {
+						return rep
+					}
+				}
+				if f != nil {
+					return f(r)
+				}
+				return nil
+			})
+		}
+		marks := func() any { return readJSON(metaPath())["gone_entries"] }
+		// askedByNumber returns the pull request numbers each
+		// PullRequestNumbers request asked about, in order.
+		askedByNumber := func() [][]int {
+			var out [][]int
+			for _, r := range server.Operations(ghapi.PullRequestNumbers(0).Name) {
+				var numbers []int
+				for i := 0; r.Int("n"+strconv.Itoa(i)) >= 0; i++ {
+					numbers = append(numbers, r.Int("n"+strconv.Itoa(i)))
+				}
+				out = append(out, numbers)
+			}
+			return out
+		}
+		markOf2 := func() map[string]any {
+			return map[string]any{"2": entry(2).FetchedAt.Format(time.RFC3339)}
+		}
+
+		BeforeEach(func() {
+			gone, still := pr(2, 2, "CLOSED"), pr(1, 1, "CLOSED")
+			gone.Comments, still.Comments = comments(3), comments(3)
+			held = []fetch.Entry{pr(9, 9, "CLOSED"), gone, still}
+			hidden = nil
+			serve(held...)
+			Expect(run(fetch.WindowStart)).To(Succeed())
+			age(2)
+			var err error
+			before, err = os.ReadFile(rawPath(2))
+			Expect(err).NotTo(HaveOccurred())
+			defaultSince = true
+			logs.Reset()
+		})
+
+		for _, way := range []struct {
+			name string
+			// hide makes GitHub no longer have PR 2.
+			hide func()
+			// bring makes GitHub list PR 2 again, updated after the default
+			// since.
+			bring func()
+		}{
+			{
+				name: "deleted, so that no walk lists it",
+				hide: func() { server.Delete(2) },
+				bring: func() {
+					moved := held[1]
+					moved.UpdatedAt = at(6)
+					serve(held[0], moved, held[2])
+				},
+			},
+			{
+				name: "listed but answered NOT_FOUND when read",
+				hide: func() {
+					hidden = func(r fetchtest.Request) *fetchtest.Reply {
+						switch {
+						case r.Operation == ghapi.ConnectionPage(ghapi.Comments).Name && r.Int("number") == 2:
+							return &fetchtest.Reply{Status: 200, Body: notFound}
+						case r.Operation == ghapi.PullRequestNumbers(0).Name && r.Int("n0") == 2 && r.Int("n1") < 0:
+							return &fetchtest.Reply{Status: 200, Body: notFoundP0}
+						}
+						return nil
+					}
+					intercept(nil)
+				},
+				bring: func() {
+					hidden = nil
+					intercept(nil)
+					server.Update(2, func(e *fetch.Entry) { e.UpdatedAt = at(6) })
+				},
+			},
+		} {
+			Context(way.name, func() {
+				BeforeEach(func() { way.hide() })
+
+				It("walks back to the window start once, leaving the entry as it was, and from the default since on the next run", func() {
+					Expect(run(at(5))).To(Succeed())
+					Expect(run(at(5))).To(Succeed())
+
+					Expect(walkedFrom()).To(Equal([]any{fromWindow, fromDefault}), "log:\n%s", logs.String())
+					Expect(os.ReadFile(rawPath(2))).To(Equal(before))
+				})
+
+				It("asks GitHub for it by number, in one request, only after the walk from the window start", func() {
+					Expect(run(at(5))).To(Succeed())
+
+					Expect(askedByNumber()).To(Equal([][]int{{2}}))
+					Expect(logged("asked github about older-format entries the walk left")).To(HaveExactElements(And(
+						HaveKeyWithValue("asked", 1.0),
+						HaveKeyWithValue("not_found", 1.0),
+					)), "log:\n%s", logs.String())
+					Expect(marks()).To(Equal(markOf2()))
+
+					Expect(run(at(5))).To(Succeed())
+
+					Expect(askedByNumber()).To(HaveLen(1), "the walk from the default since asks nothing")
+				})
+
+				It("keeps the mark in meta.json through a third run", func() {
+					for range 3 {
+						Expect(run(at(5))).To(Succeed())
+					}
+
+					Expect(walkedFrom()).To(Equal([]any{fromWindow, fromDefault, fromDefault}), "log:\n%s", logs.String())
+					Expect(marks()).To(Equal(markOf2()))
+					Expect(os.ReadFile(rawPath(2))).To(Equal(before))
+				})
+
+				It("warns once a run with its number, and counts it in the closing log line, but no longer as an entry to walk back for", func() {
+					warned := func() {
+						GinkgoHelper()
+						Expect(logged(goneMsg)).To(HaveExactElements(And(
+							HaveKeyWithValue("level", "WARN"),
+							HaveKeyWithValue("pull_requests", 1.0),
+							HaveKeyWithValue("numbers", []any{2.0}),
+						)), "log:\n%s", logs.String())
+						Expect(logged("walk finished")).To(HaveExactElements(HaveKeyWithValue("gone", 1.0)))
+					}
+					Expect(run(at(5))).To(Succeed())
+					warned()
+					Expect(logged("cache holds entries of an older format")).To(HaveExactElements(HaveKeyWithValue("entries", 1.0)))
+					logs.Reset()
+
+					Expect(run(at(5))).To(Succeed())
+
+					warned()
+					Expect(logged("cache holds entries of an older format")).To(BeEmpty())
+				})
+
+				It("fetches it as any other once GitHub lists it again, and drops the mark", func() {
+					Expect(run(at(5))).To(Succeed())
+					way.bring()
+					logs.Reset()
+
+					Expect(run(at(5))).To(Succeed())
+
+					Expect(walkedFrom()).To(Equal([]any{fromDefault}))
+					Expect(entry(2).FormatVersion).To(Equal(fetch.FormatVersion))
+					Expect(entry(2).UpdatedAt).To(Equal(at(6)))
+					Expect(marks()).To(BeNil())
+					Expect(logged(goneMsg)).To(BeEmpty())
+					Expect(logged("walk finished")).To(HaveExactElements(HaveKeyWithValue("gone", 0.0)))
+				})
+
+				It("keeps it as it was under --refetch, without walking back", func() {
+					Expect(run(at(5))).To(Succeed())
+					refetch = true
+					logs.Reset()
+
+					Expect(run(at(5))).To(Succeed())
+
+					Expect(walkedFrom()).To(Equal([]any{fromDefault}))
+					Expect(os.ReadFile(rawPath(2))).To(Equal(before))
+					Expect(marks()).To(Equal(markOf2()))
+					Expect(logged("walk finished")).To(HaveExactElements(HaveKeyWithValue("gone", 1.0)))
+				})
+
+				It("concludes nothing from a walk from the window start that a rate limit stops", func() {
+					intercept(func(r fetchtest.Request) *fetchtest.Reply {
+						if _, open := r.Variables["states"]; r.Operation == ghapi.PullRequests.Name && open {
+							return rateLimited()
+						}
+						return nil
+					})
+
+					Expect(run(at(5))).To(MatchError(isRateLimit, "a *ghapi.RateLimitError"))
+
+					Expect(marks()).To(BeNil())
+					Expect(logged(goneMsg)).To(BeEmpty())
+					intercept(nil)
+					Expect(run(at(5))).To(Succeed())
+					Expect(walkedFrom()).To(Equal([]any{fromWindow, fromWindow}), "the walk after it goes back again")
+				})
+
+				It("concludes nothing from a --since walk that stops short of the window start", func() {
+					defaultSince = false
+
+					Expect(run(at(5))).To(Succeed())
+
+					Expect(marks()).To(BeNil())
+					Expect(logged(goneMsg)).To(BeEmpty())
+					defaultSince = true
+					Expect(run(at(5))).To(Succeed())
+					Expect(walkedFrom()).To(Equal([]any{fromDefault, fromWindow}), "the default walk after it goes back")
+				})
+
+				It("concludes from a --full walk", func() {
+					defaultSince = false
+
+					Expect(run(fetch.WindowStart)).To(Succeed())
+
+					Expect(marks()).To(Equal(markOf2()))
+				})
+			})
+		}
+
+		It("walks back again for an ordinary older-format entry beside a marked one, and fetches it as before", func() {
+			server.Delete(2)
+			Expect(run(at(5))).To(Succeed())
+			age(1)
+			logs.Reset()
+
+			Expect(run(at(5))).To(Succeed())
+
+			Expect(walkedFrom()).To(Equal([]any{fromWindow}))
+			Expect(logged("cache holds entries of an older format")).To(HaveExactElements(HaveKeyWithValue("entries", 1.0)))
+			Expect(nestedFor(ghapi.Comments, 1)).To(HaveLen(2), "PR 1 is fetched by the first walk and again now")
+			Expect(entry(1).FormatVersion).To(Equal(fetch.FormatVersion))
+			Expect(os.ReadFile(rawPath(2))).To(Equal(before))
+			Expect(marks()).To(Equal(markOf2()))
+		})
+
+		It("walks back for a marked entry written again since, by a later fetch, though of an older format again", func() {
+			server.Delete(2)
+			Expect(run(at(5))).To(Succeed())
+			Expect(marks()).To(Equal(markOf2()))
+			e := readJSON(rawPath(2))
+			e["fetchedAt"] = at(400).Format(time.RFC3339)
+			b, err := json.Marshal(e)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(os.WriteFile(rawPath(2), b, 0o600)).To(Succeed())
+			logs.Reset()
+
+			Expect(run(at(5))).To(Succeed())
+
+			Expect(walkedFrom()).To(Equal([]any{fromWindow}), "the mark is of the entry as it was; log:\n%s", logs.String())
+			Expect(logged("cache holds entries of an older format")).To(HaveExactElements(HaveKeyWithValue("entries", 1.0)))
+			Expect(marks()).To(Equal(map[string]any{"2": "2026-11-17T16:00:00Z"}), "marked again, as the entry now is")
+		})
+
+		It("does not carry a mark through a shorter walk onto an entry written again since, though of an older format again", func() {
+			server.Delete(2)
+			Expect(run(at(5))).To(Succeed())
+			Expect(marks()).To(Equal(markOf2()))
+			e := readJSON(rawPath(2))
+			e["fetchedAt"] = at(400).Format(time.RFC3339)
+			b, err := json.Marshal(e)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(os.WriteFile(rawPath(2), b, 0o600)).To(Succeed())
+			defaultSince = false
+			logs.Reset()
+
+			Expect(run(at(5))).To(Succeed())
+
+			Expect(walkedFrom()).To(Equal([]any{fromDefault}), "an explicit since, not widened")
+			Expect(askedByNumber()).To(HaveLen(1), "only the first walk asked")
+			Expect(marks()).To(BeNil(), "the mark was of the entry as it was")
+		})
+
+		It("neither marks nor names as gone a pull request the walk missed because it was updated during it, and the next walk fetches it", func() {
+			server.Delete(2)
+			age(1)
+			pageSize = 1
+			moved := false
+			server.After(func(_ int, r fetchtest.Request) {
+				if !moved && r.Operation == ghapi.PullRequests.Name {
+					server.Update(1, func(e *fetch.Entry) { e.UpdatedAt = at(300) })
+					moved = true
+				}
+			})
+
+			Expect(run(at(5))).To(Succeed())
+
+			Expect(nestedFor(ghapi.Comments, 1)).To(HaveLen(1), "PR 1 moved past the cursor, and only the first walk fetched it")
+			Expect(askedByNumber()).To(Equal([][]int{{1, 2}}))
+			Expect(marks()).To(Equal(markOf2()))
+			Expect(logged(goneMsg)).To(HaveExactElements(HaveKeyWithValue("numbers", []any{2.0})), "log:\n%s", logs.String())
+			Expect(logged("walk finished")).To(HaveExactElements(HaveKeyWithValue("gone", 1.0)))
+
+			Expect(run(at(5))).To(Succeed())
+			Expect(run(at(5))).To(Succeed())
+
+			Expect(walkedFrom()).To(Equal([]any{fromWindow, fromWindow, fromDefault}), "log:\n%s", logs.String())
+			Expect(entry(1).FormatVersion).To(Equal(fetch.FormatVersion))
+			Expect(entry(1).UpdatedAt).To(Equal(at(300)))
+			Expect(marks()).To(Equal(markOf2()))
+		})
+
+		DescribeTable("fails the run, concluding nothing, when asking GitHub by number fails",
+			func(rep fetchtest.Reply, match types.GomegaMatcher) {
+				server.Delete(2)
+				was, err := os.ReadFile(metaPath())
+				Expect(err).NotTo(HaveOccurred())
+				intercept(func(r fetchtest.Request) *fetchtest.Reply {
+					if r.Operation == ghapi.PullRequestNumbers(0).Name {
+						return &rep
+					}
+					return nil
+				})
+
+				Expect(run(at(5))).To(match)
+
+				Expect(os.ReadFile(metaPath())).To(Equal(was))
+				Expect(logged(goneMsg)).To(BeEmpty())
+				intercept(nil)
+				Expect(run(at(5))).To(Succeed())
+				Expect(walkedFrom()).To(Equal([]any{fromWindow, fromWindow}), "the walk after it goes back again")
+				Expect(marks()).To(Equal(markOf2()))
+			},
+			Entry("a spent rate limit", *rateLimited(), MatchError(isRateLimit, "a *ghapi.RateLimitError")),
+			Entry("a 503 on every attempt", fetchtest.Reply{Status: 503},
+				And(MatchError(ghapi.ErrUnavailable), MatchError(ContainSubstring("asking whether cached pull requests exist")))),
+			Entry("a GraphQL error other than NOT_FOUND", fetchtest.Reply{Status: 200, Body: `{"errors":[{"type":"FORBIDDEN","message":"Resource not accessible by integration"}]}`},
+				MatchError(And(ContainSubstring("asking whether cached pull requests exist"), ContainSubstring("Resource not accessible")))),
+			Entry("a NOT_FOUND of the repository rather than the PR", fetchtest.Reply{Status: 200, Body: `{"data":{"repository":null},"errors":[{"type":"NOT_FOUND","path":["repository"],"message":"Could not resolve to a Repository with the name 'ceph/ceph'."}]}`},
+				MatchError(ContainSubstring("Could not resolve to a Repository"))),
+			Entry("a reply without the PR", fetchtest.Reply{Status: 200, Body: `{"data":{"repository":{}}}`},
+				MatchError(ContainSubstring("no answer for pull request 2 in repository.p0"))),
+		)
+
+		It("asks about 25 pull requests a request, names at most 20 of them in the warning, lowest first, and counts every one", func() {
+			var prs []fetch.Entry
+			for n := 10; n < 36; n++ {
+				prs = append(prs, pr(n, 3, "CLOSED"))
+			}
+			serve(prs...)
+			Expect(run(fetch.WindowStart)).To(Succeed())
+			left := []int{2}
+			for n := 10; n < 36; n++ {
+				age(n)
+				server.Delete(n)
+				left = append(left, n)
+			}
+			var want []any
+			for _, n := range left[:20] {
+				want = append(want, float64(n))
+			}
+			logs.Reset()
+
+			Expect(run(at(5))).To(Succeed())
+
+			Expect(askedByNumber()).To(Equal([][]int{{2}, left[:25], left[25:]}),
+				"the walk that cached them asked about PR 2 alone first")
+			Expect(logged(goneMsg)).To(HaveExactElements(And(
+				HaveKeyWithValue("pull_requests", 27.0),
+				HaveKeyWithValue("numbers", want),
+			)), "PR 2 and the 26 more; log:\n%s", logs.String())
+			Expect(logged("walk finished")).To(HaveExactElements(HaveKeyWithValue("gone", 27.0)))
+		})
+	})
+
 	It("stops at the first PR updated before --since and does not request the next page", func() {
 		serve(pr(5, 5, "CLOSED"), pr(4, 4, "CLOSED"), pr(3, 3, "CLOSED"), pr(2, 2, "CLOSED"), pr(1, 1, "CLOSED"))
 		pageSize = 2

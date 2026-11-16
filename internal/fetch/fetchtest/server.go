@@ -53,9 +53,9 @@ type Reply struct {
 }
 
 // Server answers PullRequests, the connection pages, Counts, SearchCount,
-// AuthorBaselines, CommitNames and CommitNamesPage from the pull requests it
-// holds. Cursors are offsets; lists are ordered by updatedAt then number,
-// both descending. A held pull request's CommitNames are its commits' names
+// AuthorBaselines, CommitNames, CommitNamesPage and PullRequestNumbers from
+// the pull requests it holds. Cursors are offsets; lists are ordered by
+// updatedAt then number, both descending. A held pull request's CommitNames are its commits' names
 // as GitHub keeps them, which only the names queries return.
 type Server struct {
 	*httptest.Server
@@ -227,7 +227,7 @@ func (s *Server) answer(r Request) (data map[string]any, errs []map[string]any, 
 	switch r.Operation {
 	case ghapi.PullRequests.Name, ghapi.Counts.Name, ghapi.SearchCount.Name, ghapi.AuthorBaselines(0).Name:
 		return data, nil, nil
-	case ghapi.CommitNames(0).Name:
+	case ghapi.CommitNames(0).Name, ghapi.PullRequestNumbers(0).Name:
 		for i := 0; ; i++ {
 			n := r.Int("n" + strconv.Itoa(i))
 			if n < 0 {
@@ -292,6 +292,19 @@ func (s *Server) data(r Request) (map[string]any, error) {
 				continue
 			}
 			repo["p"+strconv.Itoa(i)] = map[string]any{"commits": page(nameNodes(pr), 0, r.Int("first"))}
+		}
+	case ghapi.PullRequestNumbers(0).Name:
+		repo := map[string]any{}
+		for i := 0; ; i++ {
+			n := r.Int("n" + strconv.Itoa(i))
+			if n < 0 {
+				return map[string]any{"repository": repo}, nil
+			}
+			if _, ok := s.prs[n]; !ok {
+				repo["p"+strconv.Itoa(i)] = nil
+				continue
+			}
+			repo["p"+strconv.Itoa(i)] = map[string]any{"number": n}
 		}
 	case ghapi.CommitNamesPage.Name:
 		pr, ok := s.prs[r.Int("number")]

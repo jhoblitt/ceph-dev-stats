@@ -157,6 +157,20 @@ var CommitNamesPage = Query{Name: "CommitNamesPage", Text: `query CommitNamesPag
 }
 `}
 
+// PullRequestNumbers asks whether n pull requests exist, in one request,
+// selecting no more than each one's number: alias p<i> is the pull request
+// numbered by variable n<i>, and null, with a NOT_FOUND error, for one
+// GitHub cannot resolve. Variables: owner, name, n0 to n<n-1>.
+func PullRequestNumbers(n int) Query {
+	var vars, fields strings.Builder
+	for i := range n {
+		fmt.Fprintf(&vars, ", $n%d: Int!", i)
+		fmt.Fprintf(&fields, "    p%d: pullRequest(number: $n%d) { number }\n", i, i)
+	}
+	return Query{Name: "PullRequestNumbers", Text: "query PullRequestNumbers($owner: String!, $name: String!" + vars.String() + ") {\n  " +
+		rateLimitFields + "\n  repository(owner: $owner, name: $name) {\n" + fields.String() + "  }\n}\n"}
+}
+
 // AuthorBaselines asks for n search counts in one request: alias a<i>
 // answers the search in variable q<i>.
 func AuthorBaselines(n int) Query {

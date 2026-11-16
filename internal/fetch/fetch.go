@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io/fs"
 	"log/slog"
+	"maps"
 	"path/filepath"
 	"slices"
 	"strconv"
@@ -52,7 +53,8 @@ type Config struct {
 	// SinceIsDefault says Since is the default rather than the operator's
 	// choice. The walk then goes back to the window start instead when the
 	// cache holds entries of an older FormatVersion, so that every one of
-	// them is listed and fetched again.
+	// them is listed and fetched again, but for those meta.json's
+	// GoneEntries marks.
 	SinceIsDefault bool
 	// DefaultSince, when set, is the since a walk without --since would
 	// have used on this run. meta.json's walk_started becomes, through
@@ -87,7 +89,17 @@ type walker struct {
 	unresolved map[int]bool
 	// written holds the pull requests this walk has cached.
 	written map[int]bool
+	// stale is staleEntries as the walk started, and marked meta.json's
+	// GoneEntries then.
+	stale, marked map[int]time.Time
 }
+
+// goneNamed is how many pull requests the warning about GoneEntries names.
+const goneNamed = 20
+
+// numbersPerRequest is how many pull requests one PullRequestNumbers request
+// asks about.
+const numbersPerRequest = 25
 
 // unresolvedError is GitHub failing to resolve one pull request a query
 // asked about, as when it was deleted after it was listed or cached.
@@ -126,7 +138,11 @@ func (w *walker) skipUnresolved(ctx context.Context, u *unresolvedError) {
 // start instead, so that it reaches them all. A pull request that GitHub
 // can no longer resolve when asked about it alone, as when it was deleted
 // after it was listed or cached, is skipped with a warning, its entry left
-// as it was or not written, and counted in the closing log line.
+// as it was or not written, and counted in the closing log line. When a
+// walk from the window start has finished, GitHub is asked by number about
+// each older-format entry it left as it was; one GitHub cannot resolve is
+// marked in meta.json's GoneEntries, no longer sends a default walk back,
+// and is warned of and counted in the closing log line on every run.
 func Run(ctx context.Context, client *ghapi.Client, cfg Config) error {
 	if cfg.PageSize == 0 {
 		cfg.PageSize = DefaultPageSize
@@ -143,13 +159,14 @@ func Run(ctx context.Context, client *ghapi.Client, cfg Config) error {
 	if cfg.WindowStart.IsZero() {
 		cfg.WindowStart = WindowStart
 	}
-	if err := reachStale(ctx, &cfg); err != nil {
-		return err
-	}
 	w := &walker{
-		client: client, cfg: cfg, log: cfg.Logger, started: cfg.Now().UTC(), pageSize: cfg.PageSize,
+		client: client, log: cfg.Logger, started: cfg.Now().UTC(), pageSize: cfg.PageSize,
 		unresolved: map[int]bool{}, written: map[int]bool{},
 	}
+	if err := w.reachStale(ctx, &cfg); err != nil {
+		return err
+	}
+	w.cfg = cfg
 	w.log.InfoContext(ctx, "walk started",
 		slog.Time("since", cfg.Since),
 		slog.String("cache_dir", cfg.CacheDir))
@@ -166,13 +183,20 @@ func Run(ctx context.Context, client *ghapi.Client, cfg Config) error {
 	if err := w.baselines(ctx); err != nil {
 		return err
 	}
+	gone, err := w.goneEntries(ctx)
+	if err != nil {
+		return err
+	}
 	if !cfg.DefaultSince.IsZero() && cfg.Since.After(cfg.DefaultSince) {
 		w.log.WarnContext(ctx, "coverage mark not advanced",
 			slog.String("reason", "the walk started later than the default since, so it may have missed pull requests updated in between"),
 			slog.Time("since", cfg.Since),
 			slog.Time("default_since", cfg.DefaultSince),
 			slog.String("path", filepath.Join(cfg.CacheDir, MetaFile)))
-		w.log.InfoContext(ctx, "walk finished", slog.Int("unresolved", len(w.unresolved)))
+		w.warnGone(ctx, gone)
+		w.log.InfoContext(ctx, "walk finished",
+			slog.Int("unresolved", len(w.unresolved)),
+			slog.Int("gone", len(gone)))
 		return nil
 	}
 	meta, err := w.counts(ctx)
@@ -183,33 +207,140 @@ func Run(ctx context.Context, client *ghapi.Client, cfg Config) error {
 	// but those GitHub can no longer resolve, which no later pass could
 	// name, and store names each deleted account's entry it writes.
 	meta.DeletedAuthorsNamed = true
+	meta.GoneEntries = gone
 	if err := writeJSON(filepath.Join(cfg.CacheDir, MetaFile), meta); err != nil {
 		return err
 	}
+	w.warnGone(ctx, gone)
 	w.log.InfoContext(ctx, "walk finished",
 		slog.Int("opened_in_window", meta.OpenedInWindow),
 		slog.String("opened_in_window_source", string(meta.OpenedInWindowSource)),
 		slog.Int("open", meta.Open),
-		slog.Int("unresolved", len(w.unresolved)))
+		slog.Int("unresolved", len(w.unresolved)),
+		slog.Int("gone", len(gone)))
 	return nil
 }
 
-// reachStale warns when the cache holds entries of an older FormatVersion,
-// and then moves a default cfg.Since back to cfg.WindowStart so that the
-// walk lists, and fetches again, every one of them.
-func reachStale(ctx context.Context, cfg *Config) error {
-	stale, err := staleEntries(cfg.CacheDir)
-	if err != nil || stale == 0 {
+// reachStale sets w.stale and w.marked from cfg's cache. When some stale
+// entries are not marked at the same FetchedAt, it warns, and then moves a
+// default cfg.Since back to cfg.WindowStart so that the walk lists, and
+// fetches again, every one of them.
+func (w *walker) reachStale(ctx context.Context, cfg *Config) error {
+	switch m, err := ReadMeta(cfg.CacheDir); {
+	case err == nil:
+		w.marked = m.GoneEntries
+	case !errors.Is(err, fs.ErrNotExist):
 		return err
+	}
+	stale, err := staleEntries(cfg.CacheDir)
+	if err != nil {
+		return err
+	}
+	w.stale = stale
+	unmarked := 0
+	for n, fetched := range stale {
+		if at, ok := w.marked[n]; !ok || !at.Equal(fetched) {
+			unmarked++
+		}
+	}
+	if unmarked == 0 {
+		return nil
 	}
 	if cfg.SinceIsDefault {
 		cfg.Since = cfg.WindowStart
 	}
-	cfg.Logger.WarnContext(ctx, "cache holds entries of an older format",
-		slog.Int("entries", stale),
+	w.log.WarnContext(ctx, "cache holds entries of an older format",
+		slog.Int("entries", unmarked),
 		slog.Int("format_version", FormatVersion),
 		slog.Time("since", cfg.Since))
 	return nil
+}
+
+// goneEntries is meta.json's GoneEntries after this walk. After a walk from
+// the window start, GitHub is asked by number about every older-format entry
+// the walk did not write, and those it cannot resolve are kept: not being
+// written is no proof, since a pull request updated during the walk can
+// move past the listing's cursor and go unlisted, and one that resolves is
+// left unmarked for the next walk to go back for. A walk that started later
+// concludes nothing of the pull requests it did not list, and keeps those
+// already marked that it did not write.
+func (w *walker) goneEntries(ctx context.Context) (map[int]time.Time, error) {
+	gone := map[int]time.Time{}
+	if w.cfg.Since.After(w.cfg.WindowStart) {
+		for n, fetched := range w.stale {
+			if at, ok := w.marked[n]; ok && !w.written[n] && at.Equal(fetched) {
+				gone[n] = fetched
+			}
+		}
+		return gone, nil
+	}
+	var left []int
+	for n := range w.stale {
+		if !w.written[n] {
+			left = append(left, n)
+		}
+	}
+	if len(left) == 0 {
+		return gone, nil
+	}
+	slices.Sort(left)
+	for batch := range slices.Chunk(left, numbersPerRequest) {
+		missing, err := w.unresolvable(ctx, batch)
+		if err != nil {
+			return nil, err
+		}
+		for _, n := range missing {
+			gone[n] = w.stale[n]
+		}
+	}
+	w.log.InfoContext(ctx, "asked github about older-format entries the walk left",
+		slog.Int("asked", len(left)),
+		slog.Int("not_found", len(gone)))
+	return gone, nil
+}
+
+// unresolvable asks GitHub by number about the pull requests numbers, at
+// most numbersPerRequest of them, and returns those it cannot resolve.
+func (w *walker) unresolvable(ctx context.Context, numbers []int) ([]int, error) {
+	const what = "asking whether cached pull requests exist"
+	vars := map[string]any{"owner": Owner, "name": Name}
+	for i, n := range numbers {
+		vars["n"+strconv.Itoa(i)] = n
+	}
+	var resp struct {
+		Repository map[string]*struct {
+			Number *int `json:"number"`
+		} `json:"repository"`
+	}
+	err := w.client.Do(ctx, ghapi.PullRequestNumbers(len(numbers)), vars, &resp)
+	missing, ok := notFoundAliases(err, len(numbers))
+	if !ok {
+		return nil, fmt.Errorf("%s: %w", what, err)
+	}
+	var out []int
+	for i, n := range numbers {
+		pr := resp.Repository["p"+strconv.Itoa(i)]
+		switch {
+		case missing[i]:
+			out = append(out, n)
+		case pr == nil || pr.Number == nil || *pr.Number != n:
+			return nil, fmt.Errorf("%s: no answer for pull request %d in repository.p%d", what, n, i)
+		}
+	}
+	return out, nil
+}
+
+// warnGone warns of the cached pull requests GitHub no longer has, naming
+// the first goneNamed of them.
+func (w *walker) warnGone(ctx context.Context, gone map[int]time.Time) {
+	if len(gone) == 0 {
+		return
+	}
+	numbers := slices.Sorted(maps.Keys(gone))
+	w.log.WarnContext(ctx, "cache holds older-format entries of pull requests github no longer has",
+		slog.String("reason", "after a finished walk from the window start left their entries as they were, github answered NOT_FOUND when asked for them by number; the entries are kept as they are, and no longer send a default walk back to the window start"),
+		slog.Int("pull_requests", len(numbers)),
+		slog.Any("numbers", numbers[:min(len(numbers), goneNamed)]))
 }
 
 // DefaultSince is where a walk starts when no --since is given: a day

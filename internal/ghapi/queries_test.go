@@ -29,7 +29,7 @@ var _ = Describe("queries", func() {
 	}
 
 	all := func() []ghapi.Query {
-		qs := []ghapi.Query{ghapi.PullRequests, ghapi.Counts, ghapi.SearchCount, ghapi.AuthorBaselines(3), ghapi.CommitNames(3), ghapi.CommitNamesPage}
+		qs := []ghapi.Query{ghapi.PullRequests, ghapi.Counts, ghapi.SearchCount, ghapi.AuthorBaselines(3), ghapi.CommitNames(3), ghapi.CommitNamesPage, ghapi.PullRequestNumbers(3)}
 		for _, c := range ghapi.Connections {
 			qs = append(qs, ghapi.ConnectionPage(c))
 		}
@@ -127,5 +127,12 @@ var _ = Describe("queries", func() {
 		q := ghapi.AuthorBaselines(25)
 		Expect(strings.Count(q.Text, "search(")).To(Equal(25))
 		Expect(q.Text).To(ContainSubstring("a24: search(query: $q24"))
+	})
+
+	It("asks whether each of several pull requests exists by its number alone", func() {
+		q := ghapi.PullRequestNumbers(25)
+		Expect(strings.Count(q.Text, "pullRequest(")).To(Equal(25))
+		Expect(q.Text).To(ContainSubstring("p24: pullRequest(number: $n24) { number }"))
+		Expect(q.Text).NotTo(ContainSubstring("nodes"))
 	})
 })
