@@ -14,6 +14,8 @@ trailer_keys:
   # A misspelt Assisted-by, and Assisted-by with an AI- prefix.
   - assited-by
   - ai-assisted-by
+  # Generated-by, naming the model that generated the commit.
+  - generated-by
 
 # A description or commit-prose line counts only when it matches one of
 # these: a tool's name alone is not a disclosure, and neither is talk
@@ -94,3 +96,5 @@ ignore:
     why: a sentence of the contribution policy, not a use of a tool
   - line: 'As a separate note, PR #71457 contains a lot of technical description and possible solution which I claim is AI generated.'
     why: says another pull request is AI-generated; discloses nothing of its own
+  - line: 'copilot: add GitHub Copilot instructions'
+    why: a commit subject whose area is "copilot", about a file for the tool

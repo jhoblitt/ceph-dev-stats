@@ -11,29 +11,40 @@ components:
   - id: rgw
     name: RGW
     labels: [rgw]
+  # kcephfs marks the kernel client and its mount helper, mount.ceph;
+  # client_lock, work on the client's lock of that name.
   - id: cephfs
     name: CephFS
-    labels: [cephfs]
+    labels: [cephfs, kcephfs, client_lock]
+  # krbd marks the kernel RBD client and its tests.
   - id: rbd
     name: RBD
-    labels: [rbd]
+    labels: [rbd, krbd]
+  # cache-tiering marks the OSD's cache tiers.
   - id: core
     name: Core (RADOS)
-    labels: [core]
+    labels: [core, cache-tiering]
+  # The messenger, src/msg, is RADOS's network layer. Most pull requests
+  # labelled messenger, from 2019 and 2020, carry no core label.
+  - id: messenger
+    name: Messenger
+    labels: [messenger]
   - id: mon
     name: Monitor
     labels: [mon]
   - id: mgr
     name: Manager
     labels: [mgr]
+  # carbon marks the Dashboard's move to the Carbon design system.
   - id: dashboard
     name: Dashboard
-    labels: [dashboard]
+    labels: [dashboard, carbon]
   # SeaStore is Crimson's object store: 27 of its 29 pull requests carry
-  # crimson too. crimson-perf marks Crimson performance work.
+  # crimson too. crimson-perf marks Crimson performance work, and
+  # crimson-replicated-recovery the Crimson OSD work gathered under that name.
   - id: crimson
     name: Crimson
-    labels: [crimson, seastore, crimson-perf]
+    labels: [crimson, seastore, crimson-perf, crimson-replicated-recovery]
   - id: bluestore
     name: BlueStore
     labels: [bluestore]
@@ -103,12 +114,24 @@ process:
   - 'releng-audit-*'
   - 'backport*'
   - 'ui-tested-*'
+  # A release's backport batches: nautilus-batch-1, quincy-batch-1, …
+  - '*-batch-*'
+  # Crimson's backport batches: crimson backport squid, …
+  - 'crimson backport *'
+  # A person's testing queues: <name>-testing-<suffix>.
+  - '*-testing-*'
+  # A backport waiting on a merge to a newer release: waiting-pacific-merge.
+  - 'waiting-*-merge'
   - DNM
   - do-not-merge
   - In Progress
+  - pending-discussion
+  - crimson-has-followup
+  - skip-teuthology
   - ci-approved
   - ready-to-merge
   - TESTED
+  - verified-in-octo-lab
   - RGW-TESTED
   - Rados-Tested
   - core-Tested
@@ -120,16 +143,44 @@ process:
   - jaya-bluestore-testing
   - stale
   - pinned
+  # Closed and discarded, 2014-2016: test pushes, wrong branches, superseded
+  # work.
+  - trash
 
 # Labels that are neither: what kind of change it is beyond its kind, the
 # platform, the dependency-update bot's own labels, a programme.
 other:
   - api-change
   - config-change
+  - api
+  - config
+  - security
   - performance
+  - regression
+  - improvement
+  - improvements
+  - revert
   - FreeBSD
+  - win32
+  - rocky10
+  - ubuntu-24.04
+  - arm64
+  - aarch64
+  - Clang
+  - python3
+  - rdma
   - dependencies
   - javascript
   - python
   - github_actions
   - GSoC / Outreachy
+  # Pull requests from an Open Source Day event, by year: open-source-day,
+  # open-source-day-2023, …
+  - 'open-source-day*'
+  # Red Hat QE's changes to its downstream branches, rh-nautilus and others.
+  - rh-qe-downstream-change
+  # The harness that runs teuthology tasks on a vstart cluster.
+  - vstart_runner
+  # Parts of Ceph with too few pull requests for a filter entry of their own.
+  - exporter
+  - neorados
