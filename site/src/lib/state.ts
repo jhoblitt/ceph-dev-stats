@@ -4,6 +4,7 @@
 //   #/<route>?target=backports&from=2026-06-01&to=2026-08-31&component=rgw&kind=bugfix
 //     &size=11-100&standing=first&disclosure=disclosed&drafts=exclude&reopened=only
 //     &author=<login>&reviewer=<login>&week=2026-06-01&band=lt7&pr=66600&sort=-size
+//     &authorsort=-lines&reviewersort=first&bots=show
 //
 // <route> is empty for the report or `methods`. The target is always written;
 // the period only when it differs from the whole window, so a link to the
@@ -29,7 +30,20 @@ import {
 } from './filters';
 import { findLogin } from './handles';
 import { bucketEnd, bucketStart, stepFor } from './stats/buckets';
-import { DEFAULT_SORT, type Sort, parseSort, sameSort, sortParam } from './sort';
+import {
+  AUTHOR_COLUMNS,
+  type AuthorColumn,
+  DEFAULT_AUTHOR_SORT,
+  DEFAULT_REVIEWER_SORT,
+  DEFAULT_SORT,
+  REVIEWER_COLUMNS,
+  type ReviewerColumn,
+  type Sort,
+  parseSort,
+  parseSortOf,
+  sameSort,
+  sortParam,
+} from './sort';
 
 export const ROUTES = ['report', 'methods'] as const;
 export type Route = (typeof ROUTES)[number];
@@ -48,6 +62,12 @@ export interface AppState {
   pr: number | null;
   /** The PR table's order. */
   sort: Sort;
+  /** The Authors table's order. */
+  authorSort: Sort<AuthorColumn>;
+  /** The Reviewers table's order. */
+  reviewerSort: Sort<ReviewerColumn>;
+  /** Whether the People tables list bot accounts. */
+  bots: boolean;
 }
 
 const KEYS = [
@@ -67,6 +87,9 @@ const KEYS = [
   'band',
   'pr',
   'sort',
+  'authorsort',
+  'reviewersort',
+  'bots',
 ] as const;
 type Key = (typeof KEYS)[number];
 
@@ -108,7 +131,17 @@ export function defaultFilters(meta: Meta): Filters {
 }
 
 export function defaultState(meta: Meta): AppState {
-  return { route: 'report', filters: defaultFilters(meta), week: null, band: null, pr: null, sort: DEFAULT_SORT };
+  return {
+    route: 'report',
+    filters: defaultFilters(meta),
+    week: null,
+    band: null,
+    pr: null,
+    sort: DEFAULT_SORT,
+    authorSort: DEFAULT_AUTHOR_SORT,
+    reviewerSort: DEFAULT_REVIEWER_SORT,
+    bots: false,
+  };
 }
 
 function isRoute(s: string): s is Route {
@@ -170,6 +203,9 @@ export function validateState(raw: RawState, meta: Meta): AppState {
     band: findChoice(AGE_BANDS, p.band),
     pr: p.pr !== undefined && PR_NUMBER.test(p.pr) ? Number(p.pr) : null,
     sort: parseSort(p.sort),
+    authorSort: parseSortOf(AUTHOR_COLUMNS, p.authorsort, DEFAULT_AUTHOR_SORT),
+    reviewerSort: parseSortOf(REVIEWER_COLUMNS, p.reviewersort, DEFAULT_REVIEWER_SORT),
+    bots: p.bots === 'show',
   };
 }
 
@@ -198,6 +234,11 @@ export function hashFromState(state: AppState, meta: Meta): string {
   if (state.band !== null) parts.push(`band=${enc(state.band)}`);
   if (state.pr !== null) parts.push(`pr=${state.pr}`);
   if (!sameSort(state.sort, DEFAULT_SORT)) parts.push(`sort=${enc(sortParam(state.sort))}`);
+  if (!sameSort(state.authorSort, DEFAULT_AUTHOR_SORT)) parts.push(`authorsort=${enc(sortParam(state.authorSort))}`);
+  if (!sameSort(state.reviewerSort, DEFAULT_REVIEWER_SORT)) {
+    parts.push(`reviewersort=${enc(sortParam(state.reviewerSort))}`);
+  }
+  if (state.bots) parts.push('bots=show');
   return `#/${state.route === 'report' ? '' : state.route}?${parts.join('&')}`;
 }
 

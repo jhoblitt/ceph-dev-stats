@@ -36,6 +36,9 @@ const defaults: AppState = {
   band: null,
   pr: null,
   sort: { column: 'opened', descending: true },
+  authorSort: { column: 'opened', descending: true },
+  reviewerSort: { column: 'prs', descending: true },
+  bots: false,
 };
 
 function withFilters(patch: Partial<AppState['filters']>): AppState {
@@ -73,6 +76,9 @@ describe('round trip through the hash', () => {
     band: '30-90',
     pr: 66600,
     sort: { column: 'size', descending: false },
+    authorSort: { column: 'lines', descending: true },
+    reviewerSort: { column: 'response', descending: false },
+    bots: true,
   };
 
   it('preserves every field at once', () => {
@@ -104,6 +110,11 @@ describe('round trip through the hash', () => {
     ['pr', { pr: 64010 }],
     ['sort ascending', { sort: { column: 'title', descending: false } }],
     ['sort descending', { sort: { column: 'reopened', descending: true } }],
+    ['authors by author ascending', { authorSort: { column: 'author', descending: false } }],
+    ['authors by lines changed', { authorSort: { column: 'lines', descending: true } }],
+    ['reviewers by first responses', { reviewerSort: { column: 'first', descending: true } }],
+    ['reviewers by median response ascending', { reviewerSort: { column: 'response', descending: false } }],
+    ['bots shown', { bots: true }],
   ] satisfies [string, Partial<AppState>][])('preserves %s', (_name, patch) => {
     const state = { ...defaults, ...patch };
     expect(stateFromHash(hashFromState(state, meta), meta)).toEqual(state);
@@ -138,6 +149,22 @@ describe('round trip through the hash', () => {
     );
     expect(hashFromState({ ...defaults, sort: { column: 'title', descending: true } }, meta)).toBe('#/?target=main&sort=-title');
     expect(hashFromState({ ...defaults, sort: { column: 'opened', descending: true } }, meta)).toBe('#/?target=main');
+  });
+
+  it("writes the People tables' orders and the bots after the PR table's order, leaving out the defaults", () => {
+    expect(
+      hashFromState(
+        {
+          ...defaults,
+          sort: { column: 'size', descending: true },
+          authorSort: { column: 'lines', descending: true },
+          reviewerSort: { column: 'first', descending: false },
+          bots: true,
+        },
+        meta,
+      ),
+    ).toBe('#/?target=main&sort=-size&authorsort=-lines&reviewersort=first&bots=show');
+    expect(hashFromState({ ...defaults, authorSort: { column: 'opened', descending: true } }, meta)).toBe('#/?target=main');
   });
 
   it('puts the route in the hash path', () => {
@@ -180,6 +207,10 @@ describe('unknown values fall back to their defaults', () => {
     ['week that is not a date', '#/?week=soon'],
     ['sort by an unknown column', '#/?sort=colour'],
     ['sort that is a bare minus', '#/?sort=-'],
+    ['authors sorted by a PR table column', '#/?authorsort=title'],
+    ['authors sorted by a reviewer column', '#/?authorsort=-prs'],
+    ['reviewers sorted by an unknown column', '#/?reviewersort=colour'],
+    ['bots other than show', '#/?bots=yes'],
     ['an unknown parameter', '#/?colour=blue'],
   ])('%s', (_name, hash) => {
     expect(stateFromHash(hash, meta)).toEqual(defaults);

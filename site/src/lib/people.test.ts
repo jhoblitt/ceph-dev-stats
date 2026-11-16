@@ -1,0 +1,180 @@
+import { describe, expect, it } from 'vitest';
+import { AUTHOR_TABLE, REVIEWER_TABLE, type PeopleColumn, medianCell, shownPeople, sortPeople } from './people';
+import { AUTHOR_COLUMNS, REVIEWER_COLUMNS } from './sort';
+import type { AuthorRow, ReviewerRow } from './stats/people';
+import { META } from './stats/testing';
+
+// People 0 fixture-author-e, 1 fixture-author-f, 2 fixture-author-a, 10 fixture-author-j (a bot).
+const authors: AuthorRow[] = [
+  {
+    person: 0,
+    opened: 3,
+    merged: 1,
+    closed: 1,
+    open: 1,
+    commits: 9,
+    additions: 100,
+    deletions: 10,
+    lines: 110,
+    response: { state: 'known', days: 2, prs: 5 },
+    merge: { state: 'tooFew', prs: 3 },
+    disclosed: 0,
+  },
+  {
+    person: 1,
+    opened: 7,
+    merged: 5,
+    closed: 0,
+    open: 2,
+    commits: 7,
+    additions: 5,
+    deletions: 500,
+    lines: 505,
+    response: { state: 'notYetKnown', prs: 6 },
+    merge: { state: 'known', days: 4, prs: 7 },
+    disclosed: 7,
+  },
+  {
+    person: 2,
+    opened: 5,
+    merged: 2,
+    closed: 2,
+    open: 1,
+    commits: 20,
+    additions: 50,
+    deletions: 50,
+    lines: 100,
+    response: { state: 'known', days: 1, prs: 5 },
+    merge: { state: 'notReached', share: 0.4, prs: 5 },
+    disclosed: 1,
+  },
+  {
+    person: 10,
+    opened: 1,
+    merged: 1,
+    closed: 0,
+    open: 0,
+    commits: 1,
+    additions: 1,
+    deletions: 1,
+    lines: 2,
+    response: { state: 'tooFew', prs: 1 },
+    merge: { state: 'tooFew', prs: 1 },
+    disclosed: 0,
+  },
+];
+
+const reviewers: ReviewerRow[] = [
+  { person: 0, prs: 2, approved: 0, changes: 1, commented: 3, comments: 4, firstResponses: 1, response: { state: 'tooFew', prs: 2 } },
+  { person: 1, prs: 9, approved: 6, changes: 0, commented: 1, comments: 2, firstResponses: 5, response: { state: 'known', days: 3, prs: 9 } },
+  { person: 2, prs: 5, approved: 2, changes: 2, commented: 0, comments: 9, firstResponses: 0, response: { state: 'known', days: 0.5, prs: 5 } },
+];
+
+const login = (r: { person: number }) => META.people[r.person];
+
+/** Every value before the first null is in order, and every value from it on is null. */
+function inOrder<R>(sorted: R[], column: PeopleColumn<string, R>, descending: boolean): void {
+  const keys = sorted.map((r) => column.key(r, META));
+  const firstNull = keys.indexOf(null);
+  const known = firstNull === -1 ? keys : keys.slice(0, firstNull);
+  if (firstNull !== -1) expect(keys.slice(firstNull).every((k) => k === null), column.id).toBe(true);
+  const collator = new Intl.Collator('en', { sensitivity: 'base', numeric: true });
+  for (let i = 1; i < known.length; i++) {
+    const a = known[i - 1] as number | string;
+    const b = known[i] as number | string;
+    const c = typeof a === 'string' ? collator.compare(a, String(b)) : a - (b as number);
+    expect(descending ? c >= 0 : c <= 0, `${column.id} ${descending ? 'descending' : 'ascending'} at ${i}`).toBe(true);
+  }
+}
+
+describe('the Authors table', () => {
+  it('has a column for each of its sorts, in order', () => {
+    expect(AUTHOR_TABLE.map((c) => c.id)).toEqual([...AUTHOR_COLUMNS]);
+  });
+
+  it.each(AUTHOR_COLUMNS.flatMap((c) => [[c, false] as const, [c, true] as const]))(
+    'sorts by %s (descending: %s), a missing value last',
+    (id, descending) => {
+      const column = AUTHOR_TABLE.find((c) => c.id === id) as PeopleColumn<string, AuthorRow>;
+      const sorted = sortPeople(authors, AUTHOR_TABLE, { column: id, descending }, META);
+      expect(sorted).toHaveLength(authors.length);
+      inOrder(sorted, column, descending);
+    },
+  );
+
+  it('orders by lines changed, by the handle, and puts a median without a number last both ways', () => {
+    const by = (column: (typeof AUTHOR_COLUMNS)[number], descending: boolean) =>
+      sortPeople(authors, AUTHOR_TABLE, { column, descending }, META).map(login);
+    expect(by('lines', true)).toEqual(['fixture-author-f', 'fixture-author-e', 'fixture-author-a', 'fixture-author-j']);
+    expect(by('author', false)).toEqual(['fixture-author-a', 'fixture-author-e', 'fixture-author-f', 'fixture-author-j']);
+    expect(by('response', false)).toEqual(['fixture-author-a', 'fixture-author-e', 'fixture-author-f', 'fixture-author-j']);
+    expect(by('response', true)).toEqual(['fixture-author-e', 'fixture-author-a', 'fixture-author-f', 'fixture-author-j']);
+    expect(by('merge', true)).toEqual(['fixture-author-f', 'fixture-author-a', 'fixture-author-e', 'fixture-author-j']);
+  });
+
+  it('breaks a tie by the handle', () => {
+    // e and a both have one PR still open.
+    expect(sortPeople(authors, AUTHOR_TABLE, { column: 'open', descending: true }, META).map(login)).toEqual([
+      'fixture-author-f',
+      'fixture-author-a',
+      'fixture-author-e',
+      'fixture-author-j',
+    ]);
+  });
+
+  it('writes the share disclosing with its count', () => {
+    const disclosed = AUTHOR_TABLE.find((c) => c.id === 'disclosed') as PeopleColumn<string, AuthorRow>;
+    expect(disclosed.cell(authors[2] as AuthorRow, META)).toEqual({ text: '20%', detail: '1 of 5 PRs' });
+  });
+});
+
+describe('the Reviewers table', () => {
+  it('has a column for each of its sorts, in order', () => {
+    expect(REVIEWER_TABLE.map((c) => c.id)).toEqual([...REVIEWER_COLUMNS]);
+  });
+
+  it.each(REVIEWER_COLUMNS.flatMap((c) => [[c, false] as const, [c, true] as const]))(
+    'sorts by %s (descending: %s), a missing value last',
+    (id, descending) => {
+      const column = REVIEWER_TABLE.find((c) => c.id === id) as PeopleColumn<string, ReviewerRow>;
+      inOrder(sortPeople(reviewers, REVIEWER_TABLE, { column: id, descending }, META), column, descending);
+    },
+  );
+
+  it('orders by first responses and by the median', () => {
+    const by = (column: (typeof REVIEWER_COLUMNS)[number], descending: boolean) =>
+      sortPeople(reviewers, REVIEWER_TABLE, { column, descending }, META).map(login);
+    expect(by('first', true)).toEqual(['fixture-author-f', 'fixture-author-e', 'fixture-author-a']);
+    expect(by('response', false)).toEqual(['fixture-author-a', 'fixture-author-f', 'fixture-author-e']);
+    expect(by('response', true)).toEqual(['fixture-author-f', 'fixture-author-a', 'fixture-author-e']);
+  });
+});
+
+describe('medianCell', () => {
+  it('writes a known median as a duration, with its count', () => {
+    expect(medianCell({ state: 'known', days: 3, prs: 12 }, 'merged')).toEqual({ text: '3 days', detail: 'median over 12 PRs' });
+  });
+
+  it('says "too few" below five PRs, never a number', () => {
+    expect(medianCell({ state: 'tooFew', prs: 4 }, 'merged')).toEqual({ text: 'too few', detail: '4 PRs, fewer than 5' });
+    expect(medianCell({ state: 'tooFew', prs: 1 }, 'merged').detail).toBe('1 PR, fewer than 5');
+  });
+
+  it('says in words a median not yet known and one not reached', () => {
+    expect(medianCell({ state: 'notYetKnown', prs: 6 }, 'merged')).toEqual({
+      text: 'not yet known',
+      detail: 'median over 6 PRs, too many still waiting',
+    });
+    expect(medianCell({ state: 'notReached', share: 0.4, prs: 5 }, 'merged')).toEqual({
+      text: 'not reached',
+      detail: 'median over 5 PRs, 40% merged',
+    });
+  });
+});
+
+describe('shownPeople', () => {
+  it('leaves out the bot accounts unless asked for them', () => {
+    expect(shownPeople(authors, META, false).map(login)).not.toContain('fixture-author-j');
+    expect(shownPeople(authors, META, true).map(login)).toContain('fixture-author-j');
+  });
+});

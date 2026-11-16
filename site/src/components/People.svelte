@@ -1,0 +1,203 @@
+<!--
+  The people behind the selected PRs: who opened them and what those PRs came
+  to, and who reviewed or commented on them. Each person is named by their
+  GitHub login, linked to their page there, with a control that filters the
+  whole page by them. Bot accounts are left out until asked for.
+-->
+<script lang="ts">
+  import { formatCount } from '../lib/format';
+  import { getPage } from '../lib/page';
+  import { AUTHOR_TABLE, REVIEWER_TABLE, shownPeople, sortPeople } from '../lib/people';
+  import { periodRange } from '../lib/filters';
+  import { openedIn } from '../lib/select';
+  import { keepEqual } from '../lib/memo';
+  import { type AuthorColumn, type ReviewerColumn, type Sort, nextSort, sameSort } from '../lib/sort';
+  import { authorRows, reviewerRows } from '../lib/stats/people';
+  import PeopleTable from './PeopleTable.svelte';
+
+  const { selection, data, view } = getPage();
+  const uid = $props.id();
+
+  const dataset = $derived($view.dataset);
+  const meta = $derived(dataset.meta);
+  const filters = $derived($view.filters);
+  const period = $derived(periodRange(filters));
+  const empty = $derived($view.rows.length === 0);
+
+  const authors = $derived(authorRows(dataset, openedIn(dataset, $view.rows, period)));
+  const reviewers = $derived(reviewerRows(dataset, $view.rows, period));
+
+  // Choosing a PR or another table's order leaves these orders, and so the rows, alone.
+  const keepAuthorSort = keepEqual<Sort<AuthorColumn>>(sameSort);
+  const keepReviewerSort = keepEqual<Sort<ReviewerColumn>>(sameSort);
+  const authorSort = $derived(keepAuthorSort($selection.authorSort));
+  const reviewerSort = $derived(keepReviewerSort($selection.reviewerSort));
+  const bots = $derived($selection.bots);
+
+  const shownAuthors = $derived(sortPeople(shownPeople(authors, meta, bots), AUTHOR_TABLE, authorSort, meta));
+  const shownReviewers = $derived(sortPeople(shownPeople(reviewers, meta, bots), REVIEWER_TABLE, reviewerSort, meta));
+  const hiddenBots = $derived(bots ? 0 : authors.length - shownPeople(authors, meta, false).length);
+  const hiddenReviewerBots = $derived(bots ? 0 : reviewers.length - shownPeople(reviewers, meta, false).length);
+
+  // A count sorts the most first; a handle, from A.
+  const onAuthorSort = (column: AuthorColumn) =>
+    selection.update((s) => ({ ...s, authorSort: nextSort(s.authorSort, column, column !== 'author') }));
+  const onReviewerSort = (column: ReviewerColumn) =>
+    selection.update((s) => ({ ...s, reviewerSort: nextSort(s.reviewerSort, column, column !== 'reviewer') }));
+  const toggle = (which: 'author' | 'reviewer') => (login: string) =>
+    selection.update((s) => {
+      const next = s.filters[which] === login ? null : login;
+      return { ...s, filters: { ...s.filters, ...(which === 'author' ? { author: next } : { reviewer: next }) } };
+    });
+  const setBots = (show: boolean) => selection.update((s) => ({ ...s, bots: show }));
+
+  const count = (n: number, one: string, many: string) => `${n === 0 ? 'no' : formatCount(n)} ${n === 1 ? one : many}`;
+  const hiddenText = (n: number) => (n === 0 ? '' : `, and ${count(n, 'bot account', 'bot accounts')} not shown`);
+</script>
+
+<section id="people" aria-labelledby="people-heading" class:stale={$data.loading}>
+  <h2 id="people-heading">People</h2>
+
+  <label class="bots">
+    <input type="checkbox" checked={bots} onchange={(e) => setBots(e.currentTarget.checked)} />
+    Show bot accounts
+  </label>
+
+  {#if empty}
+    <p class="muted">no PRs match</p>
+  {:else}
+    <div class="part">
+      <h3 id="{uid}-authors">Authors</h3>
+      <p role="status">
+        {count(shownAuthors.length, 'author', 'authors')} of the selected PRs opened in the period{hiddenText(hiddenBots)}
+      </p>
+      {#if shownAuthors.length > 0}
+        <PeopleTable
+          name="Authors"
+          {meta}
+          columns={AUTHOR_TABLE}
+          rows={shownAuthors}
+          sort={authorSort}
+          onsort={onAuthorSort}
+          role="author"
+          active={filters.author}
+          ontoggle={toggle('author')}
+        />
+      {/if}
+      <div class="notes">
+        <p>
+          Commits and lines are those of the pull requests a person opened, because the data does not record who wrote
+          each commit. A backport’s commits and lines count for whoever opened the backport, so the Target filter
+          separates original work on main from backports. Lines are a pull request’s whole diff, lines added plus lines
+          deleted, so one large import can dominate a total.
+        </p>
+        <p>
+          The medians are read from the outcome curves over each person’s pull requests, as the Review section’s are:
+          the time from ready for review to the first human response, and from opening to merging. Each gives the number
+          of pull requests behind it; with fewer than five it says “too few”.
+        </p>
+      </div>
+    </div>
+
+    <div class="part">
+      <h3 id="{uid}-reviewers">Reviewers</h3>
+      <p role="status">
+        {count(shownReviewers.length, 'reviewer', 'reviewers')} of the selected PRs in the period{hiddenText(
+          hiddenReviewerBots,
+        )}
+      </p>
+      {#if shownReviewers.length > 0}
+        <PeopleTable
+          name="Reviewers"
+          {meta}
+          columns={REVIEWER_TABLE}
+          rows={shownReviewers}
+          sort={reviewerSort}
+          onsort={onReviewerSort}
+          role="reviewer"
+          active={filters.reviewer}
+          ontoggle={toggle('reviewer')}
+        />
+      {/if}
+      <div class="notes">
+        <p>
+          Nothing a person does on a pull request they opened is counted here, neither their comments on it nor their
+          replies in its review threads. Reviews and comments are those made during the period on other people’s pull
+          requests, and PRs reviewed or commented on counts each pull request once. A comment is any such comment by a
+          person that is not a bot command, such as a posted test result, so a row with comments and no reviews is
+          someone who commented without reviewing. Someone who reviews without leaving a review or a comment that the
+          data records, such as an approval given by another route, is not seen here.
+        </p>
+        <p>
+          A first response is the first comment or review on a pull request by a person other than its author; comments
+          and reviews from bot accounts, and bot commands, do not count. First responses counts the pull requests whose
+          first response was this person’s; a pull request never made ready for review has none, so it counts for no
+          one. The median is of the time from a pull request
+          being ready for review to this person’s first comment or review on it, while it was open. One made before the
+          pull request was ready counts as no time, and pull requests never made ready for review are left out. With
+          fewer than five pull requests behind it, the median says “too few”.
+        </p>
+      </div>
+    </div>
+  {/if}
+</section>
+
+<style>
+  section {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-4);
+    padding: var(--space-5);
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    transition: opacity 0.2s;
+  }
+
+  h2,
+  h3,
+  p {
+    margin: 0;
+  }
+
+  h3 {
+    font-size: var(--text-lg);
+  }
+
+  .stale {
+    opacity: 0.6;
+  }
+
+  .muted {
+    color: var(--text-muted);
+  }
+
+  .part {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-3);
+  }
+
+  .bots {
+    display: flex;
+    gap: var(--space-2);
+    align-items: center;
+    align-self: flex-start;
+    cursor: pointer;
+  }
+
+  .notes {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+    max-width: 48rem;
+    font-size: var(--text-sm);
+    color: var(--text-muted);
+  }
+
+  @media (width < 720px) {
+    section {
+      padding: var(--space-4);
+    }
+  }
+</style>

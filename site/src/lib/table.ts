@@ -108,15 +108,14 @@ function sortKey(data: Dataset, column: SortColumn, text: RowText): (r: number) 
 const collator = new Intl.Collator('en', { sensitivity: 'base', numeric: true });
 
 /**
- * The rows in the order `sort` gives, a new array; rows that tie keep the
- * order they came in, and a row with no value goes last whichever way the
- * column is sorted. Titles sort once `text` has them.
+ * The items in the order of `key`, a new array; items that tie keep the
+ * order they came in, and an item with no value goes last whichever way.
+ * Strings compare as a reader would, without regard to case.
  */
-export function sortRows(data: Dataset, rows: Uint32Array, sort: Sort, text: RowText = NO_TEXT): Uint32Array {
-  const key = sortKey(data, sort.column, text);
-  const keys = Array.from(rows, (r) => key(r));
-  const order = Array.from(rows, (_, i) => i);
-  const sign = sort.descending ? -1 : 1;
+export function orderBy<T>(items: ArrayLike<T>, key: (item: T) => number | string | null, descending: boolean): T[] {
+  const keys = Array.from(items, (item) => key(item));
+  const order = Array.from(keys, (_, i) => i);
+  const sign = descending ? -1 : 1;
   order.sort((i, j) => {
     const a = keys[i] ?? null;
     const b = keys[j] ?? null;
@@ -124,7 +123,15 @@ export function sortRows(data: Dataset, rows: Uint32Array, sort: Sort, text: Row
     const c = typeof a === 'string' || typeof b === 'string' ? collator.compare(String(a), String(b)) : a - b;
     return sign * c;
   });
-  return Uint32Array.from(order, (i) => rows[i] as number);
+  return order.map((i) => items[i] as T);
+}
+
+/**
+ * The rows in the order `sort` gives, a new array, as `orderBy` orders them.
+ * Titles sort once `text` has them.
+ */
+export function sortRows(data: Dataset, rows: Uint32Array, sort: Sort, text: RowText = NO_TEXT): Uint32Array {
+  return Uint32Array.from(orderBy(rows, sortKey(data, sort.column, text), sort.descending));
 }
 
 /** What decides the table's rows: the filters and any week or band chosen. */

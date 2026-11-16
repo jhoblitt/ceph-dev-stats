@@ -1,4 +1,5 @@
-// Reviewer load as a share, never as names: no view ranks people.
+// Reviewer load as two numbers: how many people reviewed, and the share the
+// busiest of them made. The People section names them.
 
 import type { Dataset } from '../data';
 import type { Period } from './buckets';

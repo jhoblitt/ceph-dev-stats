@@ -38,7 +38,7 @@ async function page(hash: string, files: Record<string, unknown> = {}) {
   return { props: { page: p }, loc };
 }
 
-const SECTIONS = ['Velocity', 'Review', 'LLM use', 'Each PR', 'Timelines', 'Pull requests'];
+const SECTIONS = ['Velocity', 'Review', 'LLM use', 'Each PR', 'Timelines', 'Pull requests', 'People'];
 
 describe('App', () => {
   it('draws every section, and no error, from the whole fixture', async () => {

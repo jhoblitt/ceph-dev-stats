@@ -16,7 +16,7 @@
   import { getPage } from '../lib/page';
   import { periodRange } from '../lib/filters';
   import { openedIn } from '../lib/select';
-  import { type SortColumn, nextSort, sameSort } from '../lib/sort';
+  import { type Sort, type SortColumn, nextSort, sameSort } from '../lib/sort';
   import {
     TABLE_COLUMNS,
     type TableLoad,
@@ -38,7 +38,7 @@
 
   const dataset = $derived($view.dataset);
   // Choosing a PR leaves the order alone, so it is not worked out again.
-  const keepSort = keepEqual(sameSort);
+  const keepSort = keepEqual<Sort>(sameSort);
   const filters = $derived($view.filters);
   const week = $derived($selection.week);
   const band = $derived($selection.band);
