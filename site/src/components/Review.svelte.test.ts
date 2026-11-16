@@ -99,6 +99,8 @@ function sharesAt(curve: Curve, day: number): number[] {
 }
 
 describe('the note on reviews before GitHub recorded them', () => {
+  // Each spec renders the whole app; a loaded CI runner has taken more than the default five seconds.
+  const SLOW = 30_000;
   // The fixture with a window from 2014, so a period can start before reviews were recorded.
   const early = { 'meta.json': { ...rawMeta, window_start: Date.UTC(2014, 0, 1) / 1000 } };
   const NOTE = /^GitHub recorded no reviews of pull requests before 14 Sep 2016, and this period starts earlier/;
@@ -107,7 +109,7 @@ describe('the note on reviews before GitHub recorded them', () => {
   it('is absent over the default period', async () => {
     render(App, (await fixturePage('', early)).props);
     expect(notes()).toEqual([]);
-  });
+  }, SLOW);
 
   it('shows over the review and bot-review figures and both People tables for a period from 2014, linking to the methods section', async () => {
     render(App, (await fixturePage('#/?target=main&from=2014-01-01', early)).props);
@@ -126,7 +128,7 @@ describe('the note on reviews before GitHub recorded them', () => {
         '#/methods?target=main&from=2014-01-01&section=limits-reviews-before-github-recorded-them',
       );
     }
-  });
+  }, SLOW);
 });
 
 describe('Review', () => {
