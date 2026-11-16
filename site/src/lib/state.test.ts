@@ -6,8 +6,11 @@ import {
   type AppState,
   type HashLocation,
   createStateStore,
+  dataDays,
+  defaultFilters,
   defaultState,
   hashFromState,
+  monthsBefore,
   parseHash,
   routeHash,
   sectionHash,
@@ -255,6 +258,82 @@ describe('malformed hashes yield the defaults', () => {
   });
 });
 
+const utc = (iso: string) => Date.parse(iso) / 1000;
+
+/** The fixture's meta with its window and its fetch moved. */
+function metaWith(windowStart: string, fetchedThrough: string) {
+  return parseMeta({ ...rawMeta, window_start: utc(windowStart), fetched_through: utc(fetchedThrough) });
+}
+
+describe('monthsBefore', () => {
+  it.each([
+    ['2026-11-15', '2026-05-15'],
+    ['2026-11-16', '2026-05-16'],
+    ['2026-02-10', '2025-08-10'],
+    ['2026-07-01', '2026-01-01'],
+    // A day the month six back does not have is that month's last.
+    ['2026-08-31', '2026-02-28'],
+    ['2028-08-31', '2028-02-29'],
+    ['2026-03-31', '2025-09-30'],
+    ['2026-12-31', '2026-06-30'],
+  ])('six calendar months before %s is %s', (day, expected) => {
+    expect(monthsBefore(day, 6)).toBe(expected);
+  });
+});
+
+describe('the default period', () => {
+  it('is the six calendar months before the last fetched day', () => {
+    const m = metaWith('2011-01-01T00:00:00Z', '2026-11-15T06:00:00Z');
+    expect(defaultFilters(m)).toMatchObject({ from: '2026-05-15', to: '2026-11-15' });
+  });
+
+  it('never starts before the window does', () => {
+    const m = metaWith('2026-09-01T00:00:00Z', '2026-11-15T06:00:00Z');
+    expect(defaultFilters(m)).toMatchObject({ from: '2026-09-01', to: '2026-11-15' });
+  });
+
+  it("starts a day after the window on today's data, fetched on the 16th", () => {
+    const m = metaWith('2026-05-15T00:00:00Z', '2026-11-16T07:36:00Z');
+    expect(defaultFilters(m)).toMatchObject({ from: '2026-05-16', to: '2026-11-16' });
+  });
+
+  it("is the fixture's whole window, as before", () => {
+    expect(defaultFilters(meta)).toMatchObject({ from: '2026-05-15', to: '2026-11-15' });
+  });
+});
+
+describe('a period reaching back before the default', () => {
+  const long = metaWith('2011-03-04T00:00:00Z', '2026-11-15T06:00:00Z');
+
+  it('bounds the days by the window and the last fetch', () => {
+    expect(dataDays(long)).toEqual({ first: '2011-03-04', last: '2026-11-15' });
+  });
+
+  it('keeps a start between the window and the default', () => {
+    expect(stateFromHash('#/?from=2015-06-01', long).filters).toMatchObject({ from: '2015-06-01', to: '2026-11-15' });
+    expect(stateFromHash('#/?from=2011-03-04&to=2012-01-31', long).filters).toMatchObject({
+      from: '2011-03-04',
+      to: '2012-01-31',
+    });
+  });
+
+  it('defaults a start before the window', () => {
+    expect(stateFromHash('#/?from=2011-03-03', long).filters).toMatchObject({ from: '2026-05-15' });
+  });
+
+  it('writes a start before the default, and leaves the default out', () => {
+    const d = defaultState(long);
+    const back = { ...d, filters: { ...d.filters, from: '2011-03-04' } };
+    expect(hashFromState(back, long)).toBe('#/?target=main&from=2011-03-04');
+    expect(hashFromState(d, long)).toBe('#/?target=main');
+  });
+
+  it('keeps a month bucket over a fifteen-year period', () => {
+    expect(stateFromHash('#/?from=2011-03-04&week=2011-03-01', long).week).toBe('2011-03-01');
+    expect(stateFromHash('#/?from=2011-03-04&week=2011-02-28', long).week).toBeNull();
+  });
+});
+
 describe('a period outside the data', () => {
   it.each([
     ['entirely before the window', '#/?from=2020-01-01&to=2020-02-01'],
@@ -283,24 +362,25 @@ describe('a period outside the data', () => {
 });
 
 describe('the selected bucket over a period beyond 53 weeks', () => {
-  // Fetched through 2027-11-15, so the default period steps by month.
+  // Fetched through 2027-11-15 and starting at the window, so the period steps by month.
   const longMeta = parseMeta({ ...rawMeta, fetched_through: Date.UTC(2027, 10, 15) / 1000 });
+  const from = 'from=2026-05-15';
 
   it('keeps the first of a month', () => {
-    expect(stateFromHash('#/?week=2026-07-01', longMeta).week).toBe('2026-07-01');
+    expect(stateFromHash(`#/?${from}&week=2026-07-01`, longMeta).week).toBe('2026-07-01');
   });
 
   it('keeps a month that overlaps the start of the period', () => {
-    expect(stateFromHash('#/?week=2026-05-01', longMeta).week).toBe('2026-05-01');
+    expect(stateFromHash(`#/?${from}&week=2026-05-01`, longMeta).week).toBe('2026-05-01');
   });
 
   it('drops a Monday that is not the first of a month, which names no bucket', () => {
-    expect(stateFromHash('#/?week=2026-06-08', longMeta).week).toBeNull();
+    expect(stateFromHash(`#/?${from}&week=2026-06-08`, longMeta).week).toBeNull();
   });
 
   it('drops a first of the month when the period steps by week', () => {
-    expect(stateFromHash('#/?to=2027-05-12&week=2026-07-01', longMeta).week).toBeNull();
-    expect(stateFromHash('#/?to=2027-05-12&week=2026-07-06', longMeta).week).toBe('2026-07-06');
+    expect(stateFromHash(`#/?${from}&to=2027-05-12&week=2026-07-01`, longMeta).week).toBeNull();
+    expect(stateFromHash(`#/?${from}&to=2027-05-12&week=2026-07-06`, longMeta).week).toBe('2026-07-06');
   });
 });
 

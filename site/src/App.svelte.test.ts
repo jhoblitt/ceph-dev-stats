@@ -28,13 +28,13 @@ function memoryLocation(initial: string): HashLocation & { hash: () => string } 
   };
 }
 
-async function page(hash: string, files: Record<string, unknown> = {}) {
+async function page(hash: string, files: Record<string, unknown> = {}, m = meta) {
   const loc = memoryLocation(hash);
-  const selection = createStateStore(meta, loc);
-  const loader = new DataLoader(meta, BASE, fixtureFetch(files).fetch);
-  const years = yearsForState(meta, get(selection));
+  const selection = createStateStore(m, loc);
+  const loader = new DataLoader(m, BASE, fixtureFetch(files).fetch);
+  const years = yearsForState(m, get(selection));
   const data = createDataStore(loader, selection, years, await loader.load(years));
-  const p: Page = { meta, selection, data, view: createViewStore(selection, data), loader };
+  const p: Page = { meta: m, selection, data, view: createViewStore(selection, data), loader };
   return { props: { page: p }, loc };
 }
 
@@ -215,5 +215,46 @@ describe('filter bar', () => {
     await fireEvent.change(from);
     expect(from.value).toBe('2026-05-15');
     expect(loc.hash()).toBe('#/?target=main');
+  });
+
+  describe('over a window longer than the default six months', () => {
+    const long = parseMeta({ ...rawMeta, window_start: Date.UTC(2025, 0, 1) / 1000 });
+    const pressed = (name: string) => screen.getByRole('button', { name }).getAttribute('aria-pressed');
+
+    it('keeps a typed start before the default but inside the window', async () => {
+      const { props, loc } = await page('', {}, long);
+      render(App, props);
+      const from = screen.getByLabelText('From') as HTMLInputElement;
+      expect(from.value).toBe('2026-05-15');
+      expect(from.min).toBe('2025-01-01');
+      from.value = '2025-03-01';
+      await fireEvent.change(from);
+      expect(from.value).toBe('2025-03-01');
+      expect(loc.hash()).toBe('#/?target=main&from=2025-03-01');
+    });
+
+    it('moves the period to the whole window and back to the last six months in one choice each', async () => {
+      const { props, loc } = await page('#/?from=2026-07-01&to=2026-08-31', {}, long);
+      render(App, props);
+      expect(pressed('Last 6 months')).toBe('false');
+      expect(pressed('All, from 1 Jan 2025')).toBe('false');
+
+      await fireEvent.click(screen.getByRole('button', { name: 'All, from 1 Jan 2025' }));
+      expect(loc.hash()).toBe('#/?target=main&from=2025-01-01');
+      expect((screen.getByLabelText('From') as HTMLInputElement).value).toBe('2025-01-01');
+      expect((screen.getByLabelText('To') as HTMLInputElement).value).toBe('2026-11-15');
+      expect(pressed('All, from 1 Jan 2025')).toBe('true');
+
+      await fireEvent.click(screen.getByRole('button', { name: 'Last 6 months' }));
+      expect(loc.hash()).toBe('#/?target=main');
+      expect(pressed('Last 6 months')).toBe('true');
+      expect(pressed('All, from 1 Jan 2025')).toBe('false');
+    });
+  });
+
+  it('offers no choice of the whole window when it is no longer than the default', async () => {
+    render(App, (await page('')).props);
+    expect(screen.getByRole('button', { name: 'Last 6 months' }).getAttribute('aria-pressed')).toBe('true');
+    expect(screen.queryByRole('button', { name: /^All, from/ })).toBeNull();
   });
 });
