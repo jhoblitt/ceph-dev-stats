@@ -30,6 +30,10 @@ type Result struct {
 // whose bytes change. It removes every file in dir named as the rollup
 // names its files that files does not hold, such as a year that no longer
 // has records, and leaves every other file alone.
+//
+// The site serves these files to everyone, so whatever the umask, each
+// file in files ends up mode 0644, whether Write rewrote it or found it
+// already holding its bytes, and every directory Write creates is 0755.
 func Write(dir string, files []File) (Result, error) {
 	var res Result
 	keep := map[string]bool{}
@@ -39,7 +43,7 @@ func Write(dir string, files []File) (Result, error) {
 		}
 		keep[f.Name] = true
 	}
-	if err := os.MkdirAll(dir, 0o750); err != nil {
+	if err := mkdirPublic(dir); err != nil {
 		return res, fmt.Errorf("creating %s: %w", dir, err)
 	}
 	for _, f := range files {
@@ -75,7 +79,7 @@ func writeIfChanged(path string, b []byte) (bool, error) {
 	old, err := os.ReadFile(path) //nolint:gosec // the output directory is the operator's to name
 	switch {
 	case err == nil && bytes.Equal(old, b):
-		return false, nil
+		return false, publish(path)
 	case err != nil && !errors.Is(err, fs.ErrNotExist):
 		return false, fmt.Errorf("reading %s: %w", path, err)
 	}
@@ -90,6 +94,9 @@ func writeIfChanged(path string, b []byte) (bool, error) {
 }
 
 func replace(tmp *os.File, b []byte, path string) error {
+	if err := tmp.Chmod(0o644); err != nil {
+		return errors.Join(err, tmp.Close())
+	}
 	if _, err := tmp.Write(b); err != nil {
 		return errors.Join(err, tmp.Close())
 	}
@@ -100,4 +107,45 @@ func replace(tmp *os.File, b []byte, path string) error {
 		return err
 	}
 	return os.Rename(tmp.Name(), path)
+}
+
+// publish sets a file that Write does not rewrite, because it already holds
+// its bytes, to mode 0644.
+func publish(path string) error {
+	fi, err := os.Stat(path)
+	if err != nil {
+		return fmt.Errorf("reading %s: %w", path, err)
+	}
+	if fi.Mode().Perm() == 0o644 {
+		return nil
+	}
+	if err := os.Chmod(path, 0o644); err != nil { //nolint:gosec // the site serves this file to everyone
+		return fmt.Errorf("setting the mode of %s: %w", path, err)
+	}
+	return nil
+}
+
+// mkdirPublic creates dir and its missing parents, each listable by
+// everyone, and leaves the mode of every directory that already exists
+// alone.
+func mkdirPublic(dir string) error {
+	var missing []string
+	for d := dir; ; d = filepath.Dir(d) {
+		if _, err := os.Lstat(d); !errors.Is(err, fs.ErrNotExist) {
+			break
+		}
+		missing = append(missing, d)
+		if filepath.Dir(d) == d {
+			break
+		}
+	}
+	if err := os.MkdirAll(dir, 0o755); err != nil { //nolint:gosec // the site serves this directory to everyone
+		return err
+	}
+	for _, d := range missing {
+		if err := os.Chmod(d, 0o755); err != nil { //nolint:gosec // the site serves this directory to everyone
+			return err
+		}
+	}
+	return nil
 }
