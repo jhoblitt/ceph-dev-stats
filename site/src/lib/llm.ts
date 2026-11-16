@@ -1,4 +1,4 @@
-// The LLM-use section's charts and its side-by-side comparison, from the
+// The AI-use section's charts and its side-by-side comparison, from the
 // statistics library's results. Every figure of the comparison is the
 // library's, over the two sub-selections; nothing here computes one.
 

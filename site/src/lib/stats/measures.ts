@@ -95,7 +95,7 @@ export function mergedWithin(data: Dataset, rows: Uint32Array, days: number): Me
 export interface DisclosureCounts {
   /** The rows counted. */
   rows: number;
-  /** Those disclosing LLM use in any form. */
+  /** Those disclosing AI use in any form. */
   disclosed: number;
   /** Those naming each of meta's `families`, by its index; a PR naming two counts under both. */
   families: number[];

@@ -46,19 +46,19 @@
   const noneOpened = 'no PR was opened in this period';
   const shareNothing = $derived(opened.length === 0 ? noneOpened : null);
   const familyNothing = $derived(
-    opened.length === 0 ? noneOpened : counts.disclosed === 0 ? 'no PR opened in this period discloses LLM use' : null,
+    opened.length === 0 ? noneOpened : counts.disclosed === 0 ? 'no PR opened in this period discloses AI use' : null,
   );
 
   const selected = $derived($selection.week === null ? null : dayStart($selection.week));
   const onbucket = (bucket: number) => selection.update((s) => chooseBucket(s, bucket));
 
-  const shareTitle = $derived(`Share of PRs opened that disclose LLM use, per ${step}`);
+  const shareTitle = $derived(`Share of PRs opened that disclose AI use, per ${step}`);
   const familyTitle = $derived(`Share of PRs opened naming each tool, per ${step}`);
   const compareTitle = `${DISCLOSED} against not disclosed, PRs opened in the period`;
 </script>
 
 <section id="llm" aria-labelledby="llm-heading" class:stale={sectionsStale($view, $data)} aria-busy={sectionsBusy($view, $data) ? 'true' : undefined}>
-  <h2 id="llm-heading">LLM use</h2>
+  <h2 id="llm-heading">AI use</h2>
 
   <ChartFrame
     title={shareTitle}
@@ -132,9 +132,9 @@
   <ReviewsRecordedNote />
 
   <p class="caveat">
-    “{NOT_DISCLOSED}” is not “no LLM”: disclosure is voluntary, and a PR can use an LLM without saying so. The two
+    “{NOT_DISCLOSED}” is not “no AI”: disclosure is voluntary, and a PR can use AI without saying so. The two
     groups also differ in other ways, such as kind, size and author, so a difference between them does not show that
-    LLM use caused it. Disclosed PRs are newer on average, so the share merged at a long horizon is about fewer of them,
+    AI use caused it. Disclosed PRs are newer on average, so the share merged at a long horizon is about fewer of them,
     and only their earliest ones, opened when disclosure was rarer. To compare PRs of like size, use the Size filter.
     <a href={sectionHash($selection, 'disclosure', meta)}>How disclosure is detected, and what it cannot show</a>.
   </p>

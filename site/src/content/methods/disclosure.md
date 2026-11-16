@@ -1,6 +1,6 @@
-# Disclosure of LLM use
+# Disclosure of AI use
 
-A pull request discloses LLM use when its commit messages or its description say so in one of three forms, and the strongest form it uses is the one it is counted under. A tool's name alone is not a disclosure. "Not disclosed" means only that the pull request does not say so; it does not mean that no LLM was used.
+A pull request discloses AI use when its commit messages or its description say so in one of three forms, and the strongest form it uses is the one it is counted under. A tool's name alone is not a disclosure. "Not disclosed" means only that the pull request does not say so; it does not mean that no AI tool was used.
 
 ## The three forms, strongest first
 
@@ -10,7 +10,7 @@ A pull request discloses LLM use when its commit messages or its description say
 
 Each line is judged on its own. A line is first kept as a candidate when it names a tool or uses words such as "assisted by"; the tables then decide whether it counts. A trailer in a commit message counts by its key: a disclosing key or `Co-authored-by`. A line of the description, or of a commit message's text, counts only when it matches a phrase. A candidate that its key or a phrase would otherwise count, or a trailer whose key the table does not list, is listed in the table's `ignore` section, with the reason, when it is judged not to be a disclosure. Comments and reviews are not read for disclosure.
 
-On the data as of {{asOf}}, {{disclosure.disclosed}} of the {{prs.active}} pull requests open at some point in the last {{const.recentMonths}} months disclose LLM use ({{disclosure.share}}).
+On the data as of {{asOf}}, {{disclosure.disclosed}} of the {{prs.active}} pull requests open at some point in the last {{const.recentMonths}} months disclose AI use ({{disclosure.share}}).
 
 {{table.disclosureForms}}
 
@@ -26,8 +26,8 @@ A backport cherry-picks the original commits. When the cherry-pick keeps their m
 
 ## What it cannot show
 
-- **"AI use not disclosed" is not "no LLM".** Disclosure is voluntary, and nothing on this site detects use that is not disclosed.
-- **The two groups are not alike.** Pull requests that disclose and those that do not differ in size, kind, author and age, and either group can be dominated by a few authors. A difference between them does not show that LLM use caused it.
+- **"AI use not disclosed" is not "no AI".** Disclosure is voluntary, and nothing on this site detects use that is not disclosed.
+- **The two groups are not alike.** Pull requests that disclose and those that do not differ in size, kind, author and age, and either group can be dominated by a few authors. A difference between them does not show that AI use caused it.
 - **Ceph's rule was a draft.** Ceph's rule asking for an `Assisted-by` trailer was a draft on 2026-10-12. On 2026-11-15 the tracker listed [the motion on that rule](https://tracker.ceph.com/issues/79745) as "Defeated".
 - **A wrapped sentence can be missed.** Lines are judged one at a time, so a disclosure sentence wrapped across two lines can be missed when neither line counts alone. `data/tools.yaml` holds a phrase written for the second half of such a sentence seen in the data. `cephstats check --report` lists neighbouring candidate lines that match a phrase only when joined, so whoever edits the table can find others.
 - **Wording outside the tables is missed.** A disclosure in words the candidate list or the phrases do not cover is not counted, and one in the description is read as it stands at the last fetch.

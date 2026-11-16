@@ -43,7 +43,7 @@ function atWidth(width: number) {
 const STACKS: Record<string, RegExp[]> = {
   Velocity: [/^PRs opened, merged and closed unmerged, per /, /^Open PRs at the end of each /],
   Review: [/^Review capacity against arrivals, per /, /^Human and bot reviews per /, /^Bot commands per /],
-  'LLM use': [/^Share of PRs opened that disclose LLM use, per /, /^Share of PRs opened naming each tool, per /],
+  'AI use': [/^Share of PRs opened that disclose AI use, per /, /^Share of PRs opened naming each tool, per /],
 };
 
 const num = (el: Element, name: string) => Number(el.getAttribute(name));

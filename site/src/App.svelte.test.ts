@@ -40,7 +40,7 @@ async function page(hash: string, files: Record<string, unknown> = {}, m = meta,
   return { props: { page: p }, loc };
 }
 
-const SECTIONS = ['Velocity', 'Review', 'LLM use', 'Each PR', 'Timelines', 'Pull requests', 'People'];
+const SECTIONS = ['Velocity', 'Review', 'AI use', 'Each PR', 'Timelines', 'Pull requests', 'People'];
 
 describe('App', () => {
   it('draws every section, and no error, from the whole fixture', async () => {
@@ -254,7 +254,7 @@ describe('App', () => {
       holding = true;
       await fireEvent.click(button());
       await waitFor(() => expect(held.length).toBe(1));
-      for (const name of ['Velocity', 'Review', 'LLM use', 'Each PR', 'Pull requests', 'People']) {
+      for (const name of ['Velocity', 'Review', 'AI use', 'Each PR', 'Pull requests', 'People']) {
         const s = screen.getByRole('region', { name });
         expect(s.classList.contains('stale'), name).toBe(true);
         expect(s.getAttribute('aria-busy'), name).toBe('true');

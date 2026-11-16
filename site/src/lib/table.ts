@@ -16,7 +16,7 @@ import { buckets } from './stats/buckets';
 export const TABLE_COLUMNS: readonly { id: SortColumn; label: string }[] = [
   { id: 'number', label: 'PR' },
   { id: 'title', label: 'Title' },
-  { id: 'disclosure', label: 'LLM use' },
+  { id: 'disclosure', label: 'AI use' },
   { id: 'author', label: 'Author' },
   { id: 'opened', label: 'Opened' },
   { id: 'state', label: 'State' },

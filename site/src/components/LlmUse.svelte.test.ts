@@ -21,12 +21,12 @@ const filters = defaultFilters(meta);
 const period = periodRange(filters);
 const rows = select(data, filters);
 
-const SHARE = 'Share of PRs opened that disclose LLM use, per week';
+const SHARE = 'Share of PRs opened that disclose AI use, per week';
 const FAMILIES = 'Share of PRs opened naming each tool, per week';
 const COMPARE = 'AI use disclosed against not disclosed, PRs opened in the period';
 
 function section() {
-  return within(screen.getByRole('region', { name: 'LLM use' }));
+  return within(screen.getByRole('region', { name: 'AI use' }));
 }
 
 function cells(figure: HTMLElement): string[][] {
@@ -80,10 +80,10 @@ describe('LlmUse', () => {
     ]);
   });
 
-  it("says that AI use not disclosed is not no LLM, and links to the methods page's disclosure section", async () => {
+  it("says that AI use not disclosed is not no AI, and links to the methods page's disclosure section", async () => {
     render(App, (await fixturePage('')).props);
-    const region = screen.getByRole('region', { name: 'LLM use' });
-    expect(region.textContent).toContain('“AI use not disclosed” is not “no LLM”');
+    const region = screen.getByRole('region', { name: 'AI use' });
+    expect(region.textContent).toContain('“AI use not disclosed” is not “no AI”');
     expect(region.textContent).toMatch(/kind, size and author/);
     expect(region.textContent).toMatch(/Disclosed PRs are newer on average, so the share merged at a long horizon is about fewer of them,\s+and only their earliest ones, opened when disclosure was rarer\. To compare PRs of like size, use the Size filter\./);
     const link = within(region).getByRole('link', { name: /How disclosure is detected/ });
@@ -100,7 +100,7 @@ describe('LlmUse', () => {
   it('says what is missing when PRs match but none discloses', async () => {
     render(App, (await fixturePage('#/?disclosure=not-disclosed')).props);
     const figure = section().getByRole('figure', { name: FAMILIES });
-    expect(figure.textContent).toContain('no PR opened in this period discloses LLM use');
+    expect(figure.textContent).toContain('no PR opened in this period discloses AI use');
     expect(figure.textContent).not.toContain('no PRs match');
     const compare = section().getByRole('figure', { name: COMPARE });
     expect(cells(compare)[0]?.[1]).toBe('no PRs');

@@ -76,7 +76,7 @@ export const AUTHOR_TABLE: readonly PeopleColumn<AuthorColumn, AuthorRow>[] = [
   { id: 'merge', label: 'Median to merge', key: (r) => medianKey(r.merge), cell: (r) => medianCell(r.merge, 'merged') },
   {
     id: 'disclosed',
-    label: 'Disclosing LLM use',
+    label: 'Disclosing AI use',
     key: (r) => r.disclosed / r.opened,
     cell: (r) => ({ text: formatShare(r.disclosed / r.opened), detail: `${formatCount(r.disclosed)} of ${prs(r.opened)}` }),
   },

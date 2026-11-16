@@ -24,7 +24,7 @@ export interface Dots {
   days: Float64Array;
   /** A `DOT_KIND`. */
   kind: Uint8Array;
-  /** 1 for a PR that discloses LLM use. */
+  /** 1 for a PR that discloses AI use. */
   disclosed: Uint8Array;
   /** Finished PRs with no time of final disposition, which are left off. */
   unknown: number;
@@ -262,7 +262,7 @@ export function describeDots(d: Dots): string {
   const [merged, closed, open] = countKinds(d, null);
   const disclosed = d.disclosed.reduce((a, b) => a + b, 0);
   const out = [
-    `${plural(n, 'PR')} opened in the period: ${formatCount(merged)} merged, ${formatCount(closed)} closed unmerged and ${formatCount(open)} still open; ${formatCount(disclosed)} disclose LLM use.`,
+    `${plural(n, 'PR')} opened in the period: ${formatCount(merged)} merged, ${formatCount(closed)} closed unmerged and ${formatCount(open)} still open; ${formatCount(disclosed)} disclose AI use.`,
   ];
   let lo = Infinity;
   let hi = -Infinity;
@@ -304,7 +304,7 @@ export function dotReadout(data: Dataset, d: Dots, i: number): { title: string; 
       { label: 'opened', value: dayOf(d.created[i] as number), color: null, mark: 'total' },
       { label: KIND_LABELS[d.kind[i] as number] as string, value: formatDays(d.days[i] as number), color: null, mark: 'total' },
       {
-        label: 'LLM use',
+        label: 'AI use',
         value: disclosed ? 'disclosed' : 'not disclosed',
         color: disclosed ? COLOURS.disclosed : COLOURS.notDisclosed,
         mark: 'line',

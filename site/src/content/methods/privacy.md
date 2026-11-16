@@ -4,7 +4,7 @@ The site and its published data identify people by GitHub login, and keep no e-m
 
 ## What the page loads
 
-About people, the page's data holds GitHub logins and the times of what they did: the author of each pull request, and who made each comment and each review by a person other than the author, bot commands aside, each with its time. For a pull request opened by an account since deleted, the author is the name it is credited to from its commits, where they give one, and otherwise GitHub's placeholder `ghost`, shown as "(deleted, unknown)". Beside each pull request's author it holds the author's count of earlier pull requests in ceph/ceph, where known, and whether and how the pull request discloses LLM use, with the tool families named. It also holds the time of every other comment and review, without a login; the SHA, author time and committer time of every commit; and each pull request's title as written. It holds no comment text and none of the lines read for disclosure.
+About people, the page's data holds GitHub logins and the times of what they did: the author of each pull request, and who made each comment and each review by a person other than the author, bot commands aside, each with its time. For a pull request opened by an account since deleted, the author is the name it is credited to from its commits, where they give one, and otherwise GitHub's placeholder `ghost`, shown as "(deleted, unknown)". Beside each pull request's author it holds the author's count of earlier pull requests in ceph/ceph, where known, and whether and how the pull request discloses AI use, with the tool families named. It also holds the time of every other comment and review, without a login; the SHA, author time and committer time of every commit; and each pull request's title as written. It holds no comment text and none of the lines read for disclosure.
 
 ## What the repository's records keep
 
@@ -12,12 +12,12 @@ The page's data is built from records under `data/` in [the site's repository](h
 
 - each account's login and whether GitHub types it as a bot; for a pull request's author, GitHub's author association, such as member or contributor; and in `data/authors.json`, each author's count of pull requests opened before the window's start, {{windowStart}};
 - for a pull request opened by an account since deleted, the one name it is credited to from its commits, as [Deleted accounts](#people-deleted-accounts) says. The other names on its commits are read too, but kept only in the fetch's local cache, and a name that holds an `@` is not kept among them. The cache also keeps every commit message whole, whose `Signed-off-by:` lines give each signer's name and address;
-- each pull request's title, and the lines of its description and commit messages that might disclose LLM use, quoted as written and cut at 200 characters;
+- each pull request's title, and the lines of its description and commit messages that might disclose AI use, quoted as written and cut at 200 characters;
 - the text of every comment that is a single line of at most 80 characters with no `@` in it, whatever it says; this is how a bot command is recognised. The records keep the text of no other comment. The raw responses from GitHub, which keep every comment's text whole, are not published.
 
 ## What is withheld
 
-A line that might disclose LLM use is not kept when:
+A line that might disclose AI use is not kept when:
 
 - it begins with the key of a trailer that names people or links, such as `Signed-off-by:`, `Reviewed-by:`, `Tested-by:`, `Reported-by:`, `Cc:` or `Fixes:`, written as a trailer: once white space of any kind at the ends of the line is trimmed, it starts with the key, in ASCII letters, digits and hyphens and in any case, followed directly by a colon and then by a space, a tab, a form feed, a carriage return or the end of the line. Whatever follows is not kept;
 - it holds an e-mail address other than a known tool's, such as Claude Code's or Copilot's. An `@` counts as part of an address unless it starts a mention, and `%40` counts too;

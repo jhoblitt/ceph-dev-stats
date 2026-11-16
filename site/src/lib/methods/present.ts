@@ -56,7 +56,7 @@ export interface DataFigures {
   /** The People tables over the period with every other filter as the report opens. */
   people: PeopleFigures;
   /**
-   * The PRs the LLM-use section compares over the period with every other
+   * The PRs the AI-use section compares over the period with every other
    * filter as the report opens, those
    * on the development branch opened in the period, split by disclosure.
    */
@@ -282,7 +282,7 @@ export const TABLE_FIGURES: Record<string, Figure<TableModel>> = {
       const pct = (v: number | null | undefined) => (v === null || v === undefined ? '–' : formatShare(v));
       const kinds = [...m.kinds.map((k) => ({ id: k.id, name: k.name })), { id: 'unknown', name: 'Unknown' }];
       return {
-        caption: `The ${formatCount(d.compared)} pull requests on the development branch opened in ${periodOf(d)}, those the LLM-use section compares over those months with every other filter as the report opens, by disclosure, as of ${dayOf(m.fetched_through)}`,
+        caption: `The ${formatCount(d.compared)} pull requests on the development branch opened in ${periodOf(d)}, those the AI-use section compares over those months with every other filter as the report opens, by disclosure, as of ${dayOf(m.fetched_through)}`,
         head: ['', NOT_DISCLOSED, DISCLOSED],
         rows: [
           ['pull requests', ...cells((g) => formatCount(g.prs))],

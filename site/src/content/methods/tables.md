@@ -4,7 +4,7 @@ The judgments that code cannot make are kept in five tables, edited by hand, in 
 
 ## The five tables
 
-- [`data/tools.yaml`](https://github.com/jhoblitt/ceph-dev-stats/blob/main/data/tools.yaml): what counts as a disclosure of LLM use, the trailer keys and the phrases; the tool families; and the candidate lines judged not to be disclosures, each with the reason.
+- [`data/tools.yaml`](https://github.com/jhoblitt/ceph-dev-stats/blob/main/data/tools.yaml): what counts as a disclosure of AI use, the trailer keys and the phrases; the tool families; and the candidate lines judged not to be disclosures, each with the reason.
 - [`data/bots.yaml`](https://github.com/jhoblitt/ceph-dev-stats/blob/main/data/bots.yaml): the automated accounts that GitHub types as people's, each with the reason.
 - [`data/commands.yaml`](https://github.com/jhoblitt/ceph-dev-stats/blob/main/data/commands.yaml): the patterns of the bot commands.
 - [`data/labels.yaml`](https://github.com/jhoblitt/ceph-dev-stats/blob/main/data/labels.yaml): which labels name a component, which a process state, and which neither.
