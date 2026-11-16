@@ -36,6 +36,15 @@ function cells(name: 'Authors' | 'Reviewers'): string[][] {
 
 const people = (name: 'Authors' | 'Reviewers') => cells(name).map((r) => r[1]);
 
+function part(name: 'Authors' | 'Reviewers'): HTMLElement {
+  return section().getByRole('heading', { level: 3, name }).closest('.part') as HTMLElement;
+}
+
+/** The line beneath a table giving the pooled deleted entry's figures, or null. */
+function pooledLine(name: 'Authors' | 'Reviewers'): HTMLElement | null {
+  return within(part(name)).queryByText(/^\(deleted, unknown\), not ranked or counted/);
+}
+
 describe('People', () => {
   it('lists the authors of the selected PRs opened in the period, most PRs opened first, a tie by handle', async () => {
     render(App, (await fixturePage('')).props);
@@ -222,23 +231,56 @@ describe('People with deleted accounts', () => {
     render(App, (await fixturePage('', deletedFiles())).props);
     expect(cells('Authors').map((r) => [r[0], r[1], r[2]])).toEqual([
       ['1', 'fixture-author-d', '2'],
-      ['2', '(deleted, unknown)', '1'],
-      ['3', `(deleted) ${NAME_A}`, '1'],
-      ['4', `(deleted) ${NAME_B}`, '1'],
-      ['5', 'fixture-author-a', '1'],
-      ['6', 'fixture-author-f', '1'],
+      ['2', `(deleted) ${NAME_A}`, '1'],
+      ['3', `(deleted) ${NAME_B}`, '1'],
+      ['4', 'fixture-author-a', '1'],
+      ['5', 'fixture-author-f', '1'],
     ]);
     expect(within(table('Authors')).queryByRole('link', { name: /deleted/ })).toBeNull();
-    const authors = section().getByRole('heading', { level: 3, name: 'Authors' }).closest('.part') as HTMLElement;
-    expect(within(authors).getByRole('status').textContent?.replace(/\s+/g, ' ').trim()).toBe(
-      '6 authors of the selected PRs opened in the period',
+  });
+
+  it('gives the pooled entry no row among the authors, counts it as no author, and gives its figures in a line beneath the table', async () => {
+    render(App, (await fixturePage('', deletedFiles())).props);
+    expect(people('Authors')).not.toContain('(deleted, unknown)');
+    expect(within(part('Authors')).getByRole('status').textContent?.replace(/\s+/g, ' ').trim()).toBe(
+      '5 authors of the selected PRs opened in the period',
+    );
+    const line = pooledLine('Authors') as HTMLElement;
+    expect(table('Authors').compareDocumentPosition(line)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+    expect(line.textContent).toMatch(/^\(deleted, unknown\), not ranked or counted among the authors above, opened 1 PR: /);
+    expect(line.textContent).toContain(`It pools ${POOLED_NOTE}.`);
+  });
+
+  it('gives the pooled entry no row among the reviewers, counts it as no reviewer, and gives its figures in a line beneath the table', async () => {
+    render(App, (await fixturePage('', deletedFiles())).props);
+    expect(people('Reviewers')).not.toContain('(deleted, unknown)');
+    expect(people('Reviewers').filter((p) => p !== undefined && (p.includes(NAME_A) || p.includes(NAME_B)))).toEqual([]);
+    expect(within(part('Reviewers')).getByRole('status').textContent?.replace(/\s+/g, ' ').trim()).toMatch(
+      /^5 reviewers of the selected PRs in the period/,
+    );
+    const line = pooledLine('Reviewers') as HTMLElement;
+    expect(table('Reviewers').compareDocumentPosition(line)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+    expect(line.textContent).toMatch(
+      /^\(deleted, unknown\), not ranked or counted among the reviewers above, reviewed or commented on 1 PR: .*; 1 comment; /,
+    );
+    expect(line.textContent).toContain(`It pools ${POOLED_NOTE}.`);
+    expect(part('Reviewers').querySelector('.notes')?.textContent?.replace(/\s+/g, ' ')).toContain(
+      'A deleted account’s pull requests can be credited to the name on their commits, but its comments and reviews carry no name, so they are all counted for “(deleted, unknown)” beneath the table, and no “(deleted)” author with a name has a row here.',
     );
   });
 
-  it('says beside the pooled row what it pools', async () => {
-    render(App, (await fixturePage('', deletedFiles())).props);
-    const row = within(table('Authors')).getByRole('rowheader', { name: /^\(deleted, unknown\)/ });
-    expect(row.querySelector('.visually-hidden')?.textContent).toBe(` (${POOLED_NOTE})`);
+  it('has no pooled line beneath the Authors table when the pooled entry opened none of the selected PRs', async () => {
+    // Åsa's #66700, on which a deleted account commented.
+    render(App, (await fixturePage(`#/?author=${encodeURIComponent(`ghost:${NAME_B}`)}`, deletedFiles())).props);
+    expect(pooledLine('Authors')).toBeNull();
+    expect(pooledLine('Reviewers')).not.toBeNull();
+  });
+
+  it('has no pooled line beneath the Reviewers table when no deleted account reviewed or commented on the selected PRs', async () => {
+    render(App, (await fixturePage('#/?author=fixture-author-d', deletedFiles())).props);
+    expect(pooledLine('Authors')).toBeNull();
+    expect(pooledLine('Reviewers')).toBeNull();
+    expect(people('Reviewers').length).toBeGreaterThan(0);
   });
 
   it('filters by a named deleted author from their row, the address carrying the name', async () => {
@@ -247,15 +289,5 @@ describe('People with deleted accounts', () => {
     await fireEvent.click(within(table('Authors')).getByRole('button', { name: `Filter by (deleted) ${NAME_B} as author` }));
     expect(loc.hash()).toBe(`#/?target=main&author=${encodeURIComponent(`ghost:${NAME_B}`)}`);
     expect(people('Authors')).toEqual([`(deleted) ${NAME_B}`]);
-  });
-
-  it('lists the pooled entry among the reviewers and no named deleted author, and says why', async () => {
-    render(App, (await fixturePage('', deletedFiles())).props);
-    expect(people('Reviewers')).toContain('(deleted, unknown)');
-    expect(people('Reviewers').filter((p) => p !== undefined && (p.includes(NAME_A) || p.includes(NAME_B)))).toEqual([]);
-    const reviewers = section().getByRole('heading', { level: 3, name: 'Reviewers' }).closest('.part') as HTMLElement;
-    expect(reviewers.querySelector('.notes')?.textContent?.replace(/\s+/g, ' ')).toContain(
-      'A deleted account’s pull requests can be credited to the name on their commits, but its comments and reviews carry no name, so they are all in the “(deleted, unknown)” row, and no “(deleted)” author with a name has a row here.',
-    );
   });
 });

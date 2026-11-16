@@ -365,7 +365,7 @@ describe('reviewsRecordedNote', () => {
 
   it('says that the figures understate review before reviews were recorded, and what first responses count then, for a period from 2014', () => {
     expect(reviewsRecordedNote({ from: '2014-01-01', to: '2026-11-15' })).toBe(
-      'GitHub recorded no reviews of pull requests before 14 Sep 2016, and this period starts earlier. Its figures about reviews, approvals and reviewers understate review before that day, and its first responses count only comments then, not reviews.',
+      'GitHub recorded no reviews of pull requests before 14 Sep 2016, and this period starts earlier. In the Review, AI use and People sections, its figures about reviews, approvals and reviewers understate review before that day, and its first responses count only comments then, not reviews.',
     );
   });
 

@@ -358,12 +358,13 @@ describe('peopleFigures', () => {
     ];
     const events = [{ pr: 0, at: t + 3600, kind: 'comment_other', actor: POOLED }];
 
-    it('counts a named deleted author as one author, the pooled entry as one, and the PRs credited to each', () => {
+    it('counts a named deleted author as one author, the pooled entry as no author or reviewer, and the PRs credited to each', () => {
       const d = dataset(prs, events, parseMeta(deletedMeta()));
       const f = peopleFigures(d, defaultRows(d, DAYS), PERIOD);
-      // Ada, Åsa, the pooled entry and person 0; the pooled entry reviewed.
-      expect(f.authors).toBe(4);
-      expect(f.reviewers).toBe(1);
+      // Ada, Åsa and person 0; only the pooled entry reviewed, and the tables rank it in no row.
+      expect(f.authors).toBe(3);
+      expect(f.reviewers).toBe(0);
+      expect(f.authorsTooFew).toBe(3);
       expect(f.deleted).toEqual({ namedPrs: 3, names: 2, pooledPrs: 2 });
     });
 
@@ -371,7 +372,8 @@ describe('peopleFigures', () => {
       const pooledOnly = prs.map((r) => (r.author === NAMED_A || r.author === NAMED_B ? { ...r, author: POOLED } : r));
       const d = dataset(pooledOnly, events, parseMeta(deletedMeta(false)));
       const f = peopleFigures(d, defaultRows(d, DAYS), PERIOD);
-      expect(f.authors).toBe(2);
+      // Person 0 alone: the pooled entry is not counted.
+      expect(f.authors).toBe(1);
       expect(f.deleted).toEqual({ namedPrs: 0, names: 0, pooledPrs: 5 });
     });
 

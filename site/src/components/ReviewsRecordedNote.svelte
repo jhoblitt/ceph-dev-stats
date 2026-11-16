@@ -1,5 +1,5 @@
 <!--
-  Over or below figures about reviews: that the period reaches back before GitHub
+  Above the report's sections: that the period reaches back before GitHub
   recorded reviews, and where the methods page says what that leaves out.
   Nothing while the period starts after.
 -->

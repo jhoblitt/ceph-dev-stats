@@ -8,6 +8,7 @@
 import { type Dataset, type TableYear, locateEvent, locateRow } from '../data';
 import { DAY, type Filters, developmentBases } from '../filters';
 import { isBot, isNamedDeleted, isPooledDeleted } from '../handles';
+import { shownPeople } from '../people';
 import { openedIn, select } from '../select';
 import { defaultFilters } from '../state';
 import type { Period } from '../stats/buckets';
@@ -218,11 +219,14 @@ export function defaultRows(data: Dataset, days: Days): Uint32Array {
 }
 
 export interface PeopleFigures {
-  /** Rows of the Authors table, bot accounts left out as the page leaves them out by default. */
+  /**
+   * Rows of the Authors table, bot accounts left out as the page leaves them
+   * out by default; the pooled deleted entry, which no row ranks, is not one.
+   */
   authors: number;
   /** Bot accounts among the authors, which the table hides until asked. */
   botAuthors: number;
-  /** Rows of the Reviewers table, bot accounts left out. */
+  /** Rows of the Reviewers table, bot accounts and the pooled deleted entry left out. */
   reviewers: number;
   /** Authors shown whose median to merge rests on too few PRs to be given. */
   authorsTooFew: number;
@@ -248,7 +252,7 @@ export function peopleFigures(data: Dataset, rows: Uint32Array, period: Period):
   const opened = openedIn(data, rows, period);
   const authors = authorRows(data, opened);
   const reviewers = reviewerRows(data, rows, period);
-  const human = <R extends { person: number }>(list: readonly R[]) => list.filter((r) => !isBot(data.meta, r.person));
+  const ranked = <R extends { person: number }>(list: readonly R[]) => shownPeople(list, data.meta, false);
   const p = data.prs;
   let largestLines = 0;
   let total = 0;
@@ -260,10 +264,10 @@ export function peopleFigures(data: Dataset, rows: Uint32Array, period: Period):
   }
   const named = authors.filter((a) => isNamedDeleted(data.meta, a.person));
   return {
-    authors: human(authors).length,
-    botAuthors: authors.length - human(authors).length,
-    reviewers: human(reviewers).length,
-    authorsTooFew: human(authors).filter((a) => a.merge.state === 'tooFew').length,
+    authors: ranked(authors).length,
+    botAuthors: authors.filter((a) => isBot(data.meta, a.person)).length,
+    reviewers: ranked(reviewers).length,
+    authorsTooFew: ranked(authors).filter((a) => a.merge.state === 'tooFew').length,
     largestLines,
     largestShare: total === 0 ? null : largestLines / total,
     deleted: {
