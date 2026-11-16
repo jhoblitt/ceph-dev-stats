@@ -22,7 +22,7 @@
     project,
   } from '../lib/dots';
   import { periodRange } from '../lib/filters';
-  import { getPage } from '../lib/page';
+  import { getPage, sectionsBusy, sectionsStale } from '../lib/page';
   import { openedIn } from '../lib/select';
   import AxisX from './charts/AxisX.svelte';
   import AxisY from './charts/AxisY.svelte';
@@ -160,7 +160,7 @@
   const title = 'Days to merge or close, each PR opened in the period';
 </script>
 
-<section id="dots" aria-labelledby="dots-heading" class:stale={$view.pending} aria-busy={$view.pending && $data.loading ? 'true' : undefined}>
+<section id="dots" aria-labelledby="dots-heading" class:stale={sectionsStale($view, $data)} aria-busy={sectionsBusy($view, $data) ? 'true' : undefined}>
   <h2 id="dots-heading">Each PR</h2>
 
   <ChartFrame

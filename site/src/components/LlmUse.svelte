@@ -13,7 +13,7 @@
     percent,
     shareModel,
   } from '../lib/llm';
-  import { getPage } from '../lib/page';
+  import { getPage, sectionsBusy, sectionsStale } from '../lib/page';
   import { openedIn } from '../lib/select';
   import { chooseBucket } from '../lib/selection';
   import { sectionHash } from '../lib/state';
@@ -75,7 +75,7 @@
   const compareTitle = 'Disclosed against not disclosed, PRs opened in the period';
 </script>
 
-<section id="llm" aria-labelledby="llm-heading" class:stale={$view.pending} aria-busy={$view.pending && $data.loading ? 'true' : undefined}>
+<section id="llm" aria-labelledby="llm-heading" class:stale={sectionsStale($view, $data)} aria-busy={sectionsBusy($view, $data) ? 'true' : undefined}>
   <h2 id="llm-heading">LLM use</h2>
 
   <ChartFrame

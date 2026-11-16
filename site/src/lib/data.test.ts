@@ -7,6 +7,7 @@ import { BASE, fixtureFetch, withEarlierYear } from './__fixtures__/fetch';
 import {
   DataError,
   DataLoader,
+  type Fetch,
   combine,
   loadMeta,
   locateEvent,
@@ -518,6 +519,60 @@ describe('DataLoader', () => {
     const { fetch } = fixtureFetch({ 'table-2026.json': { ...table2026, refs: table2026.refs.slice(1) } });
     const loader = new DataLoader(meta, BASE, fetch);
     await expect(loader.table(2026)).rejects.toThrow(/table-2026\.json.*"refs".*events-2026\.json has 42 events/);
+  });
+
+  /** The fixture with 2025 before it, serving `events-2025.json` only once `reachable` says so. */
+  function flaky() {
+    const { fetch, requested } = twoYearFetch();
+    let reachable = false;
+    const flakyFetch: Fetch = (url) =>
+      url.endsWith('events-2025.json') && !reachable
+        ? (requested.push(url), Promise.resolve(new Response('', { status: 503 })))
+        : fetch(url);
+    return { fetch: flakyFetch, requested, reach: () => (reachable = true) };
+  }
+
+  it('tries a failed year again when it is next asked for', async () => {
+    const f = flaky();
+    const loader = new DataLoader(twoYears, BASE, f.fetch);
+    expect((await loader.load([2025, 2026])).errors.map((e) => e.file)).toEqual(['events-2025.json']);
+    f.reach();
+    const again = await loader.load([2025, 2026]);
+    expect(again.errors).toEqual([]);
+    expect(again.dataset.size).toBe(13);
+    expect(f.requested.filter((u) => u.endsWith('events-2025.json'))).toHaveLength(2);
+    // 2026 loaded the first time and is never fetched again.
+    expect(f.requested.filter((u) => u.endsWith('-2026.json'))).toHaveLength(2);
+  });
+
+  it('shares one fetch between asks for a year made while it is under way, failed or not', async () => {
+    const f = flaky();
+    const loader = new DataLoader(twoYears, BASE, f.fetch);
+    const [a, b] = await Promise.all([loader.load([2025]), loader.load([2025])]);
+    expect(a.errors).toHaveLength(1);
+    expect(b.errors).toHaveLength(1);
+    expect(f.requested.filter((u) => u.endsWith('events-2025.json'))).toHaveLength(1);
+    f.reach();
+    await Promise.all([loader.load([2025]), loader.load([2025, 2026])]);
+    expect(f.requested.filter((u) => u.endsWith('events-2025.json'))).toHaveLength(2);
+  });
+
+  it('says a year that could not be fetched is worth trying again, and fetches it again', async () => {
+    const f = flaky();
+    const loader = new DataLoader(twoYears, BASE, f.fetch);
+    expect((await loader.load([2025])).errors).toEqual([
+      { year: 2025, file: 'events-2025.json', message: 'HTTP 503', retry: true },
+    ]);
+  });
+
+  it('says a year whose file arrived but could not be read is not, and does not fetch it again', async () => {
+    const { fetch, requested } = twoYearFetch({ 'events-2025.json': { ...events2025, kind: [99] } });
+    const loader = new DataLoader(twoYears, BASE, fetch);
+    const first = await loader.load([2025]);
+    expect(first.errors).toHaveLength(1);
+    expect(first.errors[0]).toMatchObject({ year: 2025, file: 'events-2025.json', retry: false });
+    await loader.load([2025]);
+    expect(requested.filter((u) => u.endsWith('events-2025.json'))).toHaveLength(1);
   });
 
   it("reads the earlier year's table", async () => {

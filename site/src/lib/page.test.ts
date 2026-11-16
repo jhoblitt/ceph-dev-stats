@@ -242,6 +242,106 @@ describe('the view while the years a period needs load', () => {
   });
 });
 
+describe('a year that failed to load', () => {
+  /** The stores over the fixture with 2025 before it, `events-2025.json` failing until `reach` is called. */
+  async function flaky() {
+    const { fetch, requested } = fixtureFetch(earlier);
+    let reachable = false;
+    const flakyFetch: Fetch = (url) =>
+      url.endsWith('events-2025.json') && !reachable
+        ? (requested.push(url), Promise.resolve(new Response('', { status: 503 })))
+        : fetch(url);
+    const loader = new DataLoader(meta, BASE, flakyFetch);
+    const selection = writable(recent);
+    const years = yearsForState(meta, recent);
+    const data = createDataStore(loader, selection, years, await loader.load(years));
+    const view = createViewStore(selection, data);
+    selection.set(back);
+    await vi.waitFor(() => expect(get(data).errors).toHaveLength(1));
+    expect(get(view)).toMatchObject({ pending: true, filters: recent.filters });
+    return { selection, data, view, requested, reach: () => (reachable = true) };
+  }
+  const events2025 = (requested: string[]) => requested.filter((u) => u.endsWith('events-2025.json')).length;
+
+  it('is tried again when the reader asks to try again', async () => {
+    const { data, view, requested, reach } = await flaky();
+    reach();
+    data.retry();
+    expect(get(data).loading).toBe(true);
+    await vi.waitFor(() => expect(get(data).loading).toBe(false));
+    expect(get(data).errors).toEqual([]);
+    expect(get(view)).toMatchObject({ pending: false, filters: back.filters });
+    expect(get(view).dataset.size).toBe(13);
+    expect(events2025(requested)).toBe(2);
+  });
+
+  it('is tried again when the reader chooses the period again', async () => {
+    const { selection, data, view, requested, reach } = await flaky();
+    reach();
+    selection.set(recent);
+    selection.set(back);
+    await vi.waitFor(() => expect(get(data).loading).toBe(false));
+    expect(get(data).errors).toEqual([]);
+    expect(get(view)).toMatchObject({ pending: false, filters: back.filters });
+    expect(events2025(requested)).toBe(2);
+  });
+
+  it('says a retry is running, then that it failed again and when, then that it succeeded', async () => {
+    const { data, view, reach } = await flaky();
+    expect(get(data).retry).toEqual({ state: 'none' });
+    data.retry();
+    expect(get(data)).toMatchObject({ loading: true, retry: { state: 'running' } });
+    await vi.waitFor(() => expect(get(data).loading).toBe(false));
+    expect(get(data).retry).toEqual({ state: 'failed', at: expect.any(Number) });
+    expect(get(view).pending).toBe(true);
+
+    reach();
+    data.retry();
+    expect(get(data).retry).toEqual({ state: 'running' });
+    await vi.waitFor(() => expect(get(data).loading).toBe(false));
+    expect(get(data).retry).toEqual({ state: 'succeeded' });
+    expect(get(view).pending).toBe(false);
+  });
+
+  it('forgets a retry once the reader chooses another period', async () => {
+    const { selection, data, reach } = await flaky();
+    reach();
+    data.retry();
+    await vi.waitFor(() => expect(get(data).retry).toEqual({ state: 'succeeded' }));
+    selection.set(recent);
+    expect(get(data).retry).toEqual({ state: 'none' });
+  });
+
+  it('does not try again a year whose file arrived but could not be read', async () => {
+    const { fetch, requested } = fixtureFetch({
+      ...earlier,
+      'events-2025.json': { ...(earlier['events-2025.json'] as object), kind: [99] },
+    });
+    const loader = new DataLoader(meta, BASE, fetch);
+    const selection = writable(recent);
+    const years = yearsForState(meta, recent);
+    const data = createDataStore(loader, selection, years, await loader.load(years));
+    selection.set(back);
+    await vi.waitFor(() => expect(get(data).errors).toHaveLength(1));
+    const before = requested.length;
+    data.retry();
+    expect(get(data)).toMatchObject({ loading: false, retry: { state: 'none' } });
+    expect(requested.length).toBe(before);
+  });
+
+  it('fetches nothing when tried again with every year loaded', async () => {
+    const { fetch, requested } = fixtureFetch(earlier);
+    const loader = new DataLoader(meta, BASE, fetch);
+    const selection = writable(recent);
+    const years = yearsForState(meta, recent);
+    const data = createDataStore(loader, selection, years, await loader.load(years));
+    const before = requested.length;
+    data.retry();
+    expect(get(data).loading).toBe(false);
+    expect(requested.length).toBe(before);
+  });
+});
+
 describe('the view when the report is reached from another route', () => {
   const onMethods: AppState = { ...recent, route: 'methods' };
 

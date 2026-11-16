@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { tick } from 'svelte';
   import DotPlot from '../components/DotPlot.svelte';
   import FilterBar from '../components/FilterBar.svelte';
   import Lanes from '../components/Lanes.svelte';
@@ -28,6 +29,15 @@
   const titles = $derived(sort.column === 'title' ? rowText($view.dataset, loads.map) : undefined);
   const laneOrder = $derived(tableOrder($view.dataset, $view.rows, { filters: $view.filters, week, band }, sort, titles));
   const laneOrderName = $derived(`in the PR table’s order, ${sortWords(sort)}`);
+  // A file that did not arrive may arrive when fetched again; one that
+  // arrived and could not be read is the same file until the data is
+  // published again.
+  const canRetry = $derived($data.errors.some((e) => e.retry));
+  const remedy = $derived(
+    canRetry
+      ? 'Try again fetches what failed.'
+      : 'A file arrived but could not be read, so trying again would not help; reloading the page after the data is next published may.',
+  );
   // The lanes name their rows in the PR table's own words for them.
   // A period whose years failed to load is never shown over the rest: the
   // sections keep the last period that loaded whole, and say which.
@@ -35,9 +45,26 @@
     $data.loading
       ? 'Loading the data for this period…'
       : $view.pending
-        ? `The data for the period chosen could not be loaded, so everything below is still for ${$view.filters.from} to ${$view.filters.to}, with the filters then chosen.`
-        : '',
+        ? `The data for the period chosen could not be loaded, so everything below is still for ${$view.filters.from} to ${$view.filters.to}, with the filters then chosen. ${remedy}`
+        : $data.retry.state === 'succeeded'
+          ? 'All the data for this period has loaded.'
+          : '',
   );
+  const retrying = $derived($data.retry.state === 'running');
+  const clock = (at: number) => new Date(at).toTimeString().slice(0, 5);
+
+  // The alert, and the button the reader pressed in it, go once a retry
+  // brings every year: the focus moves to the line that says so.
+  let statusLine = $state<HTMLElement>();
+  let lastRetry = $data.retry.state;
+  $effect(() => {
+    const now = $data.retry.state;
+    if (now === 'succeeded' && lastRetry !== 'succeeded') void tick().then(() => statusLine?.focus());
+    lastRetry = now;
+  });
+  const tryAgain = () => {
+    if (!retrying) data.retry();
+  };
   const laneRowsName = $derived(
     narrowing($view.dataset, { filters: $view.filters, week, band }) ?? ALL_TABLE_ROWS,
   );
@@ -59,10 +86,18 @@
         <li>{yearHolds(loader.meta, e.year)}: <code>{e.file}</code>, {e.message}</li>
       {/each}
     </ul>
+    {#if $data.retry.state === 'failed'}
+      <p>Tried again at {clock($data.retry.at)}; it still could not be loaded.</p>
+    {/if}
+    {#if canRetry}
+      <button type="button" aria-disabled={retrying ? 'true' : undefined} onclick={tryAgain}>
+        {retrying ? 'Trying again…' : 'Try again'}
+      </button>
+    {/if}
   </div>
 {/if}
 
-<p class="loading" role="status">{status}</p>
+<p class="loading" role="status" tabindex="-1" bind:this={statusLine}>{status}</p>
 
 {#if $view.first}
   <!-- Reached from another route while the period's years load: no section has figures to show yet. -->
@@ -90,6 +125,23 @@
   .load-errors p,
   .load-errors ul {
     margin: 0;
+  }
+
+  .load-errors button {
+    margin-top: var(--space-2);
+    min-height: 2.25rem;
+    padding: var(--space-1) var(--space-3);
+    border: 1px solid var(--border-strong);
+    border-radius: var(--radius-sm);
+    background: var(--page);
+    color: var(--accent);
+    font: inherit;
+    cursor: pointer;
+  }
+
+  .load-errors button:focus-visible {
+    outline: 2px solid var(--focus);
+    outline-offset: 2px;
   }
 
   .waiting {

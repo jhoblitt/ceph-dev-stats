@@ -92,7 +92,7 @@ describe('App', () => {
     await fireEvent.click(screen.getByRole('button', { name: 'All, from 1 Jan 2025' }));
     await waitFor(() => expect(screen.getByRole('alert').textContent).toMatch(/events-2025\.json, HTTP 404/));
     expect(status().textContent).toBe(
-      'The data for the period chosen could not be loaded, so everything below is still for 2026-05-15 to 2026-11-15, with the filters then chosen.',
+      'The data for the period chosen could not be loaded, so everything below is still for 2026-05-15 to 2026-11-15, with the filters then chosen. Try again fetches what failed.',
     );
     expect(table().getByRole('status').textContent).toBe(count);
     expect(screen.getByRole('region', { name: 'Velocity' }).classList.contains('stale')).toBe(true);
@@ -100,6 +100,123 @@ describe('App', () => {
     await fireEvent.click(screen.getByRole('button', { name: 'Last 6 months' }));
     await waitFor(() => expect(status().textContent).toBe(''));
     expect(screen.getByRole('region', { name: 'Velocity' }).classList.contains('stale')).toBe(false);
+  });
+
+  describe('trying a year that failed again', () => {
+    const earlier = withEarlierYear();
+    const twoYears = parseMeta(earlier['meta.json']);
+    const status = () => document.querySelector('p.loading') as HTMLElement;
+    const table = () => within(screen.getByRole('region', { name: /^Pull requests$/ }));
+    const button = () => within(screen.getByRole('alert')).getByRole('button', { name: /^Try(ing)? again/ });
+
+    /** The page with `events-2025.json` failing until `reach`; fetches of it after `hold` wait for `release`. */
+    async function flakyPage() {
+      let reachable = false;
+      let holding = false;
+      const held: (() => void)[] = [];
+      const flaky = (f: Fetch): Fetch => (url) => {
+        if (!url.endsWith('events-2025.json')) return f(url);
+        const answer = () => (reachable ? f(url) : Promise.resolve(new Response('', { status: 503 })));
+        return holding ? new Promise((go) => held.push(() => go(answer()))) : answer();
+      };
+      render(App, (await page('', earlier, twoYears, flaky)).props);
+      await fireEvent.click(screen.getByRole('button', { name: 'All, from 1 Jan 2025' }));
+      await waitFor(() => expect(screen.getByRole('alert').textContent).toMatch(/events-2025\.json, HTTP 503/));
+      return {
+        reach: () => (reachable = true),
+        hold: () => (holding = true),
+        release: () => {
+          holding = false;
+          held.splice(0).forEach((go) => go());
+        },
+        held,
+      };
+    }
+
+    it('says only what trying again does', async () => {
+      await flakyPage();
+      expect(status().textContent).toBe(
+        'The data for the period chosen could not be loaded, so everything below is still for 2026-05-15 to 2026-11-15, with the filters then chosen. Try again fetches what failed.',
+      );
+      expect(button().textContent).toBe('Try again');
+    });
+
+    it('says while it runs that it is trying, keeps the focus there, and says when it failed again', async () => {
+      const f = await flakyPage();
+      button().focus();
+      f.hold();
+      await fireEvent.click(button());
+      await waitFor(() => expect(f.held.length).toBe(1));
+      expect(button().textContent).toBe('Trying again…');
+      expect(button().getAttribute('aria-disabled')).toBe('true');
+      expect(button().hasAttribute('disabled')).toBe(false);
+      expect(document.activeElement).toBe(button());
+      // A second press while it runs asks nothing more.
+      await fireEvent.click(button());
+      expect(f.held.length).toBe(1);
+
+      f.release();
+      await waitFor(() => expect(button().textContent).toBe('Try again'));
+      expect(button().getAttribute('aria-disabled')).toBeNull();
+      expect(document.activeElement).toBe(button());
+      expect(screen.getByRole('alert').textContent).toMatch(/Tried again at \d\d:\d\d; it still could not be loaded\./);
+    });
+
+    it('moves the focus to the status line when it succeeds, which says the data has loaded', async () => {
+      const f = await flakyPage();
+      f.reach();
+      button().focus();
+      await fireEvent.click(button());
+      await waitFor(() => expect(screen.queryByRole('alert')).toBeNull());
+      expect(status().textContent).toBe('All the data for this period has loaded.');
+      expect(status().getAttribute('role')).toBe('status');
+      expect(status().getAttribute('tabindex')).toBe('-1');
+      await waitFor(() => expect(document.activeElement).toBe(status()));
+      expect(table().getByRole('status').textContent).toMatch(/^10 PRs open at some point in the period/);
+    });
+
+    it('offers no try again when the file arrived but could not be read, and says what will help', async () => {
+      const broken = { ...earlier, 'events-2025.json': { ...(earlier['events-2025.json'] as object), kind: [99] } };
+      render(App, (await page('', broken, twoYears)).props);
+      await fireEvent.click(screen.getByRole('button', { name: 'All, from 1 Jan 2025' }));
+      await waitFor(() => expect(screen.getByRole('alert').textContent).toMatch(/events-2025\.json/));
+      expect(within(screen.getByRole('alert')).queryByRole('button')).toBeNull();
+      expect(status().textContent).toBe(
+        'The data for the period chosen could not be loaded, so everything below is still for 2026-05-15 to 2026-11-15, with the filters then chosen. A file arrived but could not be read, so trying again would not help; reloading the page after the data is next published may.',
+      );
+    });
+
+    it('marks every section while it runs after a first load that lost its only year', async () => {
+      let reachable = false;
+      const held: (() => void)[] = [];
+      let holding = false;
+      const flaky = (f: Fetch): Fetch => (url) => {
+        if (!url.endsWith('events-2026.json')) return f(url);
+        const answer = () => (reachable ? f(url) : Promise.resolve(new Response('', { status: 503 })));
+        return holding ? new Promise((go) => held.push(() => go(answer()))) : answer();
+      };
+      render(App, (await page('', {}, meta, flaky)).props);
+      expect(screen.getByRole('alert').textContent).toMatch(/everything below leaves these years out/);
+      const velocity = () => screen.getByRole('region', { name: 'Velocity' });
+      expect(velocity().classList.contains('stale')).toBe(false);
+
+      reachable = true;
+      holding = true;
+      await fireEvent.click(button());
+      await waitFor(() => expect(held.length).toBe(1));
+      for (const name of ['Velocity', 'Review', 'LLM use', 'Each PR', 'Pull requests', 'People']) {
+        const s = screen.getByRole('region', { name });
+        expect(s.classList.contains('stale'), name).toBe(true);
+        expect(s.getAttribute('aria-busy'), name).toBe('true');
+      }
+      expect(screen.getByRole('region', { name: 'Timelines' }).getAttribute('aria-busy')).toBe('true');
+
+      holding = false;
+      held.splice(0).forEach((go) => go());
+      await waitFor(() => expect(screen.queryByRole('alert')).toBeNull());
+      expect(velocity().classList.contains('stale')).toBe(false);
+      expect(velocity().getAttribute('aria-busy')).toBeNull();
+    });
   });
 
   it('shows one PR only when a PR is selected', async () => {

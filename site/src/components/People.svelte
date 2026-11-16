@@ -8,7 +8,7 @@
 -->
 <script lang="ts">
   import { formatCount } from '../lib/format';
-  import { getPage } from '../lib/page';
+  import { getPage, sectionsBusy, sectionsStale } from '../lib/page';
   import { AUTHOR_TABLE, REVIEWER_TABLE, shownPeople, sortPeople } from '../lib/people';
   import { periodRange } from '../lib/filters';
   import { openedIn } from '../lib/select';
@@ -56,7 +56,7 @@
   const hiddenText = (n: number) => (n === 0 ? '' : `, and ${count(n, 'bot account', 'bot accounts')} not shown`);
 </script>
 
-<section id="people" aria-labelledby="people-heading" class:stale={$view.pending} aria-busy={$view.pending && $data.loading ? 'true' : undefined}>
+<section id="people" aria-labelledby="people-heading" class:stale={sectionsStale($view, $data)} aria-busy={sectionsBusy($view, $data) ? 'true' : undefined}>
   <h2 id="people-heading">People</h2>
 
   {#if empty}

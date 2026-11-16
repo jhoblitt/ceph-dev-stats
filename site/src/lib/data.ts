@@ -197,12 +197,15 @@ export interface TableYear {
 export class DataError extends Error {
   readonly file: string;
   readonly detail: string;
+  /** The file did not arrive whole, so fetching it again may help; false when it arrived and could not be read. */
+  readonly retriable: boolean;
 
-  constructor(file: string, detail: string) {
+  constructor(file: string, detail: string, retriable = false) {
     super(`${file}: ${detail}`);
     this.name = 'DataError';
     this.file = file;
     this.detail = detail;
+    this.retriable = retriable;
   }
 }
 
@@ -210,6 +213,8 @@ export interface LoadError {
   year: number;
   file: string;
   message: string;
+  /** Fetching the year again may help: its file did not arrive whole. */
+  retry: boolean;
 }
 
 export interface LoadResult {
@@ -591,13 +596,14 @@ async function fetchJson(fetchFn: Fetch, baseUrl: string, file: string): Promise
   try {
     res = await fetchFn(`${baseUrl}${file}`);
   } catch (err) {
-    throw new DataError(file, `could not be fetched (${err instanceof Error ? err.message : String(err)})`);
+    throw new DataError(file, `could not be fetched (${err instanceof Error ? err.message : String(err)})`, true);
   }
-  if (!res.ok) throw new DataError(file, `HTTP ${res.status}${res.statusText ? ` ${res.statusText}` : ''}`);
+  if (!res.ok) throw new DataError(file, `HTTP ${res.status}${res.statusText ? ` ${res.statusText}` : ''}`, true);
   try {
     return await res.json();
   } catch {
-    throw new DataError(file, 'is not valid JSON');
+    // A body cut short reads as invalid JSON, so this is worth fetching again too.
+    throw new DataError(file, 'is not valid JSON', true);
   }
 }
 
@@ -607,9 +613,10 @@ export async function loadMeta(baseUrl: string, fetchFn: Fetch): Promise<Meta> {
 }
 
 /**
- * Loads year files and tables, each at most once: a year that failed stays
- * failed until the page is reloaded, rather than being fetched again on
- * every change of filter.
+ * Loads year files and tables. A year that loaded is never fetched again,
+ * and asks for a year while it is being fetched share that fetch; a year
+ * whose files could not be fetched is fetched again the next time it is
+ * asked for. A table that failed stays failed until the page is reloaded.
  */
 export class DataLoader {
   readonly meta: Meta;
@@ -633,11 +640,18 @@ export class DataLoader {
       p = Promise.all([
         fetchJson(this.#fetch, this.#baseUrl, prsFile(year)),
         fetchJson(this.#fetch, this.#baseUrl, eventsFile(year)),
-      ]).then(([prs, events]) => {
-        const y = parseYear(year, prs, events, this.meta);
-        this.#done.set(year, y);
-        return y;
-      });
+      ]).then(
+        ([prs, events]) => {
+          const y = parseYear(year, prs, events, this.meta);
+          this.#done.set(year, y);
+          return y;
+        },
+        (err: unknown) => {
+          // A year that failed is fetched again the next time it is asked for.
+          if (this.#years.get(year) === p) this.#years.delete(year);
+          throw err;
+        },
+      );
       this.#years.set(year, p);
     }
     return p;
@@ -660,8 +674,9 @@ export class DataLoader {
     settled.forEach((s, i) => {
       const year = wanted[i] as number;
       if (s.status === 'fulfilled') loaded.push(s.value);
-      else if (s.reason instanceof DataError) errors.push({ year, file: s.reason.file, message: s.reason.detail });
-      else errors.push({ year, file: prsFile(year), message: String(s.reason) });
+      else if (s.reason instanceof DataError) {
+        errors.push({ year, file: s.reason.file, message: s.reason.detail, retry: s.reason.retriable });
+      } else errors.push({ year, file: prsFile(year), message: String(s.reason), retry: false });
     });
     return { dataset: combine(this.meta, loaded), errors };
   }

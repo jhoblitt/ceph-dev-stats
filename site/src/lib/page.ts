@@ -19,12 +19,26 @@ export interface DataState {
   errors: LoadError[];
   /** A load for a changed period is under way; `dataset` is the previous one until it lands. */
   loading: boolean;
+  /**
+   * Where the reader's last "try again" stands, until the period changes:
+   * running, failed again (`at`, epoch milliseconds), or succeeded.
+   */
+  retry: { state: 'none' } | { state: 'running' } | { state: 'failed'; at: number } | { state: 'succeeded' };
+}
+
+export interface DataStore extends Readable<DataState> {
+  /**
+   * Loads the current period's years again when a year failed in a way
+   * fetching again may mend; does nothing while a retry runs.
+   */
+  retry(): void;
+  destroy(): void;
 }
 
 export interface Page {
   meta: Meta;
   selection: StateStore;
-  data: Readable<DataState>;
+  data: DataStore;
   /** The filters and the rows they select; what every section's figures are computed from. */
   view: Readable<View>;
   /** For files fetched on demand, such as a year's table. */
@@ -71,36 +85,65 @@ export function firstYears(meta: Meta, state: AppState): number[] {
  * start drops the years it no longer needs from the dataset, so every figure
  * scans only the period's years; their files stay with the loader. Nothing
  * loads while another route is shown: the report's period loads when the
- * reader comes to it.
+ * reader comes to it. `retry` loads the current period's years again after
+ * one failed to arrive, which fetches again only those that failed.
  */
 export function createDataStore(
   loader: DataLoader,
   selection: Readable<AppState>,
   years: readonly number[],
   initial: LoadResult,
-): Readable<DataState> & { destroy(): void } {
-  const inner = writable<DataState>({ ...initial, loading: false });
+): DataStore {
+  const inner = writable<DataState>({ ...initial, loading: false, retry: { state: 'none' } });
   let shown = years.join(',');
+  let wanted: readonly number[] = years;
   let latest = 0;
-  const stop = selection.subscribe((state) => {
-    if (state.route !== 'report') return;
-    const wanted = yearsForState(loader.meta, state);
-    const key = wanted.join(',');
-    if (key === shown) return;
-    shown = key;
+  const load = (retrying: boolean) => {
     const ticket = ++latest;
+    const after = (errors: readonly LoadError[]): DataState['retry'] =>
+      !retrying ? { state: 'none' } : errors.length > 0 ? { state: 'failed', at: Date.now() } : { state: 'succeeded' };
     // Years another route has loaded through the same loader are taken at once.
     const have = loader.loaded(wanted);
     if (have) {
-      inner.set({ ...have, loading: false });
+      inner.set({ ...have, loading: false, retry: after(have.errors) });
       return;
     }
-    inner.update((d) => ({ ...d, loading: true }));
+    inner.update((d) => ({ ...d, loading: true, retry: retrying ? { state: 'running' } : { state: 'none' } }));
     void loader.load(wanted).then((result) => {
-      if (ticket === latest) inner.set({ ...result, loading: false });
+      if (ticket === latest) inner.set({ ...result, loading: false, retry: after(result.errors) });
     });
+  };
+  const stop = selection.subscribe((state) => {
+    if (state.route !== 'report') return;
+    const next = yearsForState(loader.meta, state);
+    const key = next.join(',');
+    if (key === shown) return;
+    shown = key;
+    wanted = next;
+    load(false);
   });
-  return { subscribe: inner.subscribe, destroy: stop };
+  return {
+    subscribe: inner.subscribe,
+    retry: () => {
+      const d = get(inner);
+      if (d.retry.state !== 'running' && d.errors.some((e) => e.retry)) load(true);
+    },
+    destroy: stop,
+  };
+}
+
+/**
+ * Whether a section's figures are not yet the reader's whole period: the
+ * view keeps a previous period's, or shows what loaded of this one while a
+ * load runs that may bring the years that failed.
+ */
+export function sectionsStale(view: View, data: DataState): boolean {
+  return view.pending || (data.loading && data.errors.length > 0);
+}
+
+/** Whether a section is about to change: it is stale and a load runs. */
+export function sectionsBusy(view: View, data: DataState): boolean {
+  return data.loading && sectionsStale(view, data);
 }
 
 const sameYears = (a: readonly number[], b: readonly number[]) => a.length === b.length && a.every((y, i) => y === b[i]);

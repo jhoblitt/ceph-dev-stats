@@ -12,7 +12,7 @@
   import { yearHolds } from '../lib/data';
   import { keepEqual } from '../lib/memo';
   import { isBot, personHandle } from '../lib/handles';
-  import { getPage } from '../lib/page';
+  import { getPage, sectionsBusy, sectionsStale } from '../lib/page';
   import { periodRange } from '../lib/filters';
   import { openedIn } from '../lib/select';
   import { type Sort, type SortColumn, nextSort, sameSort } from '../lib/sort';
@@ -103,8 +103,8 @@
 <section
   id="table"
   aria-labelledby="table-heading"
-  class:stale={$view.pending}
-  aria-busy={$view.pending && $data.loading ? 'true' : undefined}
+  class:stale={sectionsStale($view, $data)}
+  aria-busy={sectionsBusy($view, $data) ? 'true' : undefined}
   {@attach onScreen(() => (shown = true))}>
   <h2 id="table-heading">Pull requests</h2>
 
