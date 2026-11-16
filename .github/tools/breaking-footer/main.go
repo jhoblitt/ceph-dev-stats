@@ -7,10 +7,20 @@
 //
 // conventional-commits-parser treats any line beginning with BREAKING CHANGE
 // or BREAKING-CHANGE, followed by a colon or whitespace, as a footer — with no
-// regard for whether it is prose. Body text that merely wraps the keyword onto
-// the start of a line makes semantic-release cut a major release, silently.
+// regard for whether it is prose. It tests each line after the header on its
+// own, and matches the keyword in any case, after any run of whitespace, '*'
+// or '|'. Body text that merely wraps the words onto the start of a line makes
+// semantic-release cut a major release, silently.
 // Requiring the subject to carry "!" as well makes the intent explicit, so
 // accidental prose no longer looks like a deliberate break.
+//
+// This copy departs from the template: footerLine is widened to the parser's
+// note rule, the body is every line after the first, and merges are checked.
+// It still flags two kinds of line the parser lets pass, failing closed: a
+// keyword spelled with U+212A KELVIN SIGN, which Go's (?i) folds to K and
+// JavaScript's does not; and any line after one the parser's default field
+// pattern matches (a hyphen, anything, a hyphen, such as "---"), since from
+// there the parser appends every line to that field without testing it.
 package main
 
 import (
@@ -21,8 +31,12 @@ import (
 	"strings"
 )
 
+// jsSpace is JavaScript's \s, which the parser's note pattern uses: Go's \s and
+// [[:space:]] are ASCII only.
+const jsSpace = `\t\n\v\f\r\p{Zs}\x{2028}\x{2029}\x{FEFF}`
+
 var (
-	footerLine   = regexp.MustCompile(`^[[:space:]*]*BREAKING[ -]CHANGE([[:space:]:]|$)`)
+	footerLine   = regexp.MustCompile(`(?i)^[` + jsSpace + `|*]*BREAKING[ -]CHANGE[` + jsSpace + `:]`)
 	declaredHead = regexp.MustCompile(`^[a-zA-Z]+(\([^)]*\))?!:`)
 )
 
@@ -42,8 +56,9 @@ func run(args []string, stdout, stderr *os.File) int {
 		return 2
 	}
 
-	// Merge commits carry generated bodies nobody wrote, and the preset drops them.
-	out, err := git("rev-list", "--no-merges", args[0]+".."+args[1])
+	// Merge commits are checked too: a squash merge's body is built from the
+	// branch's commit messages, and a merge message is as editable as any.
+	out, err := git("rev-list", args[0]+".."+args[1])
 	if err != nil {
 		fmt.Fprintln(stderr, "breaking-footer:", err)
 		return 2
@@ -52,21 +67,20 @@ func run(args []string, stdout, stderr *os.File) int {
 	commits := lines(out)
 	offenders := 0
 	for _, sha := range commits {
-		body, err := git("log", "-1", "--format=%b", sha)
+		message, err := git("log", "-1", "--format=%B", sha)
 		if err != nil {
 			fmt.Fprintln(stderr, "breaking-footer:", err)
 			return 2
 		}
-		offending := offendingLines(body)
+		// The parser trims every leading and trailing CR and LF, then takes the
+		// first line alone as the header, not git's first paragraph, so a line
+		// wrapped under the subject is body to it.
+		subject, body, _ := strings.Cut(strings.Trim(message, "\r\n"), "\n")
+		offending := offendingLines(strings.TrimLeft(body, "\r\n"))
 		if len(offending) == 0 {
 			continue
 		}
 
-		subject, err := git("log", "-1", "--format=%s", sha)
-		if err != nil {
-			fmt.Fprintln(stderr, "breaking-footer:", err)
-			return 2
-		}
 		if declaredHead.MatchString(subject) {
 			continue
 		}
@@ -97,6 +111,9 @@ type bodyLine struct {
 func offendingLines(body string) []bodyLine {
 	var offending []bodyLine
 	for i, text := range strings.Split(body, "\n") {
+		// The parser splits on \r?\n, so a carriage return is not white space
+		// after the keyword to it.
+		text = strings.TrimSuffix(text, "\r")
 		if footerLine.MatchString(text) {
 			offending = append(offending, bodyLine{number: i + 1, text: text})
 		}

@@ -36,6 +36,11 @@ jobs:
       - name: Test with race detector and coverage
         run: go test -race -count=1 -covermode=atomic -coverprofile=coverage.out ./...
 
+      # ./... skips directories whose names begin with a dot, so the vendored
+      # CI tools' specs run only when their path is named.
+      - name: Test the CI tools
+        run: go test -race -count=1 ./.github/tools/...
+
       - name: Upload coverage profile
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
