@@ -127,8 +127,9 @@ type nameNode struct {
 }
 
 // askNames asks for the commits' names of the pull requests numbers, at most
-// namesPerRequest of them, paging each one's commits to the end.
-func (w *walker) askNames(ctx context.Context, numbers []int) (map[int]*CommitNames, error) {
+// namesPerRequest of them, paging each one's commits to the end. Those GitHub
+// can no longer resolve are left out of the names and returned apart.
+func (w *walker) askNames(ctx context.Context, numbers []int) (map[int]*CommitNames, []*unresolvedError, error) {
 	vars := map[string]any{"owner": Owner, "name": Name, "first": w.cfg.NestedPageSize}
 	for i, n := range numbers {
 		vars["n"+strconv.Itoa(i)] = n
@@ -138,18 +139,40 @@ func (w *walker) askNames(ctx context.Context, numbers []int) (map[int]*CommitNa
 			Commits *connection[nameNode] `json:"commits"`
 		} `json:"repository"`
 	}
-	if err := w.client.Do(ctx, ghapi.CommitNames(len(numbers)), vars, &resp); err != nil {
-		return nil, fmt.Errorf("asking commit names: %w", err)
+	err := w.client.Do(ctx, ghapi.CommitNames(len(numbers)), vars, &resp)
+	missing := map[string]bool{}
+	if nf, ok := errors.AsType[*ghapi.NotFoundError](err); ok {
+		for _, p := range nf.Paths {
+			missing[p] = true
+		}
+	}
+	aliased := 0
+	for i := range numbers {
+		if missing[aliasPath(i)] {
+			aliased++
+		}
+	}
+	if err != nil && (len(missing) == 0 || aliased < len(missing)) {
+		return nil, nil, fmt.Errorf("asking commit names: %w", err)
 	}
 	out := make(map[int]*CommitNames, len(numbers))
+	var unresolved []*unresolvedError
 	for i, n := range numbers {
+		if missing[aliasPath(i)] {
+			unresolved = append(unresolved, &unresolvedError{number: n, err: fmt.Errorf("asking commit names of pull request %d: %w", n, err)})
+			continue
+		}
 		var first *connection[nameNode]
 		if pr := resp.Repository["p"+strconv.Itoa(i)]; pr != nil {
 			first = pr.Commits
 		}
 		nodes, err := pages(ctx, w, n, ghapi.Commits, ghapi.CommitNamesPage, first)
+		if u, ok := errors.AsType[*unresolvedError](err); ok {
+			unresolved = append(unresolved, u)
+			continue
+		}
 		if err != nil {
-			return nil, fmt.Errorf("asking commit names: %w", err)
+			return nil, nil, fmt.Errorf("asking commit names: %w", err)
 		}
 		names := &CommitNames{Commits: make([]CommitName, len(nodes))}
 		for j, nd := range nodes {
@@ -159,7 +182,12 @@ func (w *walker) askNames(ctx context.Context, numbers []int) (map[int]*CommitNa
 		}
 		out[n] = names
 	}
-	return out, nil
+	return out, unresolved, nil
+}
+
+// aliasPath is where a CommitNames reply holds its i-th pull request.
+func aliasPath(i int) string {
+	return "repository.p" + strconv.Itoa(i)
 }
 
 // completeNames gives their CommitNames to the cached entries of deleted
@@ -167,7 +195,9 @@ func (w *walker) askNames(ctx context.Context, numbers []int) (map[int]*CommitNa
 // carried names do. It passes over the cache only while meta.json does not
 // record every such entry named. Each batch's entries are rewritten once
 // the whole batch is answered, so an entry is either as it was or complete,
-// and the next run completes whatever a failure left.
+// and the next run completes whatever a failure left. An entry whose pull
+// request GitHub can no longer resolve is left as it was, with a warning:
+// no later pass could name it either.
 func (w *walker) completeNames(ctx context.Context) error {
 	switch m, err := ReadMeta(w.cfg.CacheDir); {
 	case err == nil && m.DeletedAuthorsNamed:
@@ -198,20 +228,30 @@ func (w *walker) completeNames(ctx context.Context) error {
 		}
 	}
 	slices.Sort(todo)
+	completed, unresolved := 0, 0
 	for batch := range slices.Chunk(todo, namesPerRequest) {
-		names, err := w.askNames(ctx, batch)
+		names, lost, err := w.askNames(ctx, batch)
 		if err != nil {
 			return err
 		}
+		for _, u := range lost {
+			w.skipUnresolved(ctx, u)
+		}
+		unresolved += len(lost)
 		for _, n := range batch {
+			named, ok := names[n]
+			if !ok {
+				continue
+			}
 			e, err := ReadEntry(w.cfg.CacheDir, n)
 			if err != nil {
 				return err
 			}
-			e.CommitNames = names[n]
+			e.CommitNames = named
 			if err := writeJSON(entryPath(w.cfg.CacheDir, n), e); err != nil {
 				return err
 			}
+			completed++
 			if e.CommitNames.Name() == "" {
 				unnamed++
 			}
@@ -219,7 +259,8 @@ func (w *walker) completeNames(ctx context.Context) error {
 	}
 	w.log.InfoContext(ctx, "named deleted accounts' pull requests",
 		slog.Int("deleted", deleted),
-		slog.Int("completed", len(todo)),
+		slog.Int("completed", completed),
+		slog.Int("unresolved", unresolved),
 		slog.Int("without_name", unnamed))
 	return nil
 }

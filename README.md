@@ -44,9 +44,10 @@ environment variable.
   whitespace, and it drops a name that holds an `@`, since git's name is
   free text and such a name may be an address. Until the cache's
   `meta.json` records that every such pull request in the cache has them,
-  `fetch` looks through the cache for those cached without them, as a
-  cache written before this was, and reads their names too; a walk that
-  writes `meta.json` then records it.
+  or that GitHub can no longer resolve it, `fetch` looks through the cache
+  for those cached without them, as a cache written before this was, and
+  reads their names too, skipping with a warning any that GitHub can no
+  longer resolve; a walk that writes `meta.json` then records it.
 - `extract` turns the cached pull requests into the committed records under
   `data/`, rewriting only the files whose content changes. Every run
   re-derives each record from its cached entry in the current format.

@@ -115,6 +115,14 @@ func (s *Server) SetCreatedAt(t time.Time) {
 	s.createdAt = t
 }
 
+// Delete drops the held pull request number, so that the server answers a
+// later question about it as GitHub does about one it cannot resolve.
+func (s *Server) Delete(number int) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	delete(s.prs, number)
+}
+
 // Update applies f to the held pull request number.
 func (s *Server) Update(number int, f func(*fetch.Entry)) {
 	s.mu.Lock()
@@ -174,13 +182,17 @@ func (s *Server) serve(w http.ResponseWriter, r *http.Request) {
 	}
 
 	s.mu.Lock()
-	data, err := s.answer(req)
+	data, errs, err := s.answer(req)
 	s.mu.Unlock()
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-	reply, err := json.Marshal(map[string]any{"data": data})
+	out := map[string]any{"data": data}
+	if len(errs) > 0 {
+		out["errors"] = errs
+	}
+	reply, err := json.Marshal(out)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -195,7 +207,46 @@ func (s *Server) serve(w http.ResponseWriter, r *http.Request) {
 
 var authorLogin = regexp.MustCompile(`author:(\S+)`)
 
-func (s *Server) answer(r Request) (map[string]any, error) {
+// notFound is GitHub's error for a pull request number it cannot resolve,
+// at path in the reply, whose data holds null there.
+func notFound(number int, path ...string) map[string]any {
+	return map[string]any{
+		"type":    "NOT_FOUND",
+		"path":    path,
+		"message": fmt.Sprintf("Could not resolve to a PullRequest with the number of %d.", number),
+	}
+}
+
+// answer returns the reply's data and its GraphQL errors, or an error for a
+// request the server cannot answer at all.
+func (s *Server) answer(r Request) (data map[string]any, errs []map[string]any, err error) {
+	data, err = s.data(r)
+	if err != nil {
+		return nil, nil, err
+	}
+	switch r.Operation {
+	case ghapi.PullRequests.Name, ghapi.Counts.Name, ghapi.SearchCount.Name, ghapi.AuthorBaselines(0).Name:
+		return data, nil, nil
+	case ghapi.CommitNames(0).Name:
+		for i := 0; ; i++ {
+			n := r.Int("n" + strconv.Itoa(i))
+			if n < 0 {
+				return data, errs, nil
+			}
+			if _, ok := s.prs[n]; !ok {
+				errs = append(errs, notFound(n, "repository", "p"+strconv.Itoa(i)))
+			}
+		}
+	}
+	if _, ok := s.prs[r.Int("number")]; !ok {
+		return data, []map[string]any{notFound(r.Int("number"), "repository", "pullRequest")}, nil
+	}
+	return data, nil, nil
+}
+
+// data returns the reply's data, in which a pull request the server does not
+// hold is null.
+func (s *Server) data(r Request) (map[string]any, error) {
 	switch r.Operation {
 	case ghapi.PullRequests.Name:
 		return s.list(r)
@@ -237,14 +288,15 @@ func (s *Server) answer(r Request) (map[string]any, error) {
 			}
 			pr, ok := s.prs[n]
 			if !ok {
-				return nil, fmt.Errorf("no pull request %d", n)
+				repo["p"+strconv.Itoa(i)] = nil
+				continue
 			}
 			repo["p"+strconv.Itoa(i)] = map[string]any{"commits": page(nameNodes(pr), 0, r.Int("first"))}
 		}
 	case ghapi.CommitNamesPage.Name:
 		pr, ok := s.prs[r.Int("number")]
 		if !ok {
-			return nil, fmt.Errorf("no pull request %d", r.Int("number"))
+			return map[string]any{"repository": map[string]any{"pullRequest": nil}}, nil
 		}
 		start, err := offset(r.String("after"))
 		if err != nil {
@@ -263,7 +315,7 @@ func (s *Server) answer(r Request) (map[string]any, error) {
 	c := ghapi.Connections[i]
 	pr, ok := s.prs[r.Int("number")]
 	if !ok {
-		return nil, fmt.Errorf("no pull request %d", r.Int("number"))
+		return map[string]any{"repository": map[string]any{"pullRequest": nil}}, nil
 	}
 	start, err := offset(r.String("after"))
 	if err != nil {

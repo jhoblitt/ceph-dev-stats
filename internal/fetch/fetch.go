@@ -78,6 +78,31 @@ type walker struct {
 	log      *slog.Logger
 	started  time.Time
 	pageSize int
+	// unresolved holds the pull requests skipped because GitHub could no
+	// longer resolve them; the walk and the names pass can both meet one.
+	unresolved map[int]bool
+}
+
+// unresolvedError is GitHub failing to resolve one pull request a query
+// asked about, as when it was deleted after it was listed or cached.
+type unresolvedError struct {
+	number int
+	err    error
+}
+
+func (e *unresolvedError) Error() string { return e.err.Error() }
+func (e *unresolvedError) Unwrap() error { return e.err }
+
+// skipUnresolved warns that u's pull request is skipped, and counts it, once
+// in the walk.
+func (w *walker) skipUnresolved(ctx context.Context, u *unresolvedError) {
+	if w.unresolved[u.number] {
+		return
+	}
+	w.unresolved[u.number] = true
+	w.log.WarnContext(ctx, "skipping a pull request github cannot resolve",
+		slog.Int("number", u.number),
+		slog.String("error", u.Error()))
 }
 
 // Run walks pull requests into cfg.CacheDir in three phases: those updated
@@ -91,7 +116,10 @@ type walker struct {
 // updatedAt, in the current FormatVersion, is not fetched again, so a run
 // that stops early can be repeated. While the cache holds entries of an
 // older FormatVersion, a walk from a default since starts at the window
-// start instead, so that it reaches them all.
+// start instead, so that it reaches them all. A pull request that GitHub
+// can no longer resolve when asked about it alone, as when it was deleted
+// after it was listed or cached, is skipped with a warning, its entry left
+// as it was or not written, and counted in the closing log line.
 func Run(ctx context.Context, client *ghapi.Client, cfg Config) error {
 	if cfg.PageSize == 0 {
 		cfg.PageSize = DefaultPageSize
@@ -111,7 +139,7 @@ func Run(ctx context.Context, client *ghapi.Client, cfg Config) error {
 	if err := reachStale(ctx, &cfg); err != nil {
 		return err
 	}
-	w := &walker{client: client, cfg: cfg, log: cfg.Logger, started: cfg.Now().UTC(), pageSize: cfg.PageSize}
+	w := &walker{client: client, cfg: cfg, log: cfg.Logger, started: cfg.Now().UTC(), pageSize: cfg.PageSize, unresolved: map[int]bool{}}
 	w.log.InfoContext(ctx, "walk started",
 		slog.Time("since", cfg.Since),
 		slog.String("cache_dir", cfg.CacheDir))
@@ -134,15 +162,16 @@ func Run(ctx context.Context, client *ghapi.Client, cfg Config) error {
 			slog.Time("since", cfg.Since),
 			slog.Time("default_since", cfg.DefaultSince),
 			slog.String("path", filepath.Join(cfg.CacheDir, MetaFile)))
-		w.log.InfoContext(ctx, "walk finished")
+		w.log.InfoContext(ctx, "walk finished", slog.Int("unresolved", len(w.unresolved)))
 		return nil
 	}
 	meta, err := w.counts(ctx)
 	if err != nil {
 		return err
 	}
-	// completeNames named every entry an earlier walk left without names,
-	// and store names each deleted account's entry it writes.
+	// completeNames named every entry an earlier walk left without names
+	// but those GitHub can no longer resolve, which no later pass could
+	// name, and store names each deleted account's entry it writes.
 	meta.DeletedAuthorsNamed = true
 	if err := writeJSON(filepath.Join(cfg.CacheDir, MetaFile), meta); err != nil {
 		return err
@@ -150,7 +179,8 @@ func Run(ctx context.Context, client *ghapi.Client, cfg Config) error {
 	w.log.InfoContext(ctx, "walk finished",
 		slog.Int("opened_in_window", meta.OpenedInWindow),
 		slog.String("opened_in_window_source", string(meta.OpenedInWindowSource)),
-		slog.Int("open", meta.Open))
+		slog.Int("open", meta.Open),
+		slog.Int("unresolved", len(w.unresolved)))
 	return nil
 }
 
@@ -261,13 +291,12 @@ func (w *walker) walk(ctx context.Context, phase string, states []string, since 
 					slog.Int("skipped", skipped))
 				return nil
 			}
-			stored, err := w.store(ctx, n)
-			if err != nil {
+			switch o, err := w.store(ctx, n); {
+			case err != nil:
 				return err
-			}
-			if stored {
+			case o == stored:
 				fetched++
-			} else {
+			case o == kept:
 				skipped++
 			}
 		}
@@ -323,25 +352,57 @@ func (w *walker) listPage(ctx context.Context, states []string, after string) (c
 	}
 }
 
+// outcome is what store did with a listed pull request.
+type outcome int
+
+const (
+	stored outcome = iota
+	// kept is a pull request the cache already held.
+	kept
+	// gone is a pull request GitHub could no longer resolve.
+	gone
+)
+
 // store fetches the rest of n's connections and caches it, unless the
 // cache already holds it in the current format at the same or a later
-// updatedAt.
-func (w *walker) store(ctx context.Context, n *prNode) (bool, error) {
+// updatedAt, or GitHub can no longer resolve it.
+func (w *walker) store(ctx context.Context, n *prNode) (outcome, error) {
 	cached, err := ReadEntry(w.cfg.CacheDir, n.Number)
 	switch {
 	case err == nil && cached.FormatVersion >= FormatVersion && !n.UpdatedAt.After(cached.UpdatedAt):
-		return false, nil
+		return kept, nil
 	case err != nil && !errors.Is(err, fs.ErrNotExist):
-		return false, err
+		return 0, err
 	}
+	e, err := w.download(ctx, n)
+	if u, ok := errors.AsType[*unresolvedError](err); ok {
+		w.skipUnresolved(ctx, u)
+		return gone, nil
+	}
+	if err != nil {
+		return 0, err
+	}
+	if err := writeJSON(entryPath(w.cfg.CacheDir, e.Number), e); err != nil {
+		return 0, err
+	}
+	w.log.DebugContext(ctx, "cached pull request",
+		slog.Int("number", e.Number),
+		slog.Time("updated_at", e.UpdatedAt))
+	return stored, nil
+}
 
+// download asks for the rest of n's connections, and for its commits' names
+// when its author is null, and returns n as the cache holds it. It is an
+// *unresolvedError when GitHub can no longer resolve n.
+func (w *walker) download(ctx context.Context, n *prNode) (Entry, error) {
 	e := n.Entry
+	var err error
 	if e.Labels, err = rest(ctx, w, n.Number, ghapi.Labels, n.Labels); err != nil {
-		return false, err
+		return Entry{}, err
 	}
 	commits, err := rest(ctx, w, n.Number, ghapi.Commits, n.Commits)
 	if err != nil {
-		return false, err
+		return Entry{}, err
 	}
 	e.Commits = make([]Commit, len(commits))
 	for i, c := range commits {
@@ -349,33 +410,36 @@ func (w *walker) store(ctx context.Context, n *prNode) (bool, error) {
 	}
 	comments, err := rest(ctx, w, n.Number, ghapi.Comments, n.Comments)
 	if err != nil {
-		return false, err
+		return Entry{}, err
 	}
 	e.Comments = make([]Comment, len(comments))
 	for i, c := range comments {
 		e.Comments[i] = c.Comment
 		if e.Comments[i].DatabaseID, err = databaseID(n.Number, c.FullDatabaseID); err != nil {
-			return false, err
+			return Entry{}, err
 		}
 	}
 	reviews, err := rest(ctx, w, n.Number, ghapi.Reviews, n.Reviews)
 	if err != nil {
-		return false, err
+		return Entry{}, err
 	}
 	e.Reviews = make([]Review, len(reviews))
 	for i, r := range reviews {
 		e.Reviews[i] = r.Review
 		if e.Reviews[i].DatabaseID, err = databaseID(n.Number, r.FullDatabaseID); err != nil {
-			return false, err
+			return Entry{}, err
 		}
 	}
 	if e.TimelineItems, err = rest(ctx, w, n.Number, ghapi.TimelineItems, n.TimelineItems); err != nil {
-		return false, err
+		return Entry{}, err
 	}
 	if e.Author == nil {
-		names, err := w.askNames(ctx, []int{n.Number})
+		names, unresolved, err := w.askNames(ctx, []int{n.Number})
 		if err != nil {
-			return false, err
+			return Entry{}, err
+		}
+		if len(unresolved) > 0 {
+			return Entry{}, unresolved[0]
 		}
 		e.CommitNames = names[n.Number]
 	}
@@ -389,14 +453,7 @@ func (w *walker) store(ctx context.Context, n *prNode) (bool, error) {
 	}
 	e.FetchedAt = w.started
 	e.FormatVersion = FormatVersion
-
-	if err := writeJSON(entryPath(w.cfg.CacheDir, e.Number), e); err != nil {
-		return false, err
-	}
-	w.log.DebugContext(ctx, "cached pull request",
-		slog.Int("number", e.Number),
-		slog.Time("updated_at", e.UpdatedAt))
-	return true, nil
+	return e, nil
 }
 
 // rest returns first's nodes followed by every later page of connection c
@@ -407,7 +464,8 @@ func rest[T any](ctx context.Context, w *walker, number int, c ghapi.Connection,
 }
 
 // pages is rest, asking for each later page with q, which selects c of
-// repository.pullRequest.
+// repository.pullRequest. It is an *unresolvedError when GitHub can no
+// longer resolve that pull request.
 func pages[T any](ctx context.Context, w *walker, number int, c ghapi.Connection, q ghapi.Query, first *connection[T]) ([]T, error) {
 	if first == nil {
 		return nil, fmt.Errorf("listing pull request %d: reply without %s", number, c)
@@ -425,7 +483,11 @@ func pages[T any](ctx context.Context, w *walker, number int, c ghapi.Connection
 			"first": w.cfg.NestedPageSize, "after": info.EndCursor,
 		}
 		if err := w.client.Do(ctx, q, vars, &resp); err != nil {
-			return nil, fmt.Errorf("paging %s of pull request %d: %w", c, number, err)
+			err = fmt.Errorf("paging %s of pull request %d: %w", c, number, err)
+			if nf, ok := errors.AsType[*ghapi.NotFoundError](err); ok && slices.Equal(nf.Paths, []string{"repository.pullRequest"}) {
+				return nil, &unresolvedError{number: number, err: err}
+			}
+			return nil, err
 		}
 		page := resp.Repository.PullRequest[string(c)]
 		if page == nil {
