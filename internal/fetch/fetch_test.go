@@ -516,6 +516,77 @@ var _ = Describe("Run", func() {
 			}
 		})
 
+		It("leaves as it was each entry whose PR GitHub can no longer resolve, warning once for each, names the rest, marks the cache, and counts them as the run ends", func() {
+			server.Update(2, func(e *fetch.Entry) {
+				e.Commits = commits(3)
+				e.CommitNames = signed([2]string{"Ana Example", "x"}, [2]string{"Ana Example", "x"}, [2]string{"Ana Example", "x"})
+			})
+			server.Delete(5)
+			server.After(func(_ int, r fetchtest.Request) {
+				if r.Operation == ghapi.CommitNames(0).Name && len(server.Operations(r.Operation)) == 1 {
+					server.Delete(2)
+				}
+			})
+
+			Expect(run(at(100))).To(Succeed())
+
+			var want []int
+			for n := 1; n <= 27; n++ {
+				want = append(want, n)
+				if n != 2 && n != 5 {
+					Expect(complete(n)).To(BeTrue())
+				}
+			}
+			Expect(namesOf()).To(Equal([][]int{want[:25], want[25:]}))
+			Expect(raw(2)).To(Equal(before[2]), "PR 2, gone before its further page of names")
+			Expect(raw(5)).To(Equal(before[5]), "PR 5, gone before the pass")
+			Expect(logged("skipping a pull request github cannot resolve")).To(ConsistOf(
+				And(HaveKeyWithValue("level", "WARN"), HaveKeyWithValue("number", 2.0)),
+				And(HaveKeyWithValue("level", "WARN"), HaveKeyWithValue("number", 5.0)),
+			), "log:\n%s", logs.String())
+			Expect(logged("named deleted accounts' pull requests")).To(HaveExactElements(And(
+				HaveKeyWithValue("deleted", 28.0),
+				HaveKeyWithValue("completed", 25.0),
+				HaveKeyWithValue("unresolved", 2.0),
+				HaveKeyWithValue("without_name", 1.0),
+			)), "log:\n%s", logs.String())
+			Expect(logged("walk finished")).To(HaveExactElements(HaveKeyWithValue("unresolved", 2.0)))
+			Expect(readJSON(metaPath())).To(HaveKeyWithValue("deleted_authors_named", true))
+		})
+
+		It("warns and counts once a PR the walk and then the names pass both find GitHub can no longer resolve", func() {
+			server.Update(3, func(e *fetch.Entry) { e.UpdatedAt = at(200) })
+			server.After(func(n int, _ fetchtest.Request) {
+				if n == 0 {
+					server.Delete(3)
+				}
+			})
+
+			Expect(run(at(100))).To(Succeed())
+
+			Expect(raw(3)).To(Equal(before[3]))
+			Expect(logged("skipping a pull request github cannot resolve")).To(HaveExactElements(HaveKeyWithValue("number", 3.0)),
+				"log:\n%s", logs.String())
+			Expect(logged("named deleted accounts' pull requests")).To(HaveExactElements(HaveKeyWithValue("unresolved", 1.0)))
+			Expect(logged("walk finished")).To(HaveExactElements(HaveKeyWithValue("unresolved", 1.0)))
+		})
+
+		It("is an error, rewriting nothing, when GitHub cannot resolve the repository the names are asked of", func() {
+			server.Intercept(func(_ int, r fetchtest.Request) *fetchtest.Reply {
+				if r.Operation == ghapi.CommitNames(0).Name {
+					return &fetchtest.Reply{Status: 200, Body: `{"data":{"repository":null},"errors":[{"type":"NOT_FOUND","path":["repository"],"message":"Could not resolve to a Repository with the name 'ceph/ceph'."}]}`}
+				}
+				return nil
+			})
+
+			Expect(run(at(100))).To(MatchError(ContainSubstring("Could not resolve to a Repository")))
+
+			for _, p := range held {
+				Expect(raw(p.Number)).To(Equal(before[p.Number]), "PR %d", p.Number)
+			}
+			Expect(os.ReadFile(metaPath())).To(Equal([]byte(oldMeta)))
+		})
+
 		It("does no pass and asks nothing once meta.json records the cache complete", func() {
 			Expect(os.WriteFile(metaPath(), []byte(strings.Replace(oldMeta, `"open":0}`, `"open":0,"deleted_authors_named":true}`, 1)), 0o600)).To(Succeed())
 
@@ -928,7 +999,72 @@ var _ = Describe("Run", func() {
 				MatchError(And(ContainSubstring("pull request 2"), ContainSubstring("comments"))),
 				Not(MatchError(ghapi.ErrUnavailable)),
 			)),
+		Entry("a GraphQL error other than NOT_FOUND", fetchtest.Reply{Status: 200, Body: `{"errors":[{"type":"FORBIDDEN","message":"Resource not accessible by integration"}]}`},
+			And(
+				MatchError(And(ContainSubstring("pull request 2"), ContainSubstring("Resource not accessible by integration"))),
+				Not(MatchError(ghapi.ErrUnavailable)),
+			)),
+		Entry("a NOT_FOUND of the repository rather than the PR", fetchtest.Reply{Status: 200, Body: `{"data":{"repository":null},"errors":[{"type":"NOT_FOUND","path":["repository"],"message":"Could not resolve to a Repository with the name 'ceph/ceph'."}]}`},
+			MatchError(And(ContainSubstring("pull request 2"), ContainSubstring("Could not resolve to a Repository")))),
 	)
+
+	DescribeTable("skips a listed PR that GitHub can no longer resolve when asked for the rest of it, warning once with its number, saves the others, and counts it as the run ends",
+		func(gone fetch.Entry) {
+			serve(pr(9, 9, "CLOSED"), gone)
+			server.After(func(n int, _ fetchtest.Request) {
+				if n == 0 {
+					server.Delete(gone.Number)
+				}
+			})
+
+			Expect(run(fetch.WindowStart)).To(Succeed())
+
+			Expect(rawFiles()).To(ConsistOf("9.json"))
+			Expect(logged("skipping a pull request github cannot resolve")).To(HaveExactElements(And(
+				HaveKeyWithValue("level", "WARN"),
+				HaveKeyWithValue("number", 2.0),
+			)), "log:\n%s", logs.String())
+			Expect(logged("walk finished")).To(HaveExactElements(HaveKeyWithValue("unresolved", 1.0)))
+			Expect(filepath.Join(cacheDir, fetch.MetaFile)).To(BeAnExistingFile())
+		},
+		Entry("a further page of its comments", func() fetch.Entry {
+			p := pr(2, 2, "CLOSED")
+			p.Comments = comments(3)
+			return p
+		}()),
+		Entry("its commits' names, its author's account deleted", func() fetch.Entry {
+			p := pr(2, 2, "CLOSED")
+			p.Author = nil
+			p.Commits = commits(1)
+			return p
+		}()),
+	)
+
+	It("leaves the entry it held for a PR updated since as it was when GitHub can no longer resolve the PR, and writes nothing for it", func() {
+		held := pr(2, 2, "CLOSED")
+		held.Comments = comments(3)
+		serve(pr(9, 9, "CLOSED"), held)
+		Expect(run(fetch.WindowStart)).To(Succeed())
+		path := filepath.Join(cacheDir, "raw", "2.json")
+		before, err := os.ReadFile(path)
+		Expect(err).NotTo(HaveOccurred())
+		server.Update(2, func(e *fetch.Entry) { e.UpdatedAt = at(5) })
+		deleted := false
+		server.After(func(_ int, r fetchtest.Request) {
+			if !deleted && r.Operation == ghapi.PullRequests.Name {
+				server.Delete(2)
+				deleted = true
+			}
+		})
+		logs.Reset()
+
+		Expect(run(fetch.WindowStart)).To(Succeed())
+
+		Expect(os.ReadFile(path)).To(Equal(before))
+		Expect(rawFiles()).To(ConsistOf("2.json", "9.json"), "no other file, temporary or not")
+		Expect(logged("skipping a pull request github cannot resolve")).To(HaveExactElements(HaveKeyWithValue("number", 2.0)))
+		Expect(logged("walk finished")).To(HaveExactElements(HaveKeyWithValue("unresolved", 1.0)))
+	})
 
 	DescribeTable("is an error naming the PR and the connection when a listed PR lacks one, and saves nothing",
 		func(labels string) {

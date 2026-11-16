@@ -110,7 +110,8 @@ type Entry struct {
 	TimelineItems     []Event    `json:"timelineItems"`
 	// CommitNames is set only for a pull request whose author is null, and
 	// nil for one fetched before entries carried names until fetch
-	// completes it.
+	// completes it, or for good when GitHub could no longer resolve the
+	// pull request by then.
 	CommitNames *CommitNames `json:"commitNames,omitzero"`
 	FetchedAt   time.Time    `json:"fetchedAt"`
 	// FormatVersion is the FormatVersion of the fetch that wrote the
@@ -131,8 +132,10 @@ type Meta struct {
 	OpenedInWindowSource record.CountSource `json:"opened_in_window_source,omitzero"`
 	Open                 int                `json:"open"`
 	// DeletedAuthorsNamed is whether every cached entry whose author is
-	// null holds its CommitNames. It is false in a meta.json written before
-	// entries carried them, and then the next walk completes the cache.
+	// null holds its CommitNames, but for those whose pull requests GitHub
+	// could no longer resolve when asked. It is false in a meta.json
+	// written before entries carried them, and then the next walk completes
+	// the cache.
 	DeletedAuthorsNamed bool `json:"deleted_authors_named,omitzero"`
 }
 

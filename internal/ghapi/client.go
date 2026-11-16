@@ -41,6 +41,21 @@ func (e *RateLimitError) Error() string {
 	return "github rate limit exhausted, resets at " + e.Reset.UTC().Format(time.RFC3339)
 }
 
+// NotFoundError is returned when every error GitHub reports for a request is
+// a NOT_FOUND: an object the query names that GitHub cannot resolve, such as
+// a pull request deleted since it was listed. Paths holds where each is in
+// the reply, its path's elements joined by dots, such as
+// repository.pullRequest; the reply's data holds null there, and Do still
+// decodes the rest.
+type NotFoundError struct {
+	Paths    []string
+	messages []string
+}
+
+func (e *NotFoundError) Error() string {
+	return "graphql: " + strings.Join(e.messages, "; ")
+}
+
 // Query is one named GraphQL operation.
 type Query struct {
 	Name string
@@ -148,7 +163,8 @@ func (t transient) Unwrap() error { return t.err }
 // Do sends q with vars and decodes the response's data into out. A
 // transient failure is retried with backoff; after the last attempt the
 // error wraps ErrUnavailable. A spent rate limit is a *RateLimitError and is
-// not retried.
+// not retried, nor is a *NotFoundError, whose reply's data is decoded into
+// out all the same.
 func (c *Client) Do(ctx context.Context, q Query, vars map[string]any, out any) error {
 	body, err := json.Marshal(struct {
 		Query         string         `json:"query"`
@@ -160,11 +176,14 @@ func (c *Client) Do(ctx context.Context, q Query, vars map[string]any, out any) 
 	}
 	for attempt := 1; ; attempt++ {
 		data, err := c.post(ctx, body)
-		if err == nil {
+		nf, _ := errors.AsType[*NotFoundError](err)
+		if err == nil || nf != nil && len(data) > 0 {
 			if derr := json.Unmarshal(data, out); derr != nil {
 				return fmt.Errorf("decoding %s: %w", q.Name, derr)
 			}
 			c.logRateLimit(ctx, q.Name, data)
+		}
+		if err == nil {
 			return nil
 		}
 		t, ok := errors.AsType[transient](err)
@@ -223,25 +242,42 @@ func (c *Client) post(ctx context.Context, body []byte) (json.RawMessage, error)
 		Errors []struct {
 			Type    string `json:"type"`
 			Message string `json:"message"`
+			Path    []any  `json:"path"`
 		} `json:"errors"`
 	}
 	if err := json.Unmarshal(raw, &env); err != nil {
 		return nil, transient{fmt.Errorf("malformed response: %w", err)}
 	}
 	if len(env.Errors) > 0 {
-		msgs := make([]string, 0, len(env.Errors))
+		nf := &NotFoundError{}
 		for _, e := range env.Errors {
 			if e.Type == "RATE_LIMITED" {
 				return nil, &RateLimitError{Reset: resetTime(resp.Header)}
 			}
-			msgs = append(msgs, e.Message)
+			nf.messages = append(nf.messages, e.Message)
+			if e.Type == "NOT_FOUND" {
+				nf.Paths = append(nf.Paths, joinPath(e.Path))
+			}
 		}
-		return nil, fmt.Errorf("graphql: %s", strings.Join(msgs, "; "))
+		if len(nf.Paths) == len(env.Errors) {
+			return env.Data, nf
+		}
+		return nil, fmt.Errorf("graphql: %s", strings.Join(nf.messages, "; "))
 	}
 	if len(env.Data) == 0 || string(env.Data) == "null" {
 		return nil, transient{errors.New("response without data")}
 	}
 	return env.Data, nil
+}
+
+// joinPath joins a GraphQL error's path, whose elements are field names and
+// list indexes, with dots.
+func joinPath(path []any) string {
+	parts := make([]string, len(path))
+	for i, p := range path {
+		parts[i] = fmt.Sprint(p)
+	}
+	return strings.Join(parts, ".")
 }
 
 func (c *Client) logRateLimit(ctx context.Context, op string, data json.RawMessage) {

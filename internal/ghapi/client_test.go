@@ -254,12 +254,43 @@ var _ = Describe("Client", func() {
 	})
 
 	It("fails on any other GraphQL error, naming its message, without retrying", func() {
-		handler.script(reply{status: 200, body: `{"errors":[{"type":"NOT_FOUND","message":"Could not resolve to a Repository"}]}`})
+		handler.script(reply{status: 200, body: `{"errors":[{"type":"FORBIDDEN","message":"Resource not accessible by integration"}]}`})
 
 		_, err := do()
 
-		Expect(err).To(MatchError(ContainSubstring("Could not resolve to a Repository")))
+		Expect(err).To(MatchError(ContainSubstring("Resource not accessible by integration")))
 		Expect(err).NotTo(MatchError(ghapi.ErrUnavailable))
+		nf, _ := errors.AsType[*ghapi.NotFoundError](err)
+		Expect(nf).NotTo(HaveOccurred(), "error %v is a NotFoundError", err)
+		Expect(handler.received()).To(HaveLen(1))
+	})
+
+	It("returns a *NotFoundError with the path of each object GitHub could not resolve, and decodes the rest, without retrying", func() {
+		handler.script(reply{status: 200, body: `{"data":{"repository":{"p0":{"number":1},"p1":null,"p2":null}},"errors":[` +
+			`{"type":"NOT_FOUND","path":["repository","p1"],"message":"Could not resolve to a PullRequest with the number of 7."},` +
+			`{"type":"NOT_FOUND","path":["repository","p2"],"message":"Could not resolve to a PullRequest with the number of 8."}]}`})
+
+		out, err := do()
+
+		nf, ok := errors.AsType[*ghapi.NotFoundError](err)
+		Expect(ok).To(BeTrue(), "error %v is not a NotFoundError", err)
+		Expect(nf.Paths).To(Equal([]string{"repository.p1", "repository.p2"}))
+		Expect(err).To(MatchError(ContainSubstring("Could not resolve to a PullRequest with the number of 7.")))
+		Expect(err).NotTo(MatchError(ghapi.ErrUnavailable))
+		Expect(out).To(HaveKeyWithValue("repository", HaveKeyWithValue("p0", HaveKeyWithValue("number", 1.0))))
+		Expect(handler.received()).To(HaveLen(1))
+	})
+
+	It("is no *NotFoundError when GitHub reports another error beside a NOT_FOUND", func() {
+		handler.script(reply{status: 200, body: `{"data":{"repository":{"p0":null,"p1":null}},"errors":[` +
+			`{"type":"NOT_FOUND","path":["repository","p0"],"message":"Could not resolve to a PullRequest with the number of 7."},` +
+			`{"type":"SERVICE_UNAVAILABLE","path":["repository","p1"],"message":"Something went wrong while executing your query."}]}`})
+
+		_, err := do()
+
+		nf, _ := errors.AsType[*ghapi.NotFoundError](err)
+		Expect(nf).NotTo(HaveOccurred(), "error %v is a NotFoundError", err)
+		Expect(err).To(MatchError(ContainSubstring("Something went wrong while executing your query.")))
 		Expect(handler.received()).To(HaveLen(1))
 	})
 
