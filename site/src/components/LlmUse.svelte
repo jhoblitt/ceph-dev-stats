@@ -20,6 +20,7 @@
   import BucketChart from './charts/BucketChart.svelte';
   import ChartFrame from './charts/ChartFrame.svelte';
   import Key from './charts/Key.svelte';
+  import SectionHead from './SectionHead.svelte';
 
   const { meta, selection, data, view } = getPage();
   const zoom = periodZoom(getPage());
@@ -58,8 +59,10 @@
   const compareTitle = `${DISCLOSED} against not disclosed, PRs opened in the period`;
 </script>
 
-<section id="llm" aria-labelledby="llm-heading" class:stale={sectionsStale($view, $data)} aria-busy={sectionsBusy($view, $data) ? 'true' : undefined}>
-  <h2 id="llm-heading">AI use</h2>
+<section id="llm" tabindex="-1" aria-labelledby="llm-heading" class:stale={sectionsStale($view, $data)} aria-busy={sectionsBusy($view, $data) ? 'true' : undefined}>
+  <SectionHead name="ai-use">
+    <h2 id="llm-heading">AI use</h2>
+  </SectionHead>
 
   <ChartFrame
     title={shareTitle}

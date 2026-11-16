@@ -11,6 +11,7 @@
   import BucketChart from './charts/BucketChart.svelte';
   import ChartFrame from './charts/ChartFrame.svelte';
   import StackedArea from './charts/StackedArea.svelte';
+  import SectionHead from './SectionHead.svelte';
 
   const { selection, data, view } = getPage();
   const zoom = periodZoom(getPage());
@@ -44,8 +45,10 @@
   const backlogTitle = $derived(`Open PRs at the end of each ${step}, by age`);
 </script>
 
-<section id="velocity" aria-labelledby="velocity-heading" class:stale={sectionsStale($view, $data)} aria-busy={sectionsBusy($view, $data) ? 'true' : undefined}>
-  <h2 id="velocity-heading">Velocity</h2>
+<section id="velocity" tabindex="-1" aria-labelledby="velocity-heading" class:stale={sectionsStale($view, $data)} aria-busy={sectionsBusy($view, $data) ? 'true' : undefined}>
+  <SectionHead name="velocity">
+    <h2 id="velocity-heading">Velocity</h2>
+  </SectionHead>
 
   <ChartFrame
     title={prsTitle}

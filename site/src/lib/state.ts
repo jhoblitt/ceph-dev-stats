@@ -6,6 +6,7 @@
 //     &size=11-100&standing=first&disclosure=disclosed&drafts=exclude&reopened=only
 //     &author=<login>&reviewer=<login>&week=2026-06-01&band=lt7&pr=66600&sort=-size
 //     &authorsort=-lines&reviewersort=first&bots=show
+//   #/?target=main&section=review
 //   #/methods?target=main&section=disclosure
 //
 // <route> is empty for the report or `methods`. The target is always written;
@@ -35,6 +36,7 @@ import {
 } from './filters';
 import { findLogin } from './handles';
 import { isMethodsAnchor } from './methods/anchors';
+import { reportSection } from './report-sections';
 import { bucketEnd, bucketStart, stepFor } from './stats/buckets';
 import {
   AUTHOR_COLUMNS,
@@ -74,7 +76,7 @@ export interface AppState {
   reviewerSort: Sort<ReviewerColumn>;
   /** Whether the People tables list bot accounts. */
   bots: boolean;
-  /** The section or subheading of the methods page to show; only ever set on that page. */
+  /** The section of the page to show: a report section's name, or a methods section's or subheading's id. */
   section: string | null;
 }
 
@@ -237,6 +239,11 @@ function validWeek(week: string | undefined, filters: Filters): string | null {
 
 const PR_NUMBER = /^[1-9]\d{0,8}$/;
 
+/** Whether `section` names a section of the page at `route`; each page has its own. */
+function isSectionOf(route: Route, section: string): boolean {
+  return route === 'methods' ? isMethodsAnchor(section) : reportSection(section) !== undefined;
+}
+
 export function validateState(raw: RawState, meta: Meta): AppState {
   const d = defaultFilters(meta);
   const p = raw.params;
@@ -271,7 +278,7 @@ export function validateState(raw: RawState, meta: Meta): AppState {
     authorSort: parseSortOf(AUTHOR_COLUMNS, p.authorsort, DEFAULT_AUTHOR_SORT),
     reviewerSort: parseSortOf(REVIEWER_COLUMNS, p.reviewersort, DEFAULT_REVIEWER_SORT),
     bots: p.bots === 'show',
-    section: route === 'methods' && p.section !== undefined && isMethodsAnchor(p.section) ? p.section : null,
+    section: p.section !== undefined && isSectionOf(route, p.section) ? p.section : null,
   };
 }
 
@@ -309,18 +316,23 @@ export function hashFromState(state: AppState, meta: Meta): string {
     parts.push(`reviewersort=${enc(sortParam(state.reviewerSort))}`);
   }
   if (state.bots) parts.push('bots=show');
-  if (state.route === 'methods' && state.section !== null) parts.push(`section=${enc(state.section)}`);
+  if (state.section !== null && isSectionOf(state.route, state.section)) parts.push(`section=${enc(state.section)}`);
   return `#/${state.route === 'report' ? '' : state.route}?${parts.join('&')}`;
 }
 
-/** The hash of a page, keeping the reader's filters and selection. */
+/** The hash of a page, keeping the reader's filters and selection but not the section. */
 export function routeHash(state: AppState, route: Route, meta: Meta): string {
-  return hashFromState({ ...state, route }, meta);
+  return hashFromState({ ...state, route, section: null }, meta);
 }
 
 /** The address of a section or subheading of the methods page, keeping the reader's filters and selection. */
 export function sectionHash(state: AppState, section: string, meta: Meta): string {
   return hashFromState({ ...state, route: 'methods', section }, meta);
+}
+
+/** The address of a section of the report, by its name, keeping the reader's filters and selection. */
+export function reportSectionHash(state: AppState, name: string, meta: Meta): string {
+  return hashFromState({ ...state, route: 'report', section: name }, meta);
 }
 
 /** Where the store reads and writes the hash; a fake in tests. */

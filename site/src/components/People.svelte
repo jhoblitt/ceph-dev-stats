@@ -27,6 +27,7 @@
   import { type AuthorColumn, type ReviewerColumn, type Sort, nextSort, sameSort } from '../lib/sort';
   import { authorRows, reviewerRows } from '../lib/stats/people';
   import PeopleTable from './PeopleTable.svelte';
+  import SectionHead from './SectionHead.svelte';
 
   const { selection, data, view } = getPage();
   const uid = $props.id();
@@ -70,8 +71,10 @@
   const hiddenText = (n: number) => (n === 0 ? '' : `, and ${count(n, 'bot account', 'bot accounts')} not shown`);
 </script>
 
-<section id="people" aria-labelledby="people-heading" class:stale={sectionsStale($view, $data)} aria-busy={sectionsBusy($view, $data) ? 'true' : undefined}>
-  <h2 id="people-heading">People</h2>
+<section id="people" tabindex="-1" aria-labelledby="people-heading" class:stale={sectionsStale($view, $data)} aria-busy={sectionsBusy($view, $data) ? 'true' : undefined}>
+  <SectionHead name="people">
+    <h2 id="people-heading">People</h2>
+  </SectionHead>
 
   {#if empty}
     <p class="muted">no PRs match</p>

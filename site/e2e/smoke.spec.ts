@@ -96,6 +96,27 @@ test('the page loads whole, with every section', async ({ page }) => {
   await tableReady(page);
 });
 
+test('an address naming a section opens there once the page settles, and each section heading links to its own', async ({
+  page,
+}) => {
+  await open(page, '#/?section=people');
+  await expect(page.locator('[aria-busy="true"]')).toHaveCount(0);
+  await page.waitForLoadState('networkidle');
+  const heading = page.getByRole('heading', { level: 2, name: 'People', exact: true });
+  const top = (await heading.boundingBox())?.y ?? -1;
+  expect(top, 'the People heading, from the top of the viewport').toBeGreaterThanOrEqual(0);
+  expect(top, 'the People heading, from the top of the viewport').toBeLessThan(100);
+  await expect(page.locator('#people')).toBeFocused();
+
+  for (const name of ['Velocity', 'Review', 'AI use', 'Each PR', 'Timelines', 'Pull requests', 'People']) {
+    await expect(page.getByRole('link', { name: `Link to the ${name} section`, exact: true }), name).toHaveCount(1);
+  }
+  await expect(page.getByRole('link', { name: 'Link to the Review section', exact: true })).toHaveAttribute(
+    'href',
+    /#\/\?target=main&section=review$/,
+  );
+});
+
 test('the page opens on the whole history, the last six months one choice away and back', async ({ page }) => {
   await open(page);
   const period = page.getByRole('group', { name: 'Period' });

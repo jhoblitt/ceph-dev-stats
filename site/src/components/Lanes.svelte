@@ -25,6 +25,7 @@
   import { formatDate } from '../lib/timeline-axis';
   import ChartFrame from './charts/ChartFrame.svelte';
   import { measureWidth } from './charts/measure';
+  import SectionHead from './SectionHead.svelte';
 
   interface Props {
     /**
@@ -217,8 +218,10 @@
   const note = $derived(lanesLine(lanes.length, model.total, rowsName, orderName, newest));
 </script>
 
-<section id="timelines" aria-labelledby="timelines-heading" aria-busy={sectionsBusy($view, $data) ? 'true' : undefined}>
-  <h2 id="timelines-heading">Timelines</h2>
+<section id="timelines" tabindex="-1" aria-labelledby="timelines-heading" aria-busy={sectionsBusy($view, $data) ? 'true' : undefined}>
+  <SectionHead name="timelines">
+    <h2 id="timelines-heading">Timelines</h2>
+  </SectionHead>
 
   <ChartFrame
     title="Each PR’s timeline, one per row"

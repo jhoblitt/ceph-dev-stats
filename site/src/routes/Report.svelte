@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { tick } from 'svelte';
+  import { onDestroy, tick } from 'svelte';
   import DotPlot from '../components/DotPlot.svelte';
   import FilterBar from '../components/FilterBar.svelte';
   import Lanes from '../components/Lanes.svelte';
@@ -11,8 +11,10 @@
   import ReviewsRecordedNote from '../components/ReviewsRecordedNote.svelte';
   import Velocity from '../components/Velocity.svelte';
   import { yearHolds } from '../lib/data';
+  import { createLanding, setLanding } from '../lib/landing';
   import { keepEqual } from '../lib/memo';
   import { type LoadProgress, getPage } from '../lib/page';
+  import { reportSection } from '../lib/report-sections';
   import { type Sort, sameSort } from '../lib/sort';
   import { ALL_TABLE_ROWS, narrowing, rowText, sortWords, tableOrder } from '../lib/table';
   import { tableLoads } from '../lib/tables';
@@ -102,6 +104,22 @@
   const laneRowsName = $derived(
     narrowing(dataset, { filters, week, band }) ?? ALL_TABLE_ROWS,
   );
+
+  // The page moves to the section the address names when it opens and
+  // whenever the name changes; any other change to the address, such as a
+  // filter's, leaves the reader where they are.
+  const landing = createLanding(window);
+  setLanding(landing);
+  onDestroy(landing.release);
+  let shownSection: string | null = null;
+  $effect(() => {
+    const name = $selection.section;
+    const changed = name !== shownSection;
+    shownSection = name;
+    const id = name === null ? undefined : reportSection(name)?.id;
+    if (changed && id !== undefined) void tick().then(() => landing.land(id));
+    else landing.release();
+  });
 </script>
 
 <h1 class="visually-hidden">Ceph pull requests</h1>

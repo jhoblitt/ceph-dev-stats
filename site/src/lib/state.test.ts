@@ -14,6 +14,7 @@ import {
   monthsBefore,
   parseHash,
   recentFilters,
+  reportSectionHash,
   routeHash,
   sectionHash,
   stateFromHash,
@@ -666,11 +667,12 @@ describe('a section of the methods page', () => {
     ['an id named like a prototype key', '#/methods?section=__proto__'],
     ['an anchor written with its hash', '#/methods?section=%23disclosure'],
     ['a section on the report', '#/?section=disclosure'],
+    ['a section of the report', '#/methods?section=review'],
   ])('takes %s as none', (_name, hash) => {
     expect(stateFromHash(hash, meta).section).toBeNull();
   });
 
-  it('never writes a section on the report', () => {
+  it('never writes a section of the methods page on the report', () => {
     expect(hashFromState({ ...defaults, section: 'disclosure' }, meta)).toBe('#/?target=main');
   });
 
@@ -689,5 +691,56 @@ describe('a section of the methods page', () => {
     const state = stateFromHash(hash, meta);
     expect(state.section).toBeNull();
     expect(hashFromState(state, meta)).toBe(hash);
+  });
+});
+
+describe('a section of the report', () => {
+  const names = ['velocity', 'review', 'ai-use', 'each-pr', 'timelines', 'pull-requests', 'people'];
+
+  it.each(names)('reads and writes back section=%s alone', (name) => {
+    const state = stateFromHash(`#/?section=${name}`, meta);
+    expect(state).toEqual({ ...defaults, section: name });
+    expect(hashFromState(state, meta)).toBe(`#/?target=main&section=${name}`);
+  });
+
+  it.each(names)('reads and writes back section=%s among filters', (name) => {
+    const hash = `#/?target=main&from=2026-06-01&to=2026-08-31&kind=docs&section=${name}`;
+    const state = stateFromHash(hash, meta);
+    expect(state).toEqual({
+      ...withFilters({ from: '2026-06-01', to: '2026-08-31', kind: 'docs' }),
+      section: name,
+    });
+    expect(hashFromState(state, meta)).toBe(hash);
+  });
+
+  it.each([
+    ['a name no section has', '#/?section=nowhere'],
+    ["an element's id rather than its name", '#/?section=llm'],
+    ['a name in another case', '#/?section=Review'],
+    ['a section of the methods page', '#/?section=commands'],
+  ])('drops %s from the address', (_name, hash) => {
+    const f = fakeLocation(hash);
+    const store = createStateStore(meta, f.loc);
+    expect(get(store).section).toBeNull();
+    expect(f.loc.read()).toBe('#/?target=main');
+    store.destroy();
+  });
+
+  it('builds the address of a section, keeping the filters and selection', () => {
+    const state = { ...withFilters({ from: '2026-06-01', to: '2026-08-31', target: 'all' }), pr: 66600 };
+    const hash = reportSectionHash(state, 'review', meta);
+    expect(hash).toBe('#/?target=all&from=2026-06-01&to=2026-08-31&pr=66600&section=review');
+    expect(stateFromHash(hash, meta)).toEqual({ ...state, section: 'review' });
+  });
+
+  it('builds the address of a section from the methods page, leaving its section behind', () => {
+    const state = { ...withFilters({ target: 'all' }), route: 'methods' as const, section: 'disclosure' };
+    expect(reportSectionHash(state, 'people', meta)).toBe('#/?target=all&section=people');
+  });
+
+  it('leaves the section behind when changing page', () => {
+    const onReport = { ...defaults, section: 'people' };
+    expect(routeHash(onReport, 'methods', meta)).toBe('#/methods?target=main');
+    expect(routeHash(onReport, 'report', meta)).toBe('#/?target=main');
   });
 });
