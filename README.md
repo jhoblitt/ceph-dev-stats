@@ -134,6 +134,27 @@ which runs the whole refresh with `fetch` walking back to the window
 start: `fetch` reads its `--full` flag from `CEPHSTATS_FULL`, and the other
 steps have no such flag.
 
+## Publishing
+
+A merged refresh reaches the published site through a release. Each push to
+`main` runs CI and then semantic-release, which cuts a version when a commit
+since the last tag calls for one: a `feat`, `fix`, `perf`, `refactor`,
+`docs` or `revert` commit, a `chore(data)` commit such as a data refresh, or
+any commit marked breaking. The release tags the version and deploys the
+site built from that tag to GitHub Pages, with the version in the footer.
+Any other commit (`build`, `ci`, `test`, `style`, or another `chore`,
+Dependabot's included) cuts no release unless marked breaking, and reaches
+the site with the next release.
+
+To roll the site back, run the `deploy` workflow by hand with an older
+release tag, which must be on `main`:
+
+```sh
+gh workflow run deploy.yml -f tag=vX.Y.Z
+```
+
+The next release deploys its own version over it.
+
 ## Development
 
 Commit messages follow [Conventional Commits](https://www.conventionalcommits.org/);
