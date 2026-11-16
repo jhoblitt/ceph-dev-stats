@@ -138,9 +138,17 @@ of types `READY_FOR_REVIEW_EVENT`, `CONVERT_TO_DRAFT_EVENT`,
 `HEAD_REF_FORCE_PUSHED_EVENT`, `CLOSED_EVENT`, `REOPENED_EVENT`,
 `MERGED_EVENT`, each with `createdAt`.
 
+For the links back to GitHub the entry also carries: each commit's `oid`;
+each comment's and review's `databaseId`; the `url` of each ready, draft,
+closed and merged event; the merged event's `commit{oid}`; and a
+force-push's `beforeCommit{oid}` and `afterCommit{oid}`. Each entry records
+the cache format's version, and an entry of an older version is fetched
+again whatever its `updatedAt`.
+
 `.cache/authors.json`: login → number of PRs opened in `ceph/ceph` before
-the window start. `.cache/meta.json`: when the walk began, and GitHub's own
-counts taken at its end (PRs opened since the window start; PRs open).
+the window start. `.cache/meta.json`: `walk_started`, when the walk began,
+and GitHub's own counts taken at its end, `opened_in_window` (PRs opened
+since the window start) and `open`.
 
 ### Seam 2 — the record (Task 3 → Tasks 4, 5, 6)
 
@@ -153,11 +161,12 @@ same bytes.
   "author": {"login", "bot"}, "association",
   "base", "created", "state": "open|merged|closed", "draft",
   "additions", "deletions", "files", "labels": [sorted],
-  "commits": {"count", "first_authored", "last_committed"},
+  "commits": {"count", "first_authored", "last_committed",
+              "list": [ {"sha", "authored", "committed"} ]},
   "prior_prs": n | null,
-  "events":   [ {"at", "kind": "ready|draft|force_push|closed|reopened|merged"} ],
-  "reviews":  [ {"at", "by", "bot", "state": "approved|changes_requested|commented|dismissed"} ],
-  "comments": [ {"at", "by", "bot", "text"} ],
+  "events":   [ {"at", "kind": "ready|draft|force_push|closed|reopened|merged", "id", "sha"} ],
+  "reviews":  [ {"at", "id", "by", "bot", "state": "approved|changes_requested|commented|dismissed"} ],
+  "comments": [ {"at", "id", "by", "bot", "text"} ],
   "disclosure": {"trailers": [], "description": [], "commit_prose": []} }
 ```
 
@@ -165,6 +174,12 @@ same bytes.
 - `bot` is GitHub's own typing of the account. `data/bots.yaml` is applied
   later, in classify, so it can change without a new extract.
 - A null author is `{"login": "ghost", "bot": false}`.
+- Links: a comment's and a review's `id` is GitHub's database id. An
+  event's `id` is the number in its GitHub address (`#event-<id>`), present
+  for ready, draft, closed and merged; its `sha` is the merge commit for
+  merged and the pushed commit for force_push. A field with nothing to hold
+  is left out. Addresses are never stored; the PR's follows from its
+  number.
 - `comments[].text` is present only when the comment is a single line of at
   most 80 characters after trimming. That is what the bot-command table and
   the "looks like a command" report need; longer comments are not stored.
@@ -231,6 +246,16 @@ Under `site/public/data/`, fetched at run time, never bundled.
   index, stable across the dataset, for `comment_other` and the three human
   review kinds, else `-1`.
 - `table-<year>.json`: `titles` and `authors`, aligned with the PR rows.
+  It also carries `commits`, one list per PR row of `[sha, authored,
+  committed]`, and `refs`, one string per event of that year's events file
+  in the same order: the comment, review or event id, or the SHA for
+  `merged` and `force_push`, or the empty string. The site builds every
+  GitHub address from these and the PR number.
+- Rulings made while building, part of this seam: `window_start` and
+  `fetched_through` in `meta.json` are epoch seconds; `components`,
+  `families` and `commands` are lists of `{id, name}`, and `bases`,
+  `disclosure` and `event_kinds` lists of strings; each PR's `families` and
+  `components` list is sorted ascending.
 
 ---
 
@@ -341,6 +366,39 @@ tests beside them.
 
 - [ ] Tests first, implement, pass. `make check`.
 
+### Task 14: Links back to GitHub
+
+Runs after Task 3 and before Task 5's pull. The owner asked for it during
+the build.
+
+**Files:** `internal/ghapi/queries.go`, `internal/fetch/*`,
+`internal/record/*`, `internal/extract/*`, their tests and fixtures.
+
+**Behaviour:**
+- `fetch` requests the link fields of Seam 1 and stores them. The cache
+  entry gains a format version; an entry of an older version is fetched
+  again, so the first run after this task re-pulls the whole cache.
+- `extract` fills the record's link fields of Seam 2: `commits.list` in
+  commit order, `id` on comments and reviews, `id` and `sha` on events.
+  `first_authored` and `last_committed` stay as they are.
+- An event's `id` is parsed from the trailing `#event-<digits>` of its
+  address. An address of any other shape leaves the field out and is
+  logged once per run, not once per event.
+
+**Tests:**
+- the queries name every link field, and a scripted server's ids and SHAs
+  reach the cache entry;
+- a cached entry without a version is fetched again though its `updatedAt`
+  is unchanged, and an entry of the current version is not;
+- a fixture PR with a comment, a review, three commits, a force-push, a
+  ready event, a close, a reopening and a merge gives a record whose every
+  link field holds the fixture's value, and whose reopening has neither
+  `id` nor `sha`;
+- a record without link fields, written before this task, still reads, and
+  the next `extract --all` rewrites it with them.
+
+- [ ] Tests first, implement, pass. `make check`.
+
 ### Task 4: Tables, classification and `cephstats check`
 
 **Files:** `internal/tables/*`, `internal/classify/*`,
@@ -436,6 +494,8 @@ the records and tables. Per PR:
   window start.
 - `actor` indexes are assigned in order of first appearance over the whole
   dataset, so they are stable for a given set of records.
+- `table-<year>.json` carries `commits` and `refs` as Seam 4 says: `refs`
+  has one entry per event, in the events file's order.
 
 **Tests:** each derivation above with a minimal record, including the
 out-of-order cases of Review Focus 4 (a response before `ready`, a review by
@@ -590,7 +650,8 @@ empty selection.
   shows the PR's number; click selects it.
 - PR table: the PRs of the current selection, virtualised; columns number,
   title, author, opened, state, waits, size, disclosure, reopened; sortable;
-  each number links to the PR on GitHub. It loads `table-<year>.json` when
+  each number links to the PR on GitHub, and a selected PR shows an "Open
+  on GitHub" link. It loads `table-<year>.json` when
   first shown.
 
 **Tests:** the side-by-side figures equal the statistics library's for the
@@ -611,9 +672,19 @@ click on a dot or a row sets the selected PR in the URL.
   ordered by opening unless the table is sorted. When the selection is
   larger, a note says how many are shown.
 
+- Every mark on the one-PR timeline is a link to its GitHub page, opened in
+  a new tab and named for what it is and when: a comment, a review, a
+  commit, and the ready, draft, closed and merged events. A force-push
+  links to the commit it pushed, a reopening to the PR. Under the line the
+  PR's commits are listed by short SHA, each a link. `data.ts` loads
+  `commits` and `refs` from the table file and checks their lengths against
+  the rows and the events.
+- A PR number in the URL that is not in the data shows "no such PR".
+
 **Tests:** a fixture PR with every event kind renders one mark per event in
-time order; a PR with `first_commit` unknown renders without it; lanes cap
-at 200 and say so.
+time order, each with the address its id or SHA gives; a PR with
+`first_commit` unknown renders without it; an unknown PR number shows "no
+such PR"; lanes cap at 200 and say so.
 
 ### Task 12: Methods page
 
@@ -627,7 +698,8 @@ at 200 and say so.
 - [ ] What six months cannot show: no pre-LLM baseline, and unknown author
   standing for PRs opened before the window.
 - [ ] The hand-edited tables, linked to their files in the repository.
-- [ ] How to check a number: the PR table and the links to GitHub.
+- [ ] How to check a number: the PR table and the links to GitHub. What
+  links where, and that a reopening has no address of its own.
 - [ ] Every claim about the code's behaviour is checked against the code
   before it is written.
 
@@ -642,8 +714,9 @@ at 200 and say so.
   page loads with no console errors; changing the target filter changes a
   headline figure; selecting a week narrows the table; opening a PR shows
   its timeline; a hash with an unknown filter value loads defaults; the
-  footer shows a version and the repository link; the methods page
-  renders. Wire it into CI.
+  footer shows a version and the repository link; a mark on the timeline
+  links to that PR on github.com; the methods page renders. Wire it into
+  CI.
 - [ ] Enable Pages with source "GitHub Actions"; allow the `github-pages`
   environment to deploy from `v*` tags.
 - [ ] Merge; watch release, then deploy, with one background watcher.
@@ -657,14 +730,14 @@ at 200 and say so.
 ## Order
 
 ```
-1 ─┬─ 2 ─ 3 ─ 4 ─ 5 ─ 6 ──────────────┐
-   └─ 7 ─ 8 ─┬─ 9  ─┐                 ├─ 13
-             ├─ 10 ─┼─ 12 ────────────┘
-             └─ 11 ─┘
+1 ─┬─ 2 ─ 3 ─ 14 ─ 4 ─ 5 ─ 6 ─────────┐
+   └─ 7 ─ 8 ─ 9 ─┬─ 10 ─┐             ├─ 13
+                 └─ 11 ─┴─ 12 ────────┘
 ```
 
-The Go line (2–6) and the site line (7–11) run side by side. Tasks 9, 10
-and 11 are independent of each other. Task 13 needs all of them.
+The Go line (2–6, with 14 after 3) and the site line (7–11) run side by
+side. Task 10 needs Task 9's shared chart parts; Tasks 10 and 11 are
+independent of each other. Task 13 needs all of them.
 
 ## Self-review notes
 
@@ -680,5 +753,8 @@ and 11 are independent of each other. Task 13 needs all of them.
 - The spec leaves author standing's source to the builder; this plan takes
   a per-author baseline at the window start (Tasks 2, 3) and marks older
   PRs unknown. The full history removes the baseline.
+- Links back to GitHub were added by the owner during the build: Task 14
+  carries the identifiers through fetch and extract, Task 6 ships them,
+  Tasks 10 and 11 draw the links, Tasks 12 and 13 document and test them.
 - Not in this plan, as in the spec: the full history, a QA stage from label
   history, a scheduled refresh.

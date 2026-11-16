@@ -32,6 +32,9 @@ GitHub Pages publishes it.
   final disposition.
 - Bot commands, the comments that only trigger automation, counted as their
   own category.
+- Links from everything on the page back to GitHub: the PR, each comment,
+  each review, each commit, and each lifecycle event GitHub gives an
+  address.
 - Drill-down: filters that recompute everything, and a table of the PRs
   behind the current selection, each linking to GitHub.
 - Easy to update: one command refreshes the data.
@@ -84,6 +87,9 @@ GitHub Pages publishes it.
   opening, comments and bot commands, and the time of the final disposition.
 - **Closed and reopened**: the page says whether a PR was closed and then
   reopened. The owner asked for this as a bonus.
+- **Links back to GitHub** (added 2026-11-15, during the build): the corpus
+  includes what links a PR, its comments, its commits and the rest to their
+  GitHub pages, so a reader can drill all the way down to the GitHub UI.
 - **Approach A** (below): the browser computes the statistics from per-PR
   data.
 - **Model**: similar to `jhoblitt/ceph-porting-estimate`.
@@ -132,6 +138,12 @@ GitHub Pages publishes it.
 - **Reopened PRs**: the final disposition is the last close or merge, and
   time to merge or close runs from the opening to it. A PR is not in the
   backlog while it was closed. "Was reopened" is a filter and a column.
+- **Identifiers are stored, not addresses.** A record keeps each comment's
+  and review's GitHub id, each commit's SHA and each lifecycle event's id,
+  and the page builds the address from them. A stored address would add
+  about 70 bytes to every event for nothing the identifier does not give.
+  A reopening has no address on GitHub and links to the PR; a force-push
+  links to the commit it pushed.
 - **Stages**: opened → first human response → first human approval → merged.
   Time after approval is reported separately so QA is not counted as review.
 - **Drafts**: a PR is not waiting for review while it is a draft. The waiting
@@ -247,6 +259,13 @@ their own paging (one PR had 219 commits, others 41 reviews); the
 timeline's `totalCount` ignores the event-type filter, while the events
 returned respect it; and one request for 100 PRs with comment text,
 reviews, commits and events came back empty, where pages of 20 succeeded.
+
+Addresses, read from #69877 and #68904: a comment is
+`…/pull/N#issuecomment-<id>`, a review `…/pull/N#pullrequestreview-<id>`, a
+commit `…/pull/N/commits/<sha>`, and a marked-ready or closed event
+`…/pull/N#event-<id>`; merged and converted-to-draft events expose the same
+field. A force-push carries the commits before and after it. A reopening
+carries no address.
 
 ## Constraints
 
@@ -397,6 +416,8 @@ and not inside a closed stretch.
 - Every filter recomputes every chart and the table.
 - Selecting a week, a band or a dot narrows the table to those PRs; each row
   links to the PR on GitHub.
+- Every PR, comment, review, commit and addressable lifecycle event shown
+  links to its page on GitHub.
 - Filters and the selection live in the URL, so a view can be linked.
 - The central chart for the thesis sets PRs arriving, split by disclosure,
   against human reviews done and the people doing them.
@@ -431,7 +452,8 @@ against the calendar or against days since opening.
 2. **Extract.** Turn each cached PR into one compact record: its times,
    target, size, author, labels, first and last commit, review events,
    comment events with what is needed to classify them, lifecycle events,
-   and the disclosure text matched. Records are committed as text, one PR per line,
+   the identifiers that link each of these to GitHub, and the disclosure
+   text matched. Records are committed as text, one PR per line,
    grouped by the month the PR opened, so a refresh rewrites only the months
    that changed.
 3. **Check.** Validate the hand-edited tables against the records, and
