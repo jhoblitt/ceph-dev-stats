@@ -9,7 +9,8 @@
 <script lang="ts">
   import { onMount, tick } from 'svelte';
   import { type DataError, type TableYear } from '../lib/data';
-  import { dayOf } from '../lib/filters';
+  import { dayOf, periodRange } from '../lib/filters';
+  import { yearsFrom } from '../lib/methods/figures';
   import Prose from '../lib/methods/Prose.svelte';
   import {
     type DataFigures,
@@ -26,8 +27,10 @@
 
   const { meta, loader, selection } = getPage();
   const all = sections();
-  // The figures are over the report's default period.
+  // The figures are over the report's default period, and need only the
+  // files of the PRs active in it.
   const days = defaultFilters(meta);
+  const years = yearsFrom(meta, periodRange(days).start);
 
   let data = $state<Loadable<DataFigures>>({ state: 'loading' });
   let tables = $state<Loadable<TableFigures>>({ state: 'loading' });
@@ -44,7 +47,7 @@
   onMount(() => {
     let live = true;
     void (async () => {
-      const loaded = await loader.load(meta.years);
+      const loaded = await loader.load(years);
       if (!live) return;
       if (loaded.errors.length > 0) {
         const message = loaded.errors.map((e) => `${e.file}: ${e.message}`).join('; ');
@@ -54,8 +57,8 @@
       }
       data = { state: 'ready', value: dataFigures(loaded.dataset, days) };
       try {
-        const years = await Promise.all(meta.years.map((y) => loader.table(y).then((t): [number, TableYear] => [y, t])));
-        if (live) tables = { state: 'ready', value: tableFigures(loaded.dataset, new Map(years), days) };
+        const loadedTables = await Promise.all(years.map((y) => loader.table(y).then((t): [number, TableYear] => [y, t])));
+        if (live) tables = { state: 'ready', value: tableFigures(loaded.dataset, new Map(loadedTables), days) };
       } catch (err) {
         if (live) tables = { state: 'error', message: describe(err) };
       }

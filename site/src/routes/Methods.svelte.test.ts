@@ -1,7 +1,8 @@
 // @vitest-environment jsdom
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/svelte';
-import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import App from '../App.svelte';
+import { withEarlierYear } from '../lib/__fixtures__/fetch';
 import { fixturePage } from '../lib/__fixtures__/page';
 import { sections } from '../lib/methods/sections';
 import { stateFromHash } from '../lib/state';
@@ -30,8 +31,11 @@ beforeEach(() => {
 
 async function methods(files: Record<string, unknown> = {}, hash = '#/methods') {
   const { props, loc } = await fixturePage(hash, files);
+  // What the page itself asks the loader for, not the report's first load.
+  const load = vi.spyOn(props.page.loader, 'load');
+  const table = vi.spyOn(props.page.loader, 'table');
   render(App, props);
-  return { main: screen.getByRole('main'), loc, page: props.page };
+  return { main: screen.getByRole('main'), loc, page: props.page, load, table };
 }
 
 const article = () => screen.getByRole('main').querySelector('article') as HTMLElement;
@@ -165,6 +169,15 @@ describe('the methods page', () => {
     expect(text).toContain('0 of the 7 force-pushes in the window (0%) and 0 of the 6 merges in the window have no commit to link to');
     const kinds = screen.getByRole('table', { name: /Where each pull request’s kind came from/ });
     expect(within(kinds).getByRole('row', { name: /the PR’s checklist/ }).textContent).toMatch(/the PR’s checklist\s*4\s*0\s*4/);
+  });
+
+  it("loads only the years from the default period's start onward, and only their tables", async () => {
+    // With 2025 before the fixture's year: the default period, from
+    // 2026-05-15, needs 2026's files alone.
+    const { load, table } = await methods(withEarlierYear());
+    await waitFor(() => expect(screen.queryByRole('status')).toBeNull());
+    expect(load.mock.calls).toEqual([[[2026]]]);
+    expect(table.mock.calls).toEqual([[2026]]);
   });
 
   it('shows a loading state until the figures are computed', async () => {
