@@ -20,6 +20,8 @@ type fakeClock struct {
 	mu    sync.Mutex
 	now   time.Time
 	slept []time.Duration
+	// onSleep, when set, runs at the start of each sleep.
+	onSleep func()
 }
 
 func newFakeClock() *fakeClock {
@@ -35,6 +37,9 @@ func (c *fakeClock) Now() time.Time {
 func (c *fakeClock) Sleep(ctx context.Context, d time.Duration) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	if c.onSleep != nil {
+		c.onSleep()
+	}
 	c.slept = append(c.slept, d)
 	c.now = c.now.Add(d)
 	return ctx.Err()
@@ -49,7 +54,7 @@ func (c *fakeClock) advance(d time.Duration) {
 func (c *fakeClock) sleeps() []time.Duration {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	return slices.Clone(c.slept)
+	return append([]time.Duration{}, c.slept...)
 }
 
 // relation is one of an issue's relations, as Redmine lists it.
@@ -75,9 +80,13 @@ type request struct {
 	At     time.Time
 }
 
+// reply writes an answer of a spec's own in place of the fake's, at the
+// fake clock's time now.
+type reply func(w http.ResponseWriter, now time.Time)
+
 // fakeTracker answers Redmine's filtered issue list from issues. Requests
 // numbered failFrom to failFrom+failures-1, counting from 1, get
-// failStatus instead.
+// failStatus instead, and a request with a scripted reply gets that.
 type fakeTracker struct {
 	mu         sync.Mutex
 	clock      *fakeClock
@@ -86,17 +95,27 @@ type fakeTracker struct {
 	failFrom   int
 	failures   int
 	failStatus int
+	scripted   map[int]reply
 	requests   []request
 }
 
 func newFakeTracker(clock *fakeClock) *fakeTracker {
-	return &fakeTracker{clock: clock, issues: map[int]issue{}, failStatus: http.StatusServiceUnavailable}
+	return &fakeTracker{clock: clock, issues: map[int]issue{}, failStatus: http.StatusServiceUnavailable, scripted: map[int]reply{}}
 }
 
 func (f *fakeTracker) failRequests(from, n int) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.failFrom, f.failures = from, n
+}
+
+// script answers requests from to from+n-1, counting from 1, with rep.
+func (f *fakeTracker) script(from, n int, rep reply) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for i := range n {
+		f.scripted[from+i] = rep
+	}
 }
 
 func (f *fakeTracker) add(id int, typ string, relations ...relation) {
@@ -128,6 +147,7 @@ func (f *fakeTracker) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	})
 	n := len(f.requests)
 	failing := n >= f.failFrom && n < f.failFrom+f.failures
+	scripted := f.scripted[n]
 	type issueJSON struct {
 		ID      int `json:"id"`
 		Project struct {
@@ -155,6 +175,10 @@ func (f *fakeTracker) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	f.mu.Unlock()
 	f.clock.advance(f.latency)
 
+	if scripted != nil {
+		scripted(w, f.clock.Now())
+		return
+	}
 	if failing {
 		w.WriteHeader(f.failStatus)
 		return

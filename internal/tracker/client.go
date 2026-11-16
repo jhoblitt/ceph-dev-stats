@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"math"
 	"net/http"
 	"net/url"
 	"slices"
@@ -25,6 +26,10 @@ const MinInterval = time.Second
 
 // attempts is a request's first try and its three retries.
 const attempts = 4
+
+// maxRetryAfter is the longest Retry-After a run waits out; a tracker that
+// asks for longer is left alone until the operator runs again.
+const maxRetryAfter = 5 * time.Minute
 
 // maxBody bounds what is read of one answer; a page of 100 issues with
 // their relations is a few hundred kilobytes.
@@ -71,8 +76,8 @@ type Client struct {
 // Option configures a Client.
 type Option func(*Client)
 
-// WithHTTPClient replaces the default HTTP client. Its cookie jar, if it
-// has one, is not used.
+// WithHTTPClient replaces the default HTTP client. Its cookie jar and its
+// redirect policy, if it has them, are not used.
 func WithHTTPClient(h *http.Client) Option {
 	return func(c *Client) { c.http = h }
 }
@@ -124,11 +129,12 @@ func NewClient(baseURL string, opts ...Option) (*Client, error) {
 		o(c)
 	}
 	c.interval = max(c.interval, MinInterval)
-	if c.http.Jar != nil {
-		h := *c.http
-		h.Jar = nil
-		c.http = &h
-	}
+	h := *c.http
+	h.Jar = nil
+	// A redirect followed inside one call would skip the pacing, so the
+	// client never follows one: get turns it into an error.
+	h.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
+	c.http = &h
 	return c, nil
 }
 
@@ -143,8 +149,12 @@ func userAgent() string {
 
 // Tickets asks for at most BatchSize tickets in one request, with every
 // status and with relations. Every ticket asked for is in the answer: one
-// the tracker did not return, private or deleted, has an empty type. A
-// failed request is retried three times with backoff.
+// the tracker did not return, private or deleted, has an empty type; an
+// answer the tracker says it cut short is an error instead. A request that
+// failed in a way a retry could fix is retried three times, after 2, 4 and
+// 8 seconds or the longer wait a Retry-After asks for; a Retry-After of
+// more than five minutes is an error. A redirect is an error, never
+// followed.
 func (c *Client) Tickets(ctx context.Context, ids []int) (map[int]Ticket, error) {
 	ids = slices.Compact(slices.Sorted(slices.Values(ids)))
 	if len(ids) == 0 {
@@ -176,18 +186,27 @@ func (c *Client) Tickets(ctx context.Context, ids []int) (map[int]Ticket, error)
 		if attempt == attempts {
 			return nil, fmt.Errorf("no usable answer after %d attempts: %w", attempts, t)
 		}
+		if t.retryAfter > maxRetryAfter {
+			return nil, fmt.Errorf("tracker asked to wait %s before the next request, more than %s: %w", t.retryAfter, maxRetryAfter, t)
+		}
+		wait := max(2*time.Second<<(attempt-1), t.retryAfter)
 		c.logger.WarnContext(ctx, "retrying tracker request",
 			slog.Int("attempt", attempt),
 			slog.Int("tickets", len(ids)),
+			slog.Duration("wait", wait),
 			slog.String("error", t.Error()))
-		if err := c.clock.Sleep(ctx, 2*time.Second<<(attempt-1)); err != nil {
+		if err := c.clock.Sleep(ctx, wait); err != nil {
 			return nil, err
 		}
 	}
 }
 
 // transient marks a failure that a retry of the same request could fix.
-type transient struct{ err error }
+type transient struct {
+	err error
+	// retryAfter is the wait the tracker asked for, zero when it did not.
+	retryAfter time.Duration
+}
 
 func (t transient) Error() string { return t.err.Error() }
 func (t transient) Unwrap() error { return t.err }
@@ -233,31 +252,74 @@ func (c *Client) get(ctx context.Context, target string) ([]issue, error) {
 		if ctx.Err() != nil {
 			return nil, ctx.Err()
 		}
-		return nil, transient{err}
+		return nil, transient{err: err}
 	}
 	raw, readErr := io.ReadAll(io.LimitReader(resp.Body, maxBody))
 	readErr = errors.Join(readErr, resp.Body.Close())
 
 	switch {
 	case resp.StatusCode == http.StatusTooManyRequests || resp.StatusCode >= http.StatusInternalServerError:
-		return nil, transient{fmt.Errorf("tracker answered HTTP %d", resp.StatusCode)}
+		return nil, transient{
+			err:        fmt.Errorf("tracker answered HTTP %d", resp.StatusCode),
+			retryAfter: c.retryAfter(resp.Header.Get("Retry-After")),
+		}
+	case resp.StatusCode >= http.StatusMultipleChoices && resp.StatusCode < http.StatusBadRequest:
+		return nil, redirected(resp)
 	case resp.StatusCode != http.StatusOK:
 		return nil, fmt.Errorf("tracker answered HTTP %d: %s", resp.StatusCode, excerpt(raw))
 	case readErr != nil:
-		return nil, transient{fmt.Errorf("reading tracker answer: %w", readErr)}
+		return nil, transient{err: fmt.Errorf("reading tracker answer: %w", readErr)}
 	case len(bytes.TrimSpace(raw)) == 0:
-		return nil, transient{errors.New("empty tracker answer")}
+		return nil, transient{err: errors.New("empty tracker answer")}
 	}
 	var page struct {
-		Issues *[]issue `json:"issues"`
+		Issues     *[]issue `json:"issues"`
+		TotalCount *int     `json:"total_count"`
 	}
 	if err := json.Unmarshal(raw, &page); err != nil {
-		return nil, transient{fmt.Errorf("malformed tracker answer: %w", err)}
+		return nil, transient{err: fmt.Errorf("malformed tracker answer: %w", err)}
 	}
 	if page.Issues == nil {
-		return nil, transient{errors.New("tracker answer without issues")}
+		return nil, transient{err: errors.New("tracker answer without issues")}
+	}
+	// Not retried: a page cut short by the tracker's own limit would be cut
+	// short again, and the tickets left out must not be saved as unknown.
+	if page.TotalCount != nil && *page.TotalCount > len(*page.Issues) {
+		return nil, fmt.Errorf("tracker returned %d of %d matching tickets, a batch cut short", len(*page.Issues), *page.TotalCount)
 	}
 	return *page.Issues, nil
+}
+
+// retryAfter is the wait a Retry-After header value asks for, in seconds
+// or until an HTTP date, and zero when there is none or it is unreadable.
+func (c *Client) retryAfter(v string) time.Duration {
+	v = strings.TrimSpace(v)
+	if v == "" {
+		return 0
+	}
+	s, err := strconv.Atoi(v)
+	if errors.Is(err, strconv.ErrRange) && !strings.HasPrefix(v, "-") {
+		// Too many digits to parse is still a wait, and far over the cap.
+		s, err = math.MaxInt32, nil
+	}
+	if err == nil {
+		// Bounded so that a huge value cannot overflow a Duration.
+		return time.Duration(min(max(s, 0), math.MaxInt32)) * time.Second
+	}
+	if t, err := http.ParseTime(v); err == nil {
+		return max(t.Sub(c.clock.Now()), 0)
+	}
+	return 0
+}
+
+// redirected is the error for a redirect: the tracker has moved, and its
+// URL is the operator's to change.
+func redirected(resp *http.Response) error {
+	loc, err := resp.Location()
+	if err != nil {
+		return fmt.Errorf("tracker answered HTTP %d without a usable Location, so the tracker URL may need changing", resp.StatusCode)
+	}
+	return fmt.Errorf("tracker answered HTTP %d, a redirect to host %s, so the tracker URL may need changing", resp.StatusCode, loc.Host)
 }
 
 // tickets is the answer to a request for ids, with an empty type for each
