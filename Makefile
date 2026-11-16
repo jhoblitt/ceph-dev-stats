@@ -79,6 +79,18 @@ test: ## Run every suite with the race detector
 .PHONY: check
 check: generate-check fmt-check vet lint fix-check tidy-check test ## The local gate
 
+# The committed data under data/. Outside the go-conventions contract above.
+
+.PHONY: data-check
+data-check: ## Validate the hand-edited tables in data/ against the records
+	go run ./cmd/cephstats check
+
+# The reports rank accounts by comment count: for whoever edits the tables,
+# never for CI's public log.
+.PHONY: data-report
+data-report: ## Validate the tables and report what they do not yet match
+	go run ./cmd/cephstats check --report
+
 # The statistics site under site/ (Vite, Svelte, TypeScript). Outside the
 # go-conventions contract above. The site fetches its data at run time from
 # site/public/data/, which `cephstats rollup` writes and git ignores.
