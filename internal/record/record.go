@@ -63,6 +63,8 @@ type Record struct {
 	Reviews    []Review   `json:"reviews"`
 	Comments   []Comment  `json:"comments"`
 	Disclosure Disclosure `json:"disclosure"`
+	// KindHints is nil when the pull request gives no hint.
+	KindHints *KindHints `json:"kind_hints,omitempty"`
 }
 
 // Actor is an account; Bot is GitHub's own typing of it.

@@ -66,6 +66,7 @@ func FromEntry(e fetch.Entry) (record.Record, error) {
 		Reviews:     reviews(e.Reviews),
 		Comments:    comments(e.Comments),
 		Disclosure:  Candidates(messages, e.Body),
+		KindHints:   Hints(messages, e.Body),
 	}, nil
 }
 
