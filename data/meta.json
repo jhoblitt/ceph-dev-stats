@@ -1,9 +1,9 @@
 {
   "repo": "ceph/ceph",
   "window_start": "2026-05-15T00:00:00Z",
-  "fetched_through": "2026-11-16T05:31:36Z",
+  "fetched_through": "2026-11-16T07:36:36Z",
   "github_counts": {
-    "opened_in_window": 4990,
-    "open": 2025
+    "opened_in_window": 4993,
+    "open": 2027
   }
 }
