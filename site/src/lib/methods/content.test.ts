@@ -49,6 +49,8 @@ const TYPED: Record<string, Record<string, string>> = {
     '5': 'the fewest pull requests a label must be on for check to require it: a rule of the code, minLabelPRs',
     '0.5%': 'the most the record counts may differ from GitHub’s: a rule of the code',
   },
+  'review-capacity': { '53': 'the longest period shown by week: a rule of the code, stepFor' },
+  'disclosure-comparison': { '90': 'the 90th percentile, the name of a statistic' },
   disclosure: {
     '2026-10-12': 'the date the trailer rule was seen as a draft: a fact about the world, dated',
     '2026-11-15': 'the date the tracker listed the motion as defeated: a fact about the world, dated',
@@ -71,10 +73,8 @@ describe('the section files', () => {
     expect(all.map((s) => s.id)).toEqual(shown);
   });
 
-  it('keeps an empty slot, not shown, for each section still to come', () => {
-    const pending = ORDER.filter((e) => typeof e !== 'string').map((e) => (e as { id: string }).id);
-    expect(pending).toEqual(['people-tables', 'review-capacity', 'disclosure-comparison']);
-    for (const id of pending) expect(files[fileOf(id)]).toBeUndefined();
+  it('has no section still waiting to be written', () => {
+    expect(ORDER.filter((e) => typeof e !== 'string')).toEqual([]);
   });
 
   it('gives every section and subheading its own id', () => {
