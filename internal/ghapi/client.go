@@ -9,6 +9,8 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"net/netip"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -45,7 +47,7 @@ type Query struct {
 	Text string
 }
 
-// Client sends GraphQL queries to one endpoint, one at a time.
+// Client sends GraphQL queries to one endpoint.
 type Client struct {
 	endpoint string
 	token    string
@@ -74,8 +76,14 @@ func WithLogger(l *slog.Logger) Option {
 	return func(c *Client) { c.logger = l }
 }
 
-// NewClient returns a client that authenticates to endpoint with token.
-func NewClient(endpoint, token string, opts ...Option) *Client {
+// NewClient returns a client that authenticates to endpoint with token. The
+// endpoint must be https, or http to a loopback host, so that the token never
+// crosses a network in clear text, and must carry no user, password or
+// fragment.
+func NewClient(endpoint, token string, opts ...Option) (*Client, error) {
+	if err := checkEndpoint(endpoint); err != nil {
+		return nil, err
+	}
 	c := &Client{
 		endpoint: endpoint,
 		token:    token,
@@ -86,7 +94,38 @@ func NewClient(endpoint, token string, opts ...Option) *Client {
 	for _, o := range opts {
 		o(c)
 	}
-	return c
+	return c, nil
+}
+
+func checkEndpoint(endpoint string) error {
+	u, err := url.Parse(endpoint)
+	if err != nil {
+		// The url.Error repeats the URL, and its cause can quote part of a
+		// password, so neither is shown for a URL that may carry one.
+		if strings.Contains(endpoint, "@") {
+			return errors.New("parsing API URL: not a valid URL")
+		}
+		return fmt.Errorf("parsing API URL: %w", errors.Unwrap(err))
+	}
+	switch {
+	case u.User != nil:
+		return errors.New("API URL must not carry a user or password")
+	case u.Host == "":
+		return fmt.Errorf("API URL %s: no host", u)
+	case u.Fragment != "":
+		return fmt.Errorf("API URL %s: must not carry a fragment", u)
+	case u.Scheme != "https" && (u.Scheme != "http" || !loopback(u.Hostname())):
+		return fmt.Errorf("API URL %s: scheme must be https, or http to a loopback host, so that the token is not sent in clear text", u)
+	}
+	return nil
+}
+
+func loopback(host string) bool {
+	if strings.EqualFold(host, "localhost") {
+		return true
+	}
+	a, err := netip.ParseAddr(host)
+	return err == nil && a.IsLoopback()
 }
 
 func sleepBackoff(ctx context.Context, attempt int) error {

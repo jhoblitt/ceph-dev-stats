@@ -46,6 +46,12 @@ type Config struct {
 	// cache holds entries of an older FormatVersion, so that every one of
 	// them is listed and fetched again.
 	SinceIsDefault bool
+	// DefaultSince, when set, is the since a walk without --since would
+	// have used on this run. meta.json's walk_started becomes, through
+	// extract, where the next default walk starts, so a walk from a later
+	// Since, which skipped the pull requests updated in between, leaves
+	// meta.json as it was. Zero, as for --full, lets any Since write it.
+	DefaultSince time.Time
 	// PageSize is the number of pull requests asked for at first; it
 	// halves when a page repeatedly fails. DefaultPageSize when zero.
 	PageSize int
@@ -69,7 +75,8 @@ type walker struct {
 // Run walks pull requests into cfg.CacheDir in three phases: those updated
 // since cfg.Since, most recent first; every open one; then the prior-PR
 // count of each author not yet in authors.json. It ends by writing GitHub's
-// counts to meta.json. A pull request already cached at the listed
+// counts to meta.json, unless cfg.Since is later than a set cfg.DefaultSince,
+// when it leaves meta.json as it was and warns. A pull request already cached at the listed
 // updatedAt, in the current FormatVersion, is not fetched again, so a run
 // that stops early can be repeated. While the cache holds entries of an
 // older FormatVersion, a walk from a default since starts at WindowStart
@@ -103,6 +110,15 @@ func Run(ctx context.Context, client *ghapi.Client, cfg Config) error {
 	}
 	if err := w.baselines(ctx); err != nil {
 		return err
+	}
+	if !cfg.DefaultSince.IsZero() && cfg.Since.After(cfg.DefaultSince) {
+		w.log.WarnContext(ctx, "coverage mark not advanced",
+			slog.String("reason", "the walk started later than the default since, so it may have missed pull requests updated in between"),
+			slog.Time("since", cfg.Since),
+			slog.Time("default_since", cfg.DefaultSince),
+			slog.String("path", filepath.Join(cfg.CacheDir, MetaFile)))
+		w.log.InfoContext(ctx, "walk finished")
+		return nil
 	}
 	meta, err := w.counts(ctx)
 	if err != nil {
@@ -178,14 +194,15 @@ type reviewNode struct {
 }
 
 // prNode is a listed pull request. Its connection fields shadow Entry's
-// lists when decoding.
+// lists when decoding; they are pointers so that a connection missing from
+// the reply, or null, is told apart from an empty one.
 type prNode struct {
 	Entry
-	Labels        connection[Label]       `json:"labels"`
-	Commits       connection[commitNode]  `json:"commits"`
-	Comments      connection[commentNode] `json:"comments"`
-	Reviews       connection[reviewNode]  `json:"reviews"`
-	TimelineItems connection[Event]       `json:"timelineItems"`
+	Labels        *connection[Label]       `json:"labels"`
+	Commits       *connection[commitNode]  `json:"commits"`
+	Comments      *connection[commentNode] `json:"comments"`
+	Reviews       *connection[reviewNode]  `json:"reviews"`
+	TimelineItems *connection[Event]       `json:"timelineItems"`
 }
 
 // databaseID parses a fullDatabaseId of pull request number; null is no id.
@@ -256,9 +273,11 @@ func (w *walker) listPage(ctx context.Context, states []string, after string) (c
 		if states != nil {
 			vars["states"] = states
 		}
+		// Pointers, so that a reply without either key is told apart from
+		// an empty last page.
 		var resp struct {
-			Repository struct {
-				PullRequests connection[prNode] `json:"pullRequests"`
+			Repository *struct {
+				PullRequests *connection[prNode] `json:"pullRequests"`
 			} `json:"repository"`
 		}
 		err := w.client.Do(ctx, ghapi.PullRequests, vars, &resp)
@@ -269,7 +288,13 @@ func (w *walker) listPage(ctx context.Context, states []string, after string) (c
 				slog.String("error", err.Error()))
 			continue
 		}
-		return resp.Repository.PullRequests, err
+		if err != nil {
+			return connection[prNode]{}, err
+		}
+		if resp.Repository == nil || resp.Repository.PullRequests == nil {
+			return connection[prNode]{}, errors.New("reply without repository.pullRequests")
+		}
+		return *resp.Repository.PullRequests, nil
 	}
 }
 
@@ -343,14 +368,18 @@ func (w *walker) store(ctx context.Context, n *prNode) (bool, error) {
 }
 
 // rest returns first's nodes followed by every later page of connection c
-// of pull request number.
-func rest[T any](ctx context.Context, w *walker, number int, c ghapi.Connection, first connection[T]) ([]T, error) {
+// of pull request number. A first page or a later one that the reply left
+// out, or gave as null, is an error rather than an empty last page.
+func rest[T any](ctx context.Context, w *walker, number int, c ghapi.Connection, first *connection[T]) ([]T, error) {
+	if first == nil {
+		return nil, fmt.Errorf("listing pull request %d: reply without %s", number, c)
+	}
 	nodes := first.Nodes
 	info := first.PageInfo
 	for info.HasNextPage {
 		var resp struct {
 			Repository struct {
-				PullRequest map[string]connection[T] `json:"pullRequest"`
+				PullRequest map[string]*connection[T] `json:"pullRequest"`
 			} `json:"repository"`
 		}
 		vars := map[string]any{
@@ -361,6 +390,9 @@ func rest[T any](ctx context.Context, w *walker, number int, c ghapi.Connection,
 			return nil, fmt.Errorf("paging %s of pull request %d: %w", c, number, err)
 		}
 		page := resp.Repository.PullRequest[string(c)]
+		if page == nil {
+			return nil, fmt.Errorf("paging %s of pull request %d: reply without repository.pullRequest.%s", c, number, c)
+		}
 		nodes = append(nodes, page.Nodes...)
 		info = page.PageInfo
 	}
@@ -409,18 +441,20 @@ func (w *walker) baselines(ctx context.Context) error {
 		for i, login := range batch {
 			vars["q"+strconv.Itoa(i)] = fmt.Sprintf("repo:%s/%s is:pr author:%s created:<%s", Owner, Name, login, before)
 		}
-		var resp map[string]struct {
-			IssueCount int `json:"issueCount"`
+		// Pointers, so that a missing or null answer is not a count of 0,
+		// which would be kept for good.
+		var resp map[string]*struct {
+			IssueCount *int `json:"issueCount"`
 		}
 		if err := w.client.Do(ctx, ghapi.AuthorBaselines(len(batch)), vars, &resp); err != nil {
 			return fmt.Errorf("counting prior pull requests: %w", err)
 		}
 		for i, login := range batch {
-			r, ok := resp["a"+strconv.Itoa(i)]
-			if !ok {
+			r := resp["a"+strconv.Itoa(i)]
+			if r == nil || r.IssueCount == nil {
 				return fmt.Errorf("counting prior pull requests: no answer for %s", login)
 			}
-			known[login] = r.IssueCount
+			known[login] = *r.IssueCount
 		}
 		if err := writeJSON(path, known); err != nil {
 			return err
