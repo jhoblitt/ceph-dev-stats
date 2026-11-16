@@ -29,8 +29,9 @@
   // only a field at a time: the whole window, the default, and the last six
   // months when the window reaches further back. A window no longer than
   // that is the whole window, so it is one choice, named for what it is.
-  const whole = { label: `All, from ${formatDate(meta.window_start)}`, from: first, to: last };
-  const presets = [
+  // The whole window's short name stands in for its full one on a narrow pinned bar.
+  const whole = { label: `All, from ${formatDate(meta.window_start)}`, short: 'All', from: first, to: last };
+  const presets: { label: string; short?: string; from: string; to: string }[] = [
     ...(first < recent.from ? [{ label: `Last ${RECENT_MONTHS} months`, from: recent.from, to: recent.to }] : []),
     whole,
   ];
@@ -201,47 +202,125 @@
       change: (v) => set({ reopenedOnly: v === 'only' }),
     },
   ]);
+
+  // Once the reader scrolls past the Period row, the row itself, the same
+  // controls, is pinned to the top of the viewport, and its place in the bar
+  // keeps the size the row had there, so nothing on the page moves and
+  // pinning never moves the place it is decided by.
+  let bar = $state<HTMLElement>();
+  let place = $state<HTMLElement>();
+  let banner = $state<HTMLElement>();
+  let held = $state<{ width: number; height: number } | null>(null);
+  const pinned = $derived(held !== null);
+
+  // The row's size laid out in its place; a pinned row is put back there for
+  // the measure and pinned again before anything is drawn.
+  function measure(el: HTMLElement) {
+    const was = el.classList.contains('pinned');
+    el.classList.remove('pinned');
+    const { width, height } = el.getBoundingClientRect();
+    if (was) el.classList.add('pinned');
+    return { width, height };
+  }
+
+  function follow() {
+    if (!place) return;
+    const past = place.getBoundingClientRect().top < 0;
+    if (past && held === null) held = measure(place);
+    else if (!past && held !== null) held = null;
+  }
+
+  // A new width lays the row out anew in its place.
+  function resized() {
+    if (place && held !== null) held = measure(place);
+    follow();
+  }
+
+  $effect(() => {
+    follow();
+    window.addEventListener('scroll', follow, { passive: true });
+    window.addEventListener('resize', resized);
+    return () => {
+      window.removeEventListener('scroll', follow);
+      window.removeEventListener('resize', resized);
+    };
+  });
+
+  // What the page scrolls to clears the pinned row: its height as drawn,
+  // which the style gives before it is first drawn.
+  $effect(() => {
+    const el = banner;
+    if (!pinned || el === undefined || typeof ResizeObserver !== 'function') return;
+    const root = document.documentElement;
+    const observer = new ResizeObserver(() => root.style.setProperty('--period-banner', `${el.offsetHeight}px`));
+    observer.observe(el);
+    return () => {
+      observer.disconnect();
+      root.style.removeProperty('--period-banner');
+    };
+  });
+
+  function toFilters() {
+    bar?.scrollIntoView({ block: 'start' });
+    bar?.focus({ preventScroll: true });
+  }
 </script>
 
-<section class="filter-bar" aria-labelledby="{uid}-heading">
+<section class="filter-bar" aria-labelledby="{uid}-heading" tabindex="-1" bind:this={bar}>
   <h2 id="{uid}-heading" class="visually-hidden">Filters</h2>
 
-  <fieldset>
-    <legend>Period</legend>
-    <div class="days">
-      <div class="field">
-        <label for="{uid}-from">From</label>
-        <input
-          id="{uid}-from"
-          type="date"
-          min={first}
-          max={filters.to}
-          value={filters.from}
-          onchange={(e) => setDay('from', e.currentTarget)}
-        />
-      </div>
-      <div class="field">
-        <label for="{uid}-to">To</label>
-        <input
-          id="{uid}-to"
-          type="date"
-          min={filters.from}
-          max={last}
-          value={filters.to}
-          onchange={(e) => setDay('to', e.currentTarget)}
-        />
-      </div>
-      <div class="presets">
-        {#each presets as p (p.label)}
-          <button
-            type="button"
-            aria-pressed={filters.from === p.from && filters.to === p.to ? 'true' : 'false'}
-            onclick={() => set({ from: p.from, to: p.to })}>{p.label}</button
-          >
-        {/each}
+  <div
+    class="period-slot"
+    class:pinned
+    bind:this={place}
+    style:--held-width={held ? `${held.width}px` : undefined}
+    style:--held-height={held ? `${held.height}px` : undefined}
+  >
+    <div class="period-banner" bind:this={banner}>
+      <div class="period-row">
+        <fieldset>
+          <legend>Period</legend>
+          <div class="days">
+            <div class="field">
+              <label for="{uid}-from">From</label>
+              <input
+                id="{uid}-from"
+                type="date"
+                min={first}
+                max={filters.to}
+                value={filters.from}
+                onchange={(e) => setDay('from', e.currentTarget)}
+              />
+            </div>
+            <div class="field">
+              <label for="{uid}-to">To</label>
+              <input
+                id="{uid}-to"
+                type="date"
+                min={filters.from}
+                max={last}
+                value={filters.to}
+                onchange={(e) => setDay('to', e.currentTarget)}
+              />
+            </div>
+            <div class="presets">
+              {#each presets as p (p.label)}
+                <button
+                  type="button"
+                  aria-pressed={filters.from === p.from && filters.to === p.to ? 'true' : 'false'}
+                  data-short={p.short}
+                  onclick={() => set({ from: p.from, to: p.to })}><span class="full">{p.label}</span></button
+                >
+              {/each}
+            </div>
+          </div>
+        </fieldset>
+        {#if pinned}
+          <button type="button" class="to-filters" onclick={toFilters}><span aria-hidden="true">↑</span> Filters</button>
+        {/if}
       </div>
     </div>
-  </fieldset>
+  </div>
 
   <fieldset aria-describedby="{uid}-target-hint">
     <legend>Target</legend>
@@ -380,6 +459,7 @@
 
   /* Every control fits the bar's width on a narrow phone: a field may be no
      wider than the bar, and what is in it shrinks or wraps. */
+  .period-slot,
   fieldset,
   .field,
   .people,
@@ -488,7 +568,8 @@
 
   .person button,
   .branch button,
-  .presets button {
+  .presets button,
+  .to-filters {
     box-sizing: border-box;
     height: var(--control-height);
     padding: var(--space-1) var(--space-2);
@@ -577,6 +658,154 @@
     outline: 2px solid var(--focus);
     outline-offset: -2px;
     box-shadow: inset 0 0 0 4px var(--page);
+  }
+
+  /* Pinned, the Period row is a bar across the top of the viewport, its
+     controls in the page's column: the period at the left, and at the right
+     a way back to the other filters. Nothing in it wraps, whatever the
+     typeface: it is one line of controls on a wide screen and two on a
+     narrower one, and what is too wide gives way inside its line. What the
+     page scrolls to sits below the bar. */
+  .filter-bar {
+    --banner-pad: 0.375rem;
+    --back-width: 6rem;
+  }
+
+  @media screen {
+    :global(html:has(.period-slot)) {
+      --period-banner: calc(1px + 2 * 0.375rem + 2.375rem);
+      scroll-padding-top: var(--period-banner);
+    }
+
+    .pinned {
+      width: var(--held-width);
+      height: var(--held-height);
+    }
+
+    .pinned .period-banner {
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      z-index: 10;
+      background: var(--surface);
+      border-bottom: 1px solid var(--border-strong);
+      box-shadow: 0 2px 8px light-dark(rgb(0 0 0 / 0.08), rgb(0 0 0 / 0.5));
+    }
+
+    /* The button sits over the end of the row's last line, which keeps room for it. */
+    .pinned .period-row {
+      display: grid;
+      align-items: center;
+      max-width: var(--content-max);
+      margin: 0 auto;
+      padding: var(--banner-pad) var(--space-5);
+    }
+
+    .pinned fieldset,
+    .to-filters {
+      grid-area: 1 / 1;
+    }
+
+    .to-filters {
+      justify-self: end;
+      width: var(--back-width);
+    }
+
+    .pinned legend {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      overflow: hidden;
+      clip-path: inset(50%);
+      white-space: nowrap;
+    }
+
+    .pinned .days {
+      flex-wrap: nowrap;
+      gap: var(--banner-pad) var(--space-2);
+    }
+
+    .pinned .days .field {
+      flex: none;
+      gap: var(--space-1);
+    }
+
+    .pinned .days .field label {
+      min-width: 0;
+    }
+
+    .pinned .presets {
+      flex: 0 1 auto;
+      flex-wrap: nowrap;
+      min-width: 0;
+      padding-inline-end: calc(var(--back-width) + var(--space-2));
+    }
+
+    /* A name too wide for its control is cut short, never wrapped. */
+    .pinned .presets button,
+    .to-filters {
+      min-width: 0;
+      overflow: hidden;
+      white-space: nowrap;
+      text-overflow: ellipsis;
+    }
+  }
+
+  /* Two lines: the dates side by side, a half of the line each, read From
+     then To with their names left to assistive technology; under them the
+     choices, the whole window's by its short name. */
+  @media screen and (width < 52rem) {
+    :global(html:has(.period-slot)) {
+      --period-banner: calc(1px + 3 * 0.375rem + 2 * 2.375rem);
+    }
+
+    .pinned .days {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+      grid-template-rows: var(--control-height) var(--control-height);
+    }
+
+    .pinned .days .field label,
+    .pinned [data-short] .full {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      overflow: hidden;
+      clip-path: inset(50%);
+      white-space: nowrap;
+    }
+
+    .pinned input[type='date'] {
+      width: 100%;
+      min-width: 0;
+      padding-inline: var(--space-1);
+    }
+
+    .pinned .presets {
+      grid-column: 1 / -1;
+    }
+
+    /* Drawn only, so the choice keeps its full name for assistive technology. */
+    .pinned [data-short]::after {
+      content: attr(data-short) / '';
+    }
+
+    .to-filters {
+      align-self: end;
+    }
+  }
+
+  @media screen and (width < 720px) {
+    .pinned .period-row {
+      padding-inline: var(--space-4);
+    }
+  }
+
+  @media print {
+    .to-filters {
+      display: none;
+    }
   }
 
   @media (width < 480px) {
