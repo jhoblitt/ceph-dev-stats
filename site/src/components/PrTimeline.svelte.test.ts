@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/svelte';
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/svelte';
 import { get } from 'svelte/store';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import App from '../App.svelte';
 import { BASE, fixtureFetch } from '../lib/__fixtures__/fetch';
 import rawEvents2026 from '../lib/__fixtures__/data/events-2026.json';
@@ -113,7 +113,7 @@ function withEveryKind(): Record<string, unknown> {
 async function timeline(hash: string, files: Record<string, unknown> = {}) {
   const { props } = await fixturePage(hash, files);
   render(App, { props });
-  return screen.findByRole('region', { name: /^Timeline of #/ });
+  return screen.findByRole('region', { name: /^Pull request #/ });
 }
 
 describe('PrTimeline', () => {
@@ -240,14 +240,14 @@ describe('PrTimeline', () => {
   it('starts a new PR’s timeline afresh, not carrying over the last one’s focused mark', async () => {
     const { props } = await fixturePage('#/?target=all&pr=66600');
     render(App, { props });
-    const first = await screen.findByRole('region', { name: 'Timeline of #66600' });
+    const first = await screen.findByRole('region', { name: 'Pull request #66600' });
     const marks = within(await within(first).findByRole('group', { name: /^The marks/ })).getAllByRole('link');
     (marks[0] as HTMLElement).focus();
     await fireEvent.keyDown(marks[0] as HTMLElement, { key: 'End' });
     expect(marks.at(-1)?.tabIndex).toBe(0);
     // #66100 is in the same year's table, so only the key starts its chart afresh.
     props.page.selection.update((st) => ({ ...st, pr: 66100 }));
-    const next = await screen.findByRole('region', { name: 'Timeline of #66100' });
+    const next = await screen.findByRole('region', { name: 'Pull request #66100' });
     const nextMarks = within(await within(next).findByRole('group', { name: /^The marks/ })).getAllByRole('link');
     expect(nextMarks.map((m) => m.tabIndex).indexOf(0)).toBe(0);
   });
@@ -315,7 +315,7 @@ describe('before the timeline is on screen', () => {
     const years = yearsForState(meta, get(selection));
     const data = createDataStore(loader, selection, years, await loader.load(years));
     render(App, { props: { page: { meta, selection, data, view: createViewStore(selection, data), loader } } });
-    const section = await screen.findByRole('region', { name: 'Timeline of #67000' });
+    const section = await screen.findByRole('region', { name: 'Pull request #67000' });
     await new Promise((r) => setTimeout(r, 20));
     const tables = () => fetched.requested.filter((u) => u.includes('table-'));
     expect(tables()).toEqual([]);
@@ -324,5 +324,81 @@ describe('before the timeline is on screen', () => {
     for (const o of observed) if (o.node === section) o.cb([{ isIntersecting: true }]);
     await waitFor(() => expect(tables()).toEqual([`${BASE}table-2026.json`]));
     expect(await within(section).findByRole('group', { name: 'The marks on the line, in time order' })).toBeTruthy();
+  });
+});
+
+// The chosen PR's section: what it is, then its timeline, between the lanes
+// and the PR table, and the reader brought to it when a PR is chosen.
+describe('the chosen PR’s section', () => {
+  const scrolled: Element[] = [];
+  const real = Element.prototype.scrollIntoView;
+  beforeAll(() => {
+    Element.prototype.scrollIntoView = vi.fn(function (this: Element) {
+      scrolled.push(this);
+    });
+  });
+  afterEach(() => {
+    scrolled.length = 0;
+  });
+  afterAll(() => {
+    Element.prototype.scrollIntoView = real;
+  });
+
+  it('sits between the lanes and the PR table, its panel before its timeline', async () => {
+    const section = await timeline('#/?target=all&pr=66600');
+    const heads = screen.getAllByRole('heading', { level: 2 }).map((h) => h.textContent?.trim());
+    const at = heads.indexOf('Pull request #66600');
+    expect(heads.slice(at - 1, at + 2)).toEqual(['Timelines', 'Pull request #66600', 'Pull requests']);
+    const panel = within(section).getByRole('group', { name: 'Selected PR #66600' });
+    const chart = await within(section).findByRole('figure', { name: 'The life of #66600' });
+    expect(panel.compareDocumentPosition(chart) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it('leaves the reader where the page starts for a PR the address names on arrival', async () => {
+    await timeline('#/?target=all&pr=66600');
+    await new Promise((r) => setTimeout(r, 20));
+    expect(scrolled).toEqual([]);
+    expect(document.activeElement?.id).not.toBe('pr-heading');
+  });
+
+  it('brings the reader to it, its heading focused, when a PR is chosen from a table row', async () => {
+    const { props } = await fixturePage('#/?target=all');
+    render(App, { props });
+    const table = within(screen.getByRole('region', { name: 'Pull requests' }));
+    await fireEvent.click(await table.findByRole('button', { name: 'doc: fix a typo' }));
+    const section = await screen.findByRole('region', { name: 'Pull request #66510' });
+    await waitFor(() => expect(scrolled).toEqual([section]));
+    expect(document.activeElement).toBe(within(section).getByRole('heading', { level: 2 }));
+  });
+
+  it('brings the reader to it from a lane, and to the next PR chosen from the panel', async () => {
+    const { props } = await fixturePage('#/?target=all');
+    render(App, { props });
+    const lanes = within(screen.getByRole('region', { name: 'Timelines' }));
+    await fireEvent.click(within(lanes.getByRole('list', { name: /PRs in the lanes/ })).getByRole('link', { name: '#66800' }));
+    const section = await screen.findByRole('region', { name: 'Pull request #66800' });
+    await waitFor(() => expect(scrolled).toEqual([section]));
+    expect(document.activeElement?.id).toBe('pr-heading');
+    // #66800 backports #66500: showing that one brings the reader to the section's top again.
+    await fireEvent.click(await within(section).findByRole('button', { name: 'Show #66500 here' }));
+    await screen.findByRole('region', { name: 'Pull request #66500' });
+    await waitFor(() => expect(scrolled).toHaveLength(2));
+  });
+
+  it('says in one line when the filters leave the chosen PR out of the selection', async () => {
+    const line = /^This pull request is not in the current selection/;
+    // #66800 is a backport, to squid: outside the default target, main.
+    let section = await timeline('#/?target=main&pr=66800');
+    expect(within(section).getByText(line)).toBeTruthy();
+    cleanup();
+    section = await timeline('#/?target=all&pr=66800');
+    expect(within(section).queryByText(line)).toBeNull();
+    cleanup();
+    // #66600 is fixture-author-f's, not fixture-author-d's.
+    section = await timeline('#/?target=all&author=fixture-author-d&pr=66600');
+    expect(within(section).getByText(line).textContent?.replace(/\s+/g, ' ').trim()).toBe(
+      'This pull request is not in the current selection: the filters leave it out, so no chart, lane or table on this page counts it.',
+    );
+    expect(await within(section).findByRole('figure', { name: 'The life of #66600' })).toBeTruthy();
   });
 });

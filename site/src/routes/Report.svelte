@@ -55,10 +55,9 @@
 <LlmUse />
 <DotPlot />
 <Lanes order={laneOrder} orderName={laneOrderName} rowsName={laneRowsName} />
+<!-- The chosen PR, what it is and then its timeline, between the views that choose one. -->
+<PrTimeline />
 <PrTable />
-{#if $selection.pr !== null}
-  <PrTimeline />
-{/if}
 <People />
 
 <style>

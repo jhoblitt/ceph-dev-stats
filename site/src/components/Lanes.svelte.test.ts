@@ -85,7 +85,7 @@ describe('Lanes', () => {
     expect(link.getAttribute('href')).toBe('#/?target=all&pr=66500');
     await fireEvent.click(link);
     expect(loc.hash()).toBe('#/?target=all&pr=66500');
-    expect(await screen.findByRole('region', { name: 'Timeline of #66500' })).toBeTruthy();
+    expect(await screen.findByRole('region', { name: 'Pull request #66500' })).toBeTruthy();
   });
 
   it('opens the PR of a tapped lane, from the tap’s own place, with no pointer move before it', async () => {

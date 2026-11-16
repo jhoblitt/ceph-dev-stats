@@ -225,9 +225,10 @@ describe('before the table is on screen', () => {
   });
 });
 
+// The selected PR's panel is in its own section with its timeline, above the table.
 describe('the selected PR', () => {
   function panel() {
-    return region().getByRole('group', { name: /^Selected PR/ });
+    return within(screen.getByRole('region', { name: /^Pull request #/ })).getByRole('group', { name: /^Selected PR/ });
   }
 
   it('links to GitHub, says its kind and what decided it, and links its tickets and the PR it backports', async () => {
@@ -264,6 +265,6 @@ describe('the selected PR', () => {
 
   it('shows nothing, and does not throw, for a PR not in the data', async () => {
     render(App, (await page('#/?pr=99999')).props);
-    expect(region().queryByRole('group', { name: /^Selected PR/ })).toBeNull();
+    expect(screen.queryByRole('group', { name: /^Selected PR/ })).toBeNull();
   });
 });

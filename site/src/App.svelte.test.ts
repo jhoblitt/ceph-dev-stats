@@ -56,12 +56,12 @@ describe('App', () => {
 
   it('shows one PR only when a PR is selected', async () => {
     render(App, (await page('#/?pr=66600')).props);
-    expect(screen.getByRole('heading', { name: 'Timeline of #66600' })).toBeTruthy();
+    expect(screen.getByRole('heading', { name: 'Pull request #66600' })).toBeTruthy();
   });
 
   it('has no PR section without a selected PR', async () => {
     render(App, (await page('')).props);
-    expect(screen.queryByRole('heading', { name: /^Timeline of #/ })).toBeNull();
+    expect(screen.queryByRole('heading', { name: /^Pull request #/ })).toBeNull();
   });
 
   it('says what day the data is as of', async () => {

@@ -6,7 +6,6 @@
   under it. Hovering a lane names its PR; choosing one opens its timeline.
 -->
 <script lang="ts">
-  import { tick } from 'svelte';
   import { TIMELINE_COLOURS as C } from '../lib/colours';
   import { periodRange } from '../lib/filters';
   import { formatCount } from '../lib/format';
@@ -191,10 +190,9 @@
     pointerX = e.offsetX;
   }
 
-  async function choose(number: number) {
+  // The chosen PR's section brings the reader to itself.
+  function choose(number: number) {
     selection.update((s) => ({ ...s, pr: number }));
-    await tick();
-    document.getElementById('pr')?.scrollIntoView?.({ behavior: 'smooth', block: 'start' });
   }
 
   // From the click's own place, so a tap on a touch screen, which moves no
@@ -202,7 +200,7 @@
   function onclick(e: MouseEvent) {
     const i = laneAt(e.offsetY - TOP, pitch, lanes.length);
     const lane = i === null ? undefined : lanes[i];
-    if (lane) void choose(lane.number);
+    if (lane) choose(lane.number);
   }
 
   const ENDED = { merged: 'merged', closed: 'closed unmerged', open: 'still open' } as const;
@@ -299,7 +297,7 @@
               aria-current={lane.number === $selection.pr ? 'true' : undefined}
               onclick={(e) => {
                 e.preventDefault();
-                void choose(lane.number);
+                choose(lane.number);
               }}>#{lane.number}</a
             >
           </li>

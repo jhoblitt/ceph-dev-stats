@@ -5,11 +5,10 @@
   come from each year's table file, fetched the first time the table is on
   screen, and only for the years its rows need. A row's title chooses that
   PR; its number links to it on GitHub, and its author's handle to theirs,
-  beside a control that filters by that author. The chosen PR's summary sits
-  above the table.
+  beside a control that filters by that author. The chosen PR's summary and
+  timeline are a section of their own, above this one.
 -->
 <script lang="ts">
-  import { locateRow } from '../lib/data';
   import { keepEqual } from '../lib/memo';
   import { isBot, personHandle } from '../lib/handles';
   import { getPage } from '../lib/page';
@@ -30,7 +29,6 @@
   } from '../lib/table';
   import { tableLoads } from '../lib/tables';
   import Person from './Person.svelte';
-  import SelectedPr from './SelectedPr.svelte';
   import { onScreen } from './onscreen';
 
   const { selection, data, view, loader } = getPage();
@@ -57,18 +55,9 @@
   const tables = loads.map;
   const request = (year: number) => loads.request(year);
 
-  const chosenRow = $derived.by(() => {
-    const pr = $selection.pr;
-    if (pr === null) return -1;
-    return dataset.prs.number.indexOf(pr);
-  });
-  const chosen = $derived(chosenRow < 0 ? null : { row: chosenRow, ...locateRow(dataset, chosenRow) });
-
   const needed = $derived(shown ? yearsOfRows(dataset, rows) : []);
   $effect(() => {
     for (const y of needed) request(y);
-    // A link naming a PR must not fetch a year's titles before the table is on screen.
-    if (chosen && shown) request(chosen.year);
   });
 
   const text = $derived(rowText(dataset, tables));
@@ -112,10 +101,6 @@
 
 <section id="table" aria-labelledby="table-heading" class:stale={$data.loading} {@attach onScreen(() => (shown = true))}>
   <h2 id="table-heading">Pull requests</h2>
-
-  {#if chosen}
-    <SelectedPr data={dataset} row={chosen.row} index={chosen.index} table={tables.get(chosen.year)} onchoose={choose} />
-  {/if}
 
   {#if empty}
     <p class="muted">no PRs match</p>
