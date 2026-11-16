@@ -62,6 +62,24 @@ describe('parseMeta', () => {
   it('rejects a time that is not a number', () => {
     expect(() => parseMeta({ ...rawMeta, fetched_through: '2026-11-15T06:00:00Z' })).toThrow(/fetched_through/);
   });
+
+  it('reads the people the data names, and which of them are bots', () => {
+    expect(meta.people).toHaveLength(11);
+    expect(meta.people[4]).toBe('fixture-reviewer-k');
+    expect(meta.people_bots).toEqual([10]);
+  });
+
+  it.each([
+    ['without people', { people: undefined }, /meta\.json.*"people"/],
+    ['with people that are not logins', { people: ['a', 3] }, /meta\.json.*"people"/],
+    ['with a login named twice', { people: ['a', 'b', 'a'], people_bots: [] }, /meta\.json.*"people".*"a" twice/],
+    ['without people_bots', { people_bots: undefined }, /meta\.json.*"people_bots"/],
+    ['with a bot index past the last person', { people_bots: [10, 11] }, /meta\.json.*"people_bots" has 11 at 1, outside "people" of 11/],
+    ['with a negative bot index', { people_bots: [-1] }, /meta\.json.*"people_bots"/],
+  ])('rejects a meta %s, naming the file and the field', (_name, patch, message) => {
+    expect(() => parseMeta({ ...rawMeta, ...patch })).toThrow(DataError);
+    expect(() => parseMeta({ ...rawMeta, ...patch })).toThrow(message);
+  });
 });
 
 describe('parsePrs', () => {
@@ -123,6 +141,22 @@ describe('parsePrs', () => {
     expect(() => parsePrs(bad, 'prs-2026.json', meta)).toThrow(new RegExp(`prs-2026\\.json.*"${column}".*row 3`));
   });
 
+  it("reads each PR's author, an index into people", () => {
+    const prs = parsePrs(prs2026, 'prs-2026.json', meta);
+    expect(prs.author).toBeInstanceOf(Int32Array);
+    expect([...prs.author]).toEqual(prs2026.author);
+    expect(meta.people[prs.author[0] as number]).toBe(table2026.authors[0]);
+  });
+
+  it.each([
+    ['past the last person', 11],
+    ['of -1, since every PR has an author', -1],
+  ])('rejects a year file whose author is %s, naming the file, the column and the row', (_name, value) => {
+    const bad = { ...prs2026, author: at3(prs2026.author, value) };
+    expect(() => parsePrs(bad, 'prs-2026.json', meta)).toThrow(DataError);
+    expect(() => parsePrs(bad, 'prs-2026.json', meta)).toThrow(/prs-2026\.json.*"author" has .* at row 3, outside "people" of 11/);
+  });
+
   it('accepts every kind in the dictionary and -1', () => {
     const kinds = [-1, 0, 1, 2, 3, 4, 4, 4, 4, 4];
     expect([...parsePrs({ ...prs2026, kind: kinds }, 'prs-2026.json', meta).kind]).toEqual(kinds);
@@ -137,6 +171,18 @@ describe('parseEvents', () => {
 
   it('rejects an event on a row the year does not have', () => {
     expect(() => parseEvents(events2026, 'events-2026.json', 3, meta)).toThrow(/events-2026\.json.*pr/);
+  });
+
+  it('reads an actor of -1 for an event nobody is named for', () => {
+    expect([...parseEvents(events2026, 'events-2026.json', 10, meta).actor]).toEqual(events2026.actor);
+  });
+
+  it.each([11, -2])('rejects an actor of %i, outside people, naming the file and the event', (value) => {
+    const bad = { ...events2026, actor: events2026.actor.map((v, i) => (i === 4 ? value : v)) };
+    expect(() => parseEvents(bad, 'events-2026.json', 10, meta)).toThrow(DataError);
+    expect(() => parseEvents(bad, 'events-2026.json', 10, meta)).toThrow(
+      new RegExp(`events-2026\\.json.*"actor" has ${value} at event 4, outside "people" of 11`),
+    );
   });
 
   // Event 16 is a command_author with sub 0; meta has 15 event kinds and 2 commands.
@@ -401,6 +447,16 @@ describe('DataLoader', () => {
     const { dataset, errors } = await new DataLoader(meta, BASE, fetch).load([2025, 2026]);
     expect(errors.map((e) => e.file)).toEqual(['events-2026.json']);
     expect(dataset.years.map((y) => y.year)).toEqual([2025]);
+  });
+
+  it('reports a year file whose author is outside people by name, and loads the rest', async () => {
+    const author = prs2025.author.map((v, i) => (i === 1 ? 99 : v));
+    const { fetch } = fixtureFetch({ 'prs-2025.json': { ...prs2025, author } });
+    const { dataset, errors } = await new DataLoader(meta, BASE, fetch).load([2025, 2026]);
+    expect(errors).toHaveLength(1);
+    expect(errors[0]).toMatchObject({ year: 2025, file: 'prs-2025.json' });
+    expect(errors[0]?.message).toMatch(/"author" has 99 at row 1, outside "people"/);
+    expect(dataset.years.map((y) => y.year)).toEqual([2026]);
   });
 
   it('rejects a table whose length differs from its year', async () => {

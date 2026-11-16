@@ -98,5 +98,21 @@
     "closed",
     "reopened",
     "merged"
+  ],
+  "people": [
+    "fixture-author-e",
+    "fixture-author-f",
+    "fixture-author-a",
+    "fixture-author-i",
+    "fixture-reviewer-k",
+    "fixture-author-b",
+    "fixture-author-c",
+    "fixture-author-d",
+    "fixture-author-g",
+    "fixture-author-h",
+    "fixture-author-j"
+  ],
+  "people_bots": [
+    10
   ]
 }

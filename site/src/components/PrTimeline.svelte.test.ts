@@ -80,6 +80,7 @@ function withEveryKind(): Record<string, unknown> {
     components: [[]],
     standing: [-1],
     kind: [-1],
+    author: [0],
   });
   const events = append(rawEvents2026, {
     pr: EVERY.map(() => row),
