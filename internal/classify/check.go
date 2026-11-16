@@ -37,7 +37,9 @@ type CheckInput struct {
 }
 
 // Check classifies the records and writes reports for whoever tunes the
-// tables to out: the candidates behind the problems below, the
+// tables to out: GitHub's counts against the records', how many pull
+// requests deleted accounts opened and how many of those their commits
+// name, the candidates behind the problems below, the
 // neighboring candidates that match a phrase only when joined, the
 // description and commit-prose candidates that match no phrase, the short
 // comments by people that match no command, the accounts not typed bots
@@ -103,6 +105,7 @@ func Check(in CheckInput, out io.Writer) error {
 	errs = append(errs, countErrs...)
 
 	fmt.Fprintln(out, counts)
+	fmt.Fprintln(out, deletedAuthors(in.Records))
 	report(out, "Trailers with an unlisted key and no ignore entry", unknownKey.lines(), 0)
 	report(out, "Counted disclosures that match no family", noFamily.lines(), 0)
 	joined := map[string][]int{}
@@ -292,6 +295,26 @@ func compareCounts(recs []record.Record, meta *record.Meta) (string, []error) {
 	line := fmt.Sprintf("Counts: %d opened in the window (GitHub's %s: %d), %d open (GitHub's %s: %d)",
 		opened, source, gh.OpenedInWindow, open, record.SourceListing, gh.Open)
 	return line, errs
+}
+
+// deletedAuthors counts the pull requests opened by deleted accounts, those
+// of them named from their commits, and the distinct names, without naming
+// anyone.
+func deletedAuthors(recs []record.Record) string {
+	opened, named := 0, 0
+	names := map[string]bool{}
+	for i := range recs {
+		a := recs[i].Author
+		if a.Login != fetch.GhostLogin {
+			continue
+		}
+		opened++
+		if a.Name != "" {
+			named++
+			names[a.Name] = true
+		}
+	}
+	return fmt.Sprintf("Pull requests by deleted accounts: %d, named from their commits: %d, distinct names: %d", opened, named, len(names))
 }
 
 func apart(got, github int) bool {

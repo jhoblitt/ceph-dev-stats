@@ -256,8 +256,11 @@ export function prTimeline(data: Dataset, row: number, table: TableYear): PrTime
 
   const authorIndex = p.author[row] as number;
   // Whether a mark is the author's follows from its kind, never from
-  // comparing indexes: every deleted account shares the one `ghost` index,
-  // and an event that names an actor is by the data's rule not the author's.
+  // comparing indexes: an event that names an actor is by the data's rule
+  // not the author's. A deleted account's comments and reviews all name the
+  // pooled `ghost` entry, so one on a PR by `ghost` is not known to be its
+  // author's, and one on a PR credited to a name from its commits is not
+  // known to be that person's either.
   const person = (index: number, author: boolean): MarkWho => ({
     by: 'person',
     handle: personHandle(meta, index),

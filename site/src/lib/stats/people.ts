@@ -1,6 +1,6 @@
 // Figures per person over a selection: what each author's PRs came to, and
 // what each reviewer did on other people's PRs. People are indexes into
-// meta's `people`; the page names them by login.
+// meta's `people`; the page names them as handles.ts writes them.
 
 import { type Dataset, PR_STATE } from '../data';
 import { DAY } from '../filters';
@@ -205,7 +205,9 @@ export function reviewerRows(data: Dataset, rows: Uint32Array, period: Period): 
         const person = ev.actor[i] as number;
         // An event that names an actor is by the data's rule never the
         // author's: the author's own carry none. Comparing with the author's
-        // index would be wrong, as every deleted account shares one.
+        // index would be wrong: every deleted account's comment or review
+        // names the pooled `ghost` entry, which can be the author's index
+        // without being the author.
         if (what === -1 || person < 0) continue;
         const t = ev.at[i] as number;
         const row = inPeriod(t) ? of(person) : null;

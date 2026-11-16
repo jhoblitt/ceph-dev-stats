@@ -1,8 +1,12 @@
 import { describe, expect, it } from 'vitest';
+import { NAMED_A, NAMED_B, NAME_A, NAME_B, POOLED, deletedMeta } from './__fixtures__/deleted';
+import { parseMeta } from './data';
+import { DAY } from './filters';
 import { AUTHOR_TABLE, REVIEWER_TABLE, type PeopleColumn, medianCell, shownPeople, sortPeople } from './people';
+import { openedIn } from './select';
 import { AUTHOR_COLUMNS, REVIEWER_COLUMNS } from './sort';
-import type { AuthorRow, ReviewerRow } from './stats/people';
-import { META } from './stats/testing';
+import { type AuthorRow, type ReviewerRow, authorRows, reviewerRows } from './stats/people';
+import { META, all, at, dataset } from './stats/testing';
 
 // People 0 fixture-author-e, 1 fixture-author-f, 2 fixture-author-a, 10 fixture-author-j (a bot).
 const authors: AuthorRow[] = [
@@ -176,5 +180,65 @@ describe('shownPeople', () => {
   it('leaves out the bot accounts unless asked for them', () => {
     expect(shownPeople(authors, META, false).map(login)).not.toContain('fixture-author-j');
     expect(shownPeople(authors, META, true).map(login)).toContain('fixture-author-j');
+  });
+});
+
+describe('the People tables with deleted accounts', () => {
+  // Ada opened two PRs and Åsa one, each a deleted account known by the name
+  // on its commits; the pooled entry opened one, whose commits gave no name,
+  // and made every comment and review by a deleted account; person 0 opened
+  // one more. Comments and reviews by deleted accounts are the pooled entry's
+  // whoever made them, as the rollup writes them.
+  const meta = parseMeta(deletedMeta());
+  const t = at('2026-06-01T00:00:00Z');
+  const period = { start: at('2026-05-15T00:00:00Z'), end: at('2026-11-16T00:00:00Z') };
+  const d = dataset(
+    [
+      { created: t, author: NAMED_A, commits: 2, additions: 10, state: 1, closed: t + DAY },
+      { created: t + 1, author: NAMED_A, commits: 1, additions: 5 },
+      { created: t + 2, author: NAMED_B, commits: 4, additions: 40 },
+      { created: t + 3, author: POOLED, commits: 1, additions: 7 },
+      { created: t + 4, author: 0, commits: 1, additions: 1 },
+    ],
+    [
+      { pr: 0, at: t + DAY / 2, kind: 'comment_other', actor: POOLED },
+      { pr: 2, at: t + DAY, kind: 'review_approved', actor: POOLED },
+      { pr: 3, at: t + DAY, kind: 'comment_other', actor: 1 },
+      { pr: 4, at: t + DAY, kind: 'review_changes', actor: POOLED },
+    ],
+    meta,
+  );
+  const authorTable = authorRows(d, openedIn(d, all(d), period));
+  const reviewerTable = reviewerRows(d, all(d), period);
+  const names = (rows: readonly AuthorRow[]) => rows.map((r) => (AUTHOR_TABLE[0] as PeopleColumn<string, AuthorRow>).cell(r, meta).text);
+
+  it('gives each named deleted author a row of their own, written "(deleted)" and the name, and the pooled entry one', () => {
+    expect(authorTable.map((r) => [r.person, r.opened, r.commits, r.additions])).toEqual([
+      [NAMED_A, 2, 3, 15],
+      [NAMED_B, 1, 4, 40],
+      [POOLED, 1, 1, 7],
+      [0, 1, 1, 1],
+    ]);
+    expect(names(authorTable)).toEqual([`(deleted) ${NAME_A}`, `(deleted) ${NAME_B}`, '(deleted, unknown)', 'fixture-author-e']);
+  });
+
+  it('ranks a named deleted author by the same measures as anyone, and orders ties by what the page writes', () => {
+    const byOpened = sortPeople(authorTable, AUTHOR_TABLE, { column: 'opened', descending: true }, meta);
+    // "(deleted," sorts before "(deleted)", and Å with A, as a reader would.
+    expect(names(byOpened)).toEqual([`(deleted) ${NAME_A}`, '(deleted, unknown)', `(deleted) ${NAME_B}`, 'fixture-author-e']);
+    const byAuthor = sortPeople(authorTable, AUTHOR_TABLE, { column: 'author', descending: true }, meta);
+    expect(names(byAuthor)).toEqual(['fixture-author-e', `(deleted) ${NAME_B}`, `(deleted) ${NAME_A}`, '(deleted, unknown)']);
+  });
+
+  it('shows the deleted authors whether or not bot accounts are shown: none is a bot', () => {
+    expect(shownPeople(authorTable, meta, false)).toHaveLength(4);
+  });
+
+  it('gives a named deleted author no row among the reviewers: their comments and reviews are the pooled entry’s', () => {
+    expect(reviewerTable.map((r) => r.person).sort((a, b) => a - b)).toEqual([1, POOLED]);
+    expect(reviewerTable.find((r) => r.person === POOLED)).toMatchObject({ prs: 3, comments: 1, approved: 1, changes: 1 });
+    const cells = reviewerTable.map((r) => (REVIEWER_TABLE[0] as PeopleColumn<string, ReviewerRow>).cell(r, meta).text);
+    expect(cells).toContain('(deleted, unknown)');
+    expect(cells.some((c) => c.includes(NAME_A) || c.includes(NAME_B))).toBe(false);
   });
 });

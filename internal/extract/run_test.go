@@ -353,6 +353,37 @@ var _ = Describe("Run", func() {
 		Expect(records()[2].PriorPRs).To(BeNil())
 	})
 
+	It("names a deleted account's pull requests and still leaves their prior_prs null, though one name opened both", func() {
+		names := &fetch.CommitNames{Commits: []fetch.CommitName{{OID: "1", Author: "Kim Example", Committer: "Ivy Example"}}}
+		first, second := entry(1, "ghost", day(6, 1)), entry(2, "ghost", day(6, 2))
+		first.Author, second.Author = nil, nil
+		first.CommitNames, second.CommitNames = names, names
+		cache(first, second)
+		baselines(map[string]int{"kim": 4})
+
+		run()
+
+		for _, n := range []int{1, 2} {
+			Expect(records()[n].Author).To(Equal(record.Actor{Login: fetch.GhostLogin, Name: "Ivy Example"}), "PR %d", n)
+			Expect(records()[n].PriorPRs).To(BeNil(), "PR %d", n)
+		}
+	})
+
+	It("names a deleted account's record once fetch completes its cached entry, at the same updatedAt", func() {
+		ghost := entry(1, "ghost", day(6, 1))
+		ghost.Author = &fetch.Actor{Login: fetch.GhostLogin, Typename: "User"}
+		ghost.FormatVersion = fetch.FormatVersion
+		cache(ghost)
+		run()
+		Expect(records()[1].Author).To(Equal(record.Actor{Login: fetch.GhostLogin}))
+
+		ghost.CommitNames = &fetch.CommitNames{Commits: []fetch.CommitName{{OID: "1", Author: "Kim Example", Committer: "Ivy Example"}}}
+		cache(ghost)
+		run()
+
+		Expect(records()[1].Author).To(Equal(record.Actor{Login: fetch.GhostLogin, Name: "Ivy Example"}))
+	})
+
 	Context("with the default window", func() {
 		BeforeEach(func() {
 			window = time.Time{}

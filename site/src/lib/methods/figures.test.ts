@@ -1,9 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import table2026 from '../__fixtures__/data/table-2026.json';
-import { type TableYear, parseTable, parseYear } from '../data';
+import { NAMED_A, NAMED_B, POOLED, deletedMeta } from '../__fixtures__/deleted';
+import { type TableYear, parseMeta, parseTable, parseYear } from '../data';
 import prs2026 from '../__fixtures__/data/prs-2026.json';
 import events2026 from '../__fixtures__/data/events-2026.json';
-import { META, at, dataset, fixture } from '../stats/testing';
+import { META, type Row, at, dataset, fixture } from '../stats/testing';
 import {
   TOP_AUTHORS,
   baseRows,
@@ -337,6 +338,46 @@ describe('peopleFigures', () => {
     expect(f.authors).toBe(0);
     expect(f.largestLines).toBe(0);
     expect(f.largestShare).toBeNull();
+  });
+
+  describe('with deleted accounts', () => {
+    // On main in the period: Ada opened two, Åsa one, the pooled entry two
+    // and person 0 one; Ada's third is on a release branch, and the pooled
+    // entry's third was opened before the period. The pooled entry commented
+    // on Ada's first.
+    const t = at('2026-06-01T00:00:00Z');
+    const rowsWith = (author: number, n: number, extra: Partial<Row> = {}) =>
+      Array.from({ length: n }, (): Row => ({ created: t, author, ...extra }));
+    const prs = [
+      ...rowsWith(NAMED_A, 2),
+      ...rowsWith(NAMED_B, 1),
+      ...rowsWith(POOLED, 2),
+      ...rowsWith(0, 1),
+      ...rowsWith(NAMED_A, 1, { base: 1 }),
+      ...rowsWith(POOLED, 1, { created: at('2026-05-01T00:00:00Z') }),
+    ];
+    const events = [{ pr: 0, at: t + 3600, kind: 'comment_other', actor: POOLED }];
+
+    it('counts a named deleted author as one author, the pooled entry as one, and the PRs credited to each', () => {
+      const d = dataset(prs, events, parseMeta(deletedMeta()));
+      const f = peopleFigures(d, defaultRows(d, DAYS), PERIOD);
+      // Ada, Åsa, the pooled entry and person 0; the pooled entry reviewed.
+      expect(f.authors).toBe(4);
+      expect(f.reviewers).toBe(1);
+      expect(f.deleted).toEqual({ namedPrs: 3, names: 2, pooledPrs: 2 });
+    });
+
+    it('counts every deleted account’s PRs as the pooled entry’s, and no name, without people_deleted', () => {
+      const pooledOnly = prs.map((r) => (r.author === NAMED_A || r.author === NAMED_B ? { ...r, author: POOLED } : r));
+      const d = dataset(pooledOnly, events, parseMeta(deletedMeta(false)));
+      const f = peopleFigures(d, defaultRows(d, DAYS), PERIOD);
+      expect(f.authors).toBe(2);
+      expect(f.deleted).toEqual({ namedPrs: 0, names: 0, pooledPrs: 5 });
+    });
+
+    it('counts none on data with no deleted account', () => {
+      expect(peopleFigures(data, defaultRows(data, DAYS), PERIOD).deleted).toEqual({ namedPrs: 0, names: 0, pooledPrs: 0 });
+    });
   });
 });
 

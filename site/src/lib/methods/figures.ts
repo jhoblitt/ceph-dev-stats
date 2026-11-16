@@ -7,7 +7,7 @@
 
 import { type Dataset, type TableYear, locateEvent, locateRow } from '../data';
 import { DAY, type Filters, developmentBases } from '../filters';
-import { isBot } from '../handles';
+import { isBot, isNamedDeleted, isPooledDeleted } from '../handles';
 import { openedIn, select } from '../select';
 import { defaultFilters } from '../state';
 import type { Period } from '../stats/buckets';
@@ -230,6 +230,17 @@ export interface PeopleFigures {
   largestLines: number;
   /** Its share of all the lines changed the Authors table counts, bot accounts not shown; null with none. */
   largestShare: number | null;
+  /** The pull requests the Authors table counts that deleted accounts opened. */
+  deleted: DeletedAuthors;
+}
+
+export interface DeletedAuthors {
+  /** Those credited to a name from their commits. */
+  namedPrs: number;
+  /** The distinct names they are credited to: rows of the Authors table. */
+  names: number;
+  /** Those of the pooled entry, whose commits gave no name. */
+  pooledPrs: number;
 }
 
 /** What the People tables show for `rows` over `period`, computed as they compute it. */
@@ -247,6 +258,7 @@ export function peopleFigures(data: Dataset, rows: Uint32Array, period: Period):
     total += lines;
     largestLines = Math.max(largestLines, lines);
   }
+  const named = authors.filter((a) => isNamedDeleted(data.meta, a.person));
   return {
     authors: human(authors).length,
     botAuthors: authors.length - human(authors).length,
@@ -254,6 +266,11 @@ export function peopleFigures(data: Dataset, rows: Uint32Array, period: Period):
     authorsTooFew: human(authors).filter((a) => a.merge.state === 'tooFew').length,
     largestLines,
     largestShare: total === 0 ? null : largestLines / total,
+    deleted: {
+      namedPrs: named.reduce((n, a) => n + a.opened, 0),
+      names: named.length,
+      pooledPrs: authors.find((a) => isPooledDeleted(data.meta, a.person))?.opened ?? 0,
+    },
   };
 }
 

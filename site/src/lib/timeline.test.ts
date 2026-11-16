@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import type { Commit, TableYear } from './data';
+import { NAMED_A, NAME_A, POOLED, deletedMeta } from './__fixtures__/deleted';
+import { type Commit, type TableYear, parseMeta } from './data';
 import { META, at, dataset, type Event, type Row } from './stats/testing';
 import {
   LAYOUT,
@@ -380,17 +381,17 @@ describe('who made each mark', () => {
     expect(name(tl, 'command_other')).toBe(`Bot command by another person: ${META.commands[1]?.name}, 3 Aug 2026 13:00 UTC`);
   });
 
-  it('marks an author who is a bot account, and a deleted account by those words, with no link', () => {
+  it('marks an author who is a bot account, and the pooled deleted account as "(deleted, unknown)", with no link', () => {
     expect(name(withActors(10), 'opened')).toBe('Opened (fixture-author-j, the author, a bot account), 3 Aug 2026 09:00 UTC');
     const people = [...META.people, 'ghost'];
     const tl = withActors(people.length - 1, people);
-    expect(who(tl, 'opened')).toMatchObject({ handle: { text: 'deleted account', url: null } });
-    expect(name(tl, 'opened')).toBe('Opened (deleted account, the author), 3 Aug 2026 09:00 UTC');
+    expect(who(tl, 'opened')).toMatchObject({ handle: { text: '(deleted, unknown)', url: null } });
+    expect(name(tl, 'opened')).toBe('Opened ((deleted, unknown), the author), 3 Aug 2026 09:00 UTC');
   });
 
   it('says another person’s comment is not the author’s when both are deleted accounts', () => {
-    // Every deleted account shares the one `ghost` index; another person's
-    // comment carries an actor, and so is never the author's.
+    // Every comment by a deleted account is the pooled `ghost` entry's;
+    // another person's comment carries an actor, and so is never the author's.
     const people = [...META.people, 'ghost'];
     const ghost = people.length - 1;
     const data = dataset(
@@ -400,9 +401,36 @@ describe('who made each mark', () => {
     );
     const tl = prTimeline(data, 0, table(1, ['101']));
     const comment = tl.marks.find((m) => m.kind === 'comment_other');
-    expect(comment?.who).toMatchObject({ by: 'person', author: false, handle: { text: 'deleted account' } });
-    expect(comment && markName(comment)).toBe('Comment by another person (deleted account), 3 Aug 2026 10:00 UTC');
+    expect(comment?.who).toMatchObject({ by: 'person', author: false, handle: { text: '(deleted, unknown)' } });
+    expect(comment && markName(comment)).toBe('Comment by another person ((deleted, unknown)), 3 Aug 2026 10:00 UTC');
     expect(tl.marks.find((m) => m.kind === 'opened')?.who).toMatchObject({ author: true });
+  });
+
+  it('names a deleted author by the name on the commits, and does not take a deleted account’s comment for theirs', () => {
+    // Ada's PR, with a comment by a deleted account: it is the pooled entry's,
+    // and is not known to be Ada's, so it is another person's. Ada's own
+    // comment, a kind that carries no actor, is hers as any author's is.
+    const meta = { ...parseMeta(deletedMeta()), event_kinds: KINDS };
+    const data = dataset(
+      [{ number: 70000, created: OPENED, author: NAMED_A }],
+      [
+        { pr: 0, at: hour(1), kind: 'comment_other', actor: POOLED },
+        { pr: 0, at: hour(2), kind: 'comment_author' },
+      ],
+      meta,
+    );
+    const tl = prTimeline(data, 0, table(1, ['101', '102']));
+    const mark = (kind: string) => tl.marks.find((m) => m.kind === kind);
+    expect(mark('opened')?.who).toEqual({
+      by: 'person',
+      handle: { login: `ghost:${NAME_A}`, text: `(deleted) ${NAME_A}`, url: null },
+      author: true,
+      bot: false,
+    });
+    expect(markName(mark('opened') as never)).toBe(`Opened ((deleted) ${NAME_A}, the author), 3 Aug 2026 09:00 UTC`);
+    expect(mark('comment_other')?.who).toMatchObject({ author: false, handle: { login: 'ghost', text: '(deleted, unknown)' } });
+    expect(markName(mark('comment_other') as never)).toBe('Comment by another person ((deleted, unknown)), 3 Aug 2026 10:00 UTC');
+    expect(mark('comment_author')?.who).toMatchObject({ author: true, handle: { text: `(deleted) ${NAME_A}` } });
   });
 
   it('never names anyone on a mark when the actor is missing', () => {

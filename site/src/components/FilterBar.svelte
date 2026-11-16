@@ -11,7 +11,7 @@
     UNKNOWN_KIND,
     findChoice,
   } from '../lib/filters';
-  import { GHOST, findLogin } from '../lib/handles';
+  import { findLogin, loginHandle, personHandle } from '../lib/handles';
   import { getPage } from '../lib/page';
   import { RECENT_MONTHS, dataDays, recentFilters } from '../lib/state';
   import { formatDate } from '../lib/timeline-axis';
@@ -46,21 +46,34 @@
   type PersonFilter = 'author' | 'reviewer';
   // The Reviewer filter's dependence on the period is shown, not only hinted, since it narrows every section.
   const PEOPLE: { id: PersonFilter; label: string; hint: string; shown: boolean }[] = [
-    { id: 'author', label: 'Author', hint: 'PRs this GitHub login opened', shown: false },
+    {
+      id: 'author',
+      label: 'Author',
+      hint:
+        meta.people_deleted.length > 0
+          ? 'PRs opened by this GitHub login, or by a deleted account under the name on its commits'
+          : 'PRs this GitHub login opened',
+      shown: false,
+    },
     { id: 'reviewer', label: 'Reviewer', hint: 'PRs reviewed or commented on in the period', shown: true },
   ];
   const bots = new Set(meta.people_bots);
+  // Each person as the page writes them, which is what the inputs show and take.
+  const choices = meta.people.map((_, i) => ({ handle: personHandle(meta, i), bot: bots.has(i) }));
   // What was typed that the data does not name, by filter, until the next change.
   let unknown = $state<Record<PersonFilter, string | null>>({ author: null, reviewer: null });
 
-  // A login in any case is the one the data gives; one it does not name
-  // leaves the filter as it was, and says so.
+  const shown = (login: string | null) => (login === null ? null : loginHandle(meta, login));
+
+  // A login in any case, or a person as the page writes them, is the entry
+  // the data gives; one it does not name leaves the filter as it was, and
+  // says so.
   function setPerson(which: PersonFilter, input: HTMLInputElement) {
     const typed = input.value.trim();
     const login = typed === '' ? null : findLogin(meta, typed);
     unknown[which] = typed !== '' && login === null ? typed : null;
     if (typed === '' || login !== null) setLogin(which, login);
-    input.value = get(selection).filters[which] ?? '';
+    input.value = shown(get(selection).filters[which])?.text ?? '';
   }
 
   function setLogin(which: PersonFilter, login: string | null) {
@@ -214,6 +227,7 @@
   <div class="people">
     {#each PEOPLE as f (f.id)}
       {@const value = filters[f.id]}
+      {@const person = shown(value)}
       <div class="field">
         <label for="{uid}-{f.id}">{f.label}</label>
         <div class="person">
@@ -221,13 +235,17 @@
             id="{uid}-{f.id}"
             type="text"
             list="{uid}-people"
-            value={value ?? ''}
+            value={person?.text ?? ''}
             placeholder="any GitHub login"
             autocomplete="off"
             autocapitalize="off"
             spellcheck="false"
             title={f.hint}
-            aria-describedby={[f.shown ? `${uid}-${f.id}-hint` : '', unknown[f.id] === null ? '' : `${uid}-${f.id}-unknown`]
+            aria-describedby={[
+              f.shown ? `${uid}-${f.id}-hint` : '',
+              person?.note ? `${uid}-${f.id}-note` : '',
+              unknown[f.id] === null ? '' : `${uid}-${f.id}-unknown`,
+            ]
               .filter(Boolean)
               .join(' ') || undefined}
             onchange={(e) => setPerson(f.id, e.currentTarget)}
@@ -239,13 +257,16 @@
         {#if f.shown}
           <p class="hint" id="{uid}-{f.id}-hint">{f.hint}</p>
         {/if}
+        {#if person?.note}
+          <p class="hint" id="{uid}-{f.id}-note">{person.text}: {person.note}</p>
+        {/if}
         <p class="unknown" id="{uid}-{f.id}-unknown" role="status">{unknownText(unknown[f.id])}</p>
       </div>
     {/each}
   </div>
   <datalist id="{uid}-people">
-    {#each meta.people as login, i (login)}
-      <option value={login}>{login === GHOST ? 'deleted account' : bots.has(i) ? 'bot' : ''}</option>
+    {#each choices as c (c.handle.login)}
+      <option value={c.handle.text}>{c.handle.note ?? (c.bot ? 'bot' : '')}</option>
     {/each}
   </datalist>
 </section>

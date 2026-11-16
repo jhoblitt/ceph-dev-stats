@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -222,6 +223,315 @@ var _ = Describe("Run", func() {
 		Expect(e.Author).To(Equal(ghost))
 		Expect(e.Comments[0].Author).To(Equal(ghost))
 		Expect(e.Reviews[0].Author).To(Equal(ghost))
+	})
+
+	isRateLimit := func(err error) bool {
+		rl, ok := errors.AsType[*ghapi.RateLimitError](err)
+		return ok && rl.Reset.Equal(time.Date(2026, 11, 15, 13, 0, 0, 0, time.UTC))
+	}
+	rateLimited := func() *fetchtest.Reply {
+		return &fetchtest.Reply{Status: 403, Header: map[string]string{
+			"x-ratelimit-remaining": "0", "x-ratelimit-reset": "1794747600",
+		}}
+	}
+
+	// namesOf returns the pull request numbers each CommitNames request
+	// asked for, in order.
+	namesOf := func() [][]int {
+		var out [][]int
+		for _, r := range server.Operations(ghapi.CommitNames(0).Name) {
+			var numbers []int
+			for i := 0; r.Int("n"+strconv.Itoa(i)) >= 0; i++ {
+				numbers = append(numbers, r.Int("n"+strconv.Itoa(i)))
+			}
+			out = append(out, numbers)
+		}
+		return out
+	}
+
+	It("asks for the commits' names of a PR opened by a deleted account, every page of them, and caches only the names", func() {
+		p := pr(2, 5, "CLOSED")
+		p.Author = nil
+		p.Commits = commits(5)
+		p.CommitNames = signed(
+			[2]string{"Ana Example", "Ben Example"}, [2]string{"GitHub", "Ana Example"}, [2]string{"Ana Example", "Cy Example"},
+			[2]string{"Ana Example", "Ben Example"}, [2]string{"Dee Example", "Dee Example"},
+		)
+		serve(p)
+
+		Expect(run(fetch.WindowStart)).To(Succeed())
+
+		asked := server.Operations(ghapi.CommitNames(0).Name)
+		Expect(asked).To(HaveLen(1))
+		Expect(asked[0].Variables).To(Equal(map[string]any{"owner": "ceph", "name": "ceph", "first": 2.0, "n0": 2.0}))
+		var afters []string
+		for _, r := range server.Operations(ghapi.CommitNamesPage.Name) {
+			Expect(r.Int("number")).To(Equal(2))
+			afters = append(afters, r.String("after"))
+		}
+		Expect(afters).To(Equal([]string{"o2", "o4"}))
+		Expect(entry(2).CommitNames).To(Equal(p.CommitNames))
+		Expect(entry(2).Author).To(Equal(&fetch.Actor{Login: "ghost", Typename: "User"}))
+		Expect(logged("named deleted accounts' pull requests")).To(HaveExactElements(And(
+			HaveKeyWithValue("deleted", 1.0),
+			HaveKeyWithValue("completed", 0.0),
+			HaveKeyWithValue("without_name", 0.0),
+		)), "the walk named it, leaving the completion nothing to ask; log:\n%s", logs.String())
+	})
+
+	It("caches each name cleaned, and no name that holds an @, so that no address reaches the cache", func() {
+		p := pr(2, 5, "CLOSED")
+		p.Author = nil
+		p.Commits = commits(3)
+		p.CommitNames = signed(
+			[2]string{"ana@example.com", "Ana Example <ana@example.com>"},
+			[2]string{"Ben Example (ben@example.com)", "\u202eIvy\u200d \t Example\x07 "},
+			[2]string{"GitHub", "Cy Example"},
+		)
+		serve(p)
+
+		Expect(run(fetch.WindowStart)).To(Succeed())
+
+		Expect(entry(2).CommitNames).To(Equal(&fetch.CommitNames{Commits: []fetch.CommitName{
+			{OID: sha(0), Author: "", Committer: ""},
+			{OID: sha(1), Author: "Ivy Example", Committer: ""},
+			{OID: sha(2), Author: "Cy Example", Committer: "GitHub"},
+		}}))
+		b, err := os.ReadFile(filepath.Join(cacheDir, "raw", "2.json"))
+		Expect(err).NotTo(HaveOccurred())
+		Expect(string(b)).NotTo(ContainSubstring("@"))
+	})
+
+	It("never asks for the names of a PR whose author's account is live, and caches none", func() {
+		p := pr(1, 5, "CLOSED")
+		p.Commits = commits(3)
+		p.CommitNames = signed([2]string{"Ana Example", "Ana Example"}, [2]string{"Ana Example", "Ana Example"}, [2]string{"Ana Example", "Ana Example"})
+		serve(p)
+
+		Expect(run(fetch.WindowStart)).To(Succeed())
+
+		Expect(server.Operations(ghapi.CommitNames(0).Name)).To(BeEmpty())
+		Expect(server.Operations(ghapi.CommitNamesPage.Name)).To(BeEmpty())
+		Expect(entry(1).CommitNames).To(BeNil())
+		Expect(readJSON(filepath.Join(cacheDir, "raw", "1.json"))).NotTo(HaveKey("commitNames"))
+	})
+
+	It("saves no entry for a deleted account's PR whose names it cannot have", func() {
+		p := pr(2, 2, "CLOSED")
+		p.Author = nil
+		serve(pr(9, 9, "CLOSED"), p)
+		server.Intercept(func(_ int, r fetchtest.Request) *fetchtest.Reply {
+			if r.Operation == ghapi.CommitNames(0).Name {
+				return rateLimited()
+			}
+			return nil
+		})
+
+		Expect(run(fetch.WindowStart)).To(MatchError(isRateLimit, "a *ghapi.RateLimitError"))
+
+		Expect(rawFiles()).To(ConsistOf("9.json"))
+		Expect(filepath.Join(cacheDir, fetch.MetaFile)).NotTo(BeAnExistingFile())
+	})
+
+	Describe("completing a cache written before entries held names", func() {
+		const oldMeta = `{"window_start":"2026-05-15T00:00:00Z","walk_started":"2026-11-14T00:00:00Z","opened_in_window":30,"opened_in_window_source":"search","open":0}` + "\n"
+		metaPath := func() string { return filepath.Join(cacheDir, fetch.MetaFile) }
+		rawPath := func(number int) string { return filepath.Join(cacheDir, "raw", strconv.Itoa(number)+".json") }
+		raw := func(number int) string {
+			GinkgoHelper()
+			b, err := os.ReadFile(rawPath(number))
+			Expect(err).NotTo(HaveOccurred())
+			return string(b)
+		}
+
+		// deleted is pull request number as GitHub holds it: opened by a
+		// deleted account, its one commit committed by committer.
+		deleted := func(number int, committer string) fetch.Entry {
+			p := pr(number, 1, "CLOSED")
+			p.Author = nil
+			p.Commits = commits(1)
+			p.CommitNames = signed([2]string{committer, "Ben Example"})
+			return p
+		}
+		// cacheAsBefore writes each of prs as a fetch from before entries
+		// held names cached it.
+		cacheAsBefore := func(prs ...fetch.Entry) {
+			GinkgoHelper()
+			Expect(os.MkdirAll(filepath.Join(cacheDir, "raw"), 0o750)).To(Succeed())
+			for _, p := range prs {
+				if p.Author == nil {
+					p.Author = &fetch.Actor{Login: fetch.GhostLogin, Typename: "User"}
+				}
+				p.CommitNames = nil
+				p.FetchedAt = time.Date(2026, 11, 14, 0, 0, 0, 0, time.UTC)
+				p.FormatVersion = fetch.FormatVersion
+				b, err := json.MarshalIndent(p, "", "  ")
+				Expect(err).NotTo(HaveOccurred())
+				Expect(os.WriteFile(rawPath(p.Number), append(b, '\n'), 0o600)).To(Succeed())
+			}
+		}
+
+		var (
+			held []fetch.Entry
+			// before is each cached entry's bytes before the run.
+			before map[int]string
+		)
+
+		BeforeEach(func() {
+			held = nil
+			for n := 1; n <= 27; n++ {
+				held = append(held, deleted(n, fmt.Sprintf("Name %02d Example", n)))
+			}
+			held[26].CommitNames = signed([2]string{"GitHub", ""})
+			live := pr(40, 1, "CLOSED")
+			live.Commits = commits(1)
+			live.CommitNames = signed([2]string{"Ana Example", "Ana Example"})
+			named := deleted(30, "Cy Example")
+			held = append(held, live, named)
+			serve(held...)
+			cacheAsBefore(held...)
+			e := readJSON(rawPath(30))
+			e["commitNames"] = named.CommitNames
+			b, err := json.MarshalIndent(e, "", "  ")
+			Expect(err).NotTo(HaveOccurred())
+			Expect(os.WriteFile(rawPath(30), append(b, '\n'), 0o600)).To(Succeed())
+			Expect(os.WriteFile(metaPath(), []byte(oldMeta), 0o600)).To(Succeed())
+			before = map[int]string{}
+			for _, p := range held {
+				before[p.Number] = raw(p.Number)
+			}
+		})
+
+		// complete reports whether entry number is as it was before the run
+		// but for the names GitHub holds for it.
+		complete := func(number int) bool {
+			GinkgoHelper()
+			got := entry(number)
+			i := slices.IndexFunc(held, func(p fetch.Entry) bool { return p.Number == number })
+			Expect(got.CommitNames).To(Equal(held[i].CommitNames), "PR %d's names", number)
+			got.CommitNames = nil
+			var was fetch.Entry
+			Expect(json.Unmarshal([]byte(before[number]), &was)).To(Succeed())
+			Expect(got).To(Equal(was), "PR %d but for its names", number)
+			return true
+		}
+
+		It("names every deleted account's entry, 25 PRs a request, though the walk stores nothing, marks the cache, and logs the counts but no name", func() {
+			Expect(run(at(100))).To(Succeed())
+
+			Expect(logged("reached since")).To(ContainElement(HaveKeyWithValue("fetched", 0.0)))
+			Expect(rawFiles()).To(HaveLen(29))
+			var want []int
+			for n := 1; n <= 27; n++ {
+				want = append(want, n)
+				Expect(complete(n)).To(BeTrue())
+			}
+			Expect(namesOf()).To(Equal([][]int{want[:25], want[25:]}))
+			Expect(raw(40)).To(Equal(before[40]), "the live author's entry")
+			Expect(raw(30)).To(Equal(before[30]), "the entry that held names already")
+			Expect(readJSON(metaPath())).To(HaveKeyWithValue("deleted_authors_named", true))
+			Expect(logged("named deleted accounts' pull requests")).To(HaveExactElements(And(
+				HaveKeyWithValue("level", "INFO"),
+				HaveKeyWithValue("deleted", 28.0),
+				HaveKeyWithValue("completed", 27.0),
+				HaveKeyWithValue("without_name", 1.0),
+			)), "log:\n%s", logs.String())
+			Expect(logs.String()).NotTo(ContainSubstring("Example"))
+		})
+
+		It("leaves each entry as it was or complete when a request fails part-way, writes no mark, and completes the rest next time", func() {
+			server.Intercept(func(_ int, r fetchtest.Request) *fetchtest.Reply {
+				if r.Operation == ghapi.CommitNames(0).Name && len(server.Operations(r.Operation)) == 2 {
+					return rateLimited()
+				}
+				return nil
+			})
+
+			Expect(run(at(100))).To(MatchError(isRateLimit, "a *ghapi.RateLimitError"))
+
+			for n := 1; n <= 25; n++ {
+				Expect(complete(n)).To(BeTrue())
+			}
+			Expect(raw(26)).To(Equal(before[26]))
+			Expect(raw(27)).To(Equal(before[27]))
+			Expect(os.ReadFile(metaPath())).To(Equal([]byte(oldMeta)))
+
+			server.Intercept(nil)
+			Expect(run(at(100))).To(Succeed())
+
+			asked := namesOf()
+			Expect(asked[len(asked)-1]).To(Equal([]int{26, 27}), "the second run asks only for the two left")
+			Expect(complete(26)).To(BeTrue())
+			Expect(complete(27)).To(BeTrue())
+			Expect(readJSON(metaPath())).To(HaveKeyWithValue("deleted_authors_named", true))
+		})
+
+		It("rewrites no entry of a batch when a further page of one of its PRs fails", func() {
+			server.Update(2, func(e *fetch.Entry) {
+				e.Commits = commits(3)
+				e.CommitNames = signed([2]string{"Ana Example", "x"}, [2]string{"Ana Example", "x"}, [2]string{"Ana Example", "x"})
+			})
+			server.Intercept(func(_ int, r fetchtest.Request) *fetchtest.Reply {
+				if r.Operation == ghapi.CommitNamesPage.Name {
+					return &fetchtest.Reply{Status: 503}
+				}
+				return nil
+			})
+
+			err := run(at(100))
+
+			Expect(err).To(And(MatchError(ghapi.ErrUnavailable), MatchError(ContainSubstring("pull request 2"))))
+			for _, p := range held {
+				Expect(raw(p.Number)).To(Equal(before[p.Number]), "PR %d", p.Number)
+			}
+			Expect(os.ReadFile(metaPath())).To(Equal([]byte(oldMeta)))
+		})
+
+		It("is an error naming the PR, rewriting nothing, when the reply leaves one out", func() {
+			server.Intercept(func(_ int, r fetchtest.Request) *fetchtest.Reply {
+				if r.Operation == ghapi.CommitNames(0).Name {
+					return &fetchtest.Reply{Status: 200, Body: `{"data":{"repository":{"p0":{"commits":{"pageInfo":{"hasNextPage":false},"nodes":[]}},"p1":null}}}`}
+				}
+				return nil
+			})
+
+			err := run(at(100))
+
+			Expect(err).To(MatchError(And(ContainSubstring("pull request 2"), ContainSubstring("commits"))))
+			Expect(err).NotTo(MatchError(ghapi.ErrUnavailable))
+			for _, p := range held {
+				Expect(raw(p.Number)).To(Equal(before[p.Number]), "PR %d", p.Number)
+			}
+		})
+
+		It("does no pass and asks nothing once meta.json records the cache complete", func() {
+			Expect(os.WriteFile(metaPath(), []byte(strings.Replace(oldMeta, `"open":0}`, `"open":0,"deleted_authors_named":true}`, 1)), 0o600)).To(Succeed())
+
+			Expect(run(at(100))).To(Succeed())
+
+			Expect(server.Operations(ghapi.CommitNames(0).Name)).To(BeEmpty())
+			Expect(logged("named deleted accounts' pull requests")).To(BeEmpty())
+			for _, p := range held {
+				Expect(raw(p.Number)).To(Equal(before[p.Number]), "PR %d", p.Number)
+			}
+			Expect(readJSON(metaPath())).To(HaveKeyWithValue("deleted_authors_named", true))
+		})
+
+		It("names the entries but leaves meta.json as it was when the walk does not advance the coverage mark, and the next run asks nothing", func() {
+			defaultSinceAt = at(5)
+
+			Expect(run(at(100))).To(Succeed())
+
+			Expect(complete(1)).To(BeTrue())
+			Expect(os.ReadFile(metaPath())).To(Equal([]byte(oldMeta)))
+			requests := len(server.Operations(ghapi.CommitNames(0).Name))
+			logs.Reset()
+
+			Expect(run(at(100))).To(Succeed())
+
+			Expect(server.Operations(ghapi.CommitNames(0).Name)).To(HaveLen(requests))
+			Expect(logged("named deleted accounts' pull requests")).To(HaveExactElements(HaveKeyWithValue("completed", 0.0)))
+		})
 	})
 
 	// serveLinksPage answers the walk's first list request with the page in
@@ -574,16 +884,6 @@ var _ = Describe("Run", func() {
 		Expect(filepath.Join(cacheDir, "meta.json")).NotTo(BeAnExistingFile())
 	})
 
-	isRateLimit := func(err error) bool {
-		rl, ok := errors.AsType[*ghapi.RateLimitError](err)
-		return ok && rl.Reset.Equal(time.Date(2026, 11, 15, 13, 0, 0, 0, time.UTC))
-	}
-	rateLimited := func() *fetchtest.Reply {
-		return &fetchtest.Reply{Status: 403, Header: map[string]string{
-			"x-ratelimit-remaining": "0", "x-ratelimit-reset": "1794747600",
-		}}
-	}
-
 	DescribeTable("saves no entry for a PR whose nested page fails, keeps those before it, and writes no meta.json",
 		func(rep fetchtest.Reply, match types.GomegaMatcher) {
 			failing := pr(2, 2, "CLOSED")
@@ -771,6 +1071,7 @@ var _ = Describe("Run", func() {
 			"opened_in_window":        42.0,
 			"opened_in_window_source": "search",
 			"open":                    2.0,
+			"deleted_authors_named":   true,
 		}))
 	})
 
@@ -901,6 +1202,7 @@ var _ = Describe("Run", func() {
 					"opened_in_window":        opened,
 					"opened_in_window_source": source,
 					"open":                    1.0,
+					"deleted_authors_named":   true,
 				}))
 			},
 			Entry("by the listing's total when the window starts at the repository's creation",
@@ -973,6 +1275,14 @@ var _ = Describe("ReadMeta", func() {
 			OpenedInWindowSource: record.SourceListing,
 			Open:                 2035,
 		}))
+	})
+
+	It("reads whether every deleted account's entry holds its names, and a meta.json written before it recorded that as not yet", func() {
+		write(`{"window_start":"2011-09-01T00:00:00Z","walk_started":"2026-11-15T12:00:00Z","opened_in_window":73914,"opened_in_window_source":"listing","open":2035,"deleted_authors_named":true}`)
+		Expect(fetch.ReadMeta(cacheDir)).To(HaveField("DeletedAuthorsNamed", true))
+
+		write(`{"window_start":"2011-09-01T00:00:00Z","walk_started":"2026-11-15T12:00:00Z","opened_in_window":73914,"opened_in_window_source":"listing","open":2035}`)
+		Expect(fetch.ReadMeta(cacheDir)).To(HaveField("DeletedAuthorsNamed", false))
 	})
 
 	It("reads a meta.json written before it recorded the source as counted by the search, as every count then was", func() {

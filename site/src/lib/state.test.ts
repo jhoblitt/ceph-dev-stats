@@ -1,6 +1,7 @@
 import { get } from 'svelte/store';
 import { describe, expect, it } from 'vitest';
 import rawMeta from './__fixtures__/data/meta.json';
+import { NAME_A, NAME_B, deletedMeta } from './__fixtures__/deleted';
 import { parseMeta } from './data';
 import {
   type AppState,
@@ -242,6 +243,43 @@ describe('unknown values fall back to their defaults', () => {
 
   it('takes the first of a repeated parameter', () => {
     expect(stateFromHash('#/?target=all&target=backports', meta).filters.target).toBe('all');
+  });
+});
+
+describe('the author filter in the address, with deleted accounts', () => {
+  const named = parseMeta(deletedMeta());
+
+  it.each([
+    ['a space', NAME_A],
+    ['an ampersand, a percent sign and letters outside ASCII', NAME_B],
+  ])('round-trips a deleted account known by a name with %s', (_what, name) => {
+    const state = { ...defaultState(named), filters: { ...defaultFilters(named), author: `ghost:${name}` } };
+    const hash = hashFromState(state, named);
+    // The name is encoded, so nothing in it ends the parameter or starts another.
+    expect(hash).toBe(`#/?target=main&author=${encodeURIComponent(`ghost:${name}`)}`);
+    expect(stateFromHash(hash, named)).toEqual(state);
+  });
+
+  it('writes a name with characters the address would read otherwise as escapes', () => {
+    expect(hashFromState({ ...defaultState(named), filters: { ...defaultFilters(named), author: `ghost:${NAME_B}` } }, named)).toBe(
+      '#/?target=main&author=ghost%3A%C3%85sa%20Prov%20%26%20S%C3%B6ner%20100%25',
+    );
+  });
+
+  it('still takes an old address with author=ghost as the pooled entry', () => {
+    expect(stateFromHash('#/?author=ghost', named).filters.author).toBe('ghost');
+    expect(stateFromHash('#/?author=ghost', meta).filters.author).toBeNull();
+    expect(stateFromHash('#/?author=ghost', parseMeta(deletedMeta(false))).filters.author).toBe('ghost');
+  });
+
+  it('takes a name as the page writes it, and writes it back as the data gives it', () => {
+    const state = stateFromHash(`#/?author=${encodeURIComponent(`(deleted) ${NAME_A}`)}`, named);
+    expect(state.filters.author).toBe(`ghost:${NAME_A}`);
+    expect(hashFromState(state, named)).toBe(`#/?target=main&author=${encodeURIComponent(`ghost:${NAME_A}`)}`);
+  });
+
+  it('takes a name the data does not hold as no filter', () => {
+    expect(stateFromHash('#/?author=ghost%3ASomeone%20Else', named).filters.author).toBeNull();
   });
 });
 

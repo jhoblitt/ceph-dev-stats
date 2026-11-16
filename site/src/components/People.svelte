@@ -1,10 +1,10 @@
 <!--
   The people behind the selected PRs: who opened them and what those PRs came
   to, and who reviewed or commented on them. Each person is named by their
-  GitHub login, linked to their page there, with a control that filters the
-  whole page by them. Bot accounts among the authors are left out until
-  asked for; the data keeps no login for a bot's comment or review, so the
-  reviewers are never bots.
+  GitHub login, linked to their page there, or as a deleted account, with a
+  control that filters the whole page by them. Bot accounts among the
+  authors are left out until asked for; the data keeps no login for a bot's
+  comment or review, so the reviewers are never bots.
 -->
 <script lang="ts">
   import { formatCount } from '../lib/format';
@@ -140,6 +140,13 @@
           merged or closed. One made before the pull request was ready counts as no time, and pull requests never made ready for review are left out. With
           fewer than five pull requests behind it, the median says “too few”.
         </p>
+        {#if meta.people_deleted.length > 0}
+          <p>
+            A deleted account’s pull requests can be credited to the name on their commits, but its comments and reviews
+            carry no name, so they are all in the “(deleted, unknown)” row, and no “(deleted)” author with a name has a row
+            here.
+          </p>
+        {/if}
       </div>
     </div>
   {/if}

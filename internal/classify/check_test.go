@@ -77,6 +77,7 @@ var _ = Describe("Check", func() {
 	It("passes a clean dataset and reports on it", func() {
 		Expect(classify.Check(in, out)).To(Succeed())
 		Expect(out.String()).To(Equal(`Counts: 2 opened in the window (GitHub's search: 2), 1 open (GitHub's listing: 1)
+Pull requests by deleted accounts: 0, named from their commits: 0, distinct names: 0
 Trailers with an unlisted key and no ignore entry: 0
 Counted disclosures that match no family: 0
 Neighboring candidates that match a phrase only when joined: 0
@@ -99,6 +100,7 @@ Base branches: 2
 	It("passes the tables alone, with no records, meta or tickets", func() {
 		Expect(classify.Check(classify.CheckInput{Tables: in.Tables}, out)).To(Succeed())
 		Expect(out.String()).To(Equal(`Counts: no meta.json to compare with
+Pull requests by deleted accounts: 0, named from their commits: 0, distinct names: 0
 Trailers with an unlisted key and no ignore entry: 0
 Counted disclosures that match no family: 0
 Neighboring candidates that match a phrase only when joined: 0
@@ -191,6 +193,22 @@ Description`))
 		in.Records[2].Disclosure.Description = []string{"Docs", "assisted by an LLM"}
 		Expect(classify.Check(in, out)).To(Succeed())
 		Expect(out.String()).To(ContainSubstring("Neighboring candidates that match a phrase only when joined: 0\n"))
+	})
+
+	It("counts the deleted accounts' pull requests, those named and the names, printing no name and failing on none", func() {
+		for i, name := range []string{"Ivy Example", "", "Kim Example", "Ivy Example"} {
+			r := pr(10 + i)
+			r.Author = record.Actor{Login: fetch.GhostLogin, Name: name}
+			r.Comments = []record.Comment{{By: fetch.GhostLogin, Text: "thanks"}}
+			in.Records = append(in.Records, r)
+		}
+		in.Records[0].Comments = append(in.Records[0].Comments, record.Comment{By: fetch.GhostLogin})
+		in.Meta = meta(6, 5)
+
+		Expect(classify.Check(in, out)).To(Succeed())
+
+		Expect(out.String()).To(ContainSubstring("\nPull requests by deleted accounts: 4, named from their commits: 3, distinct names: 2\n"))
+		Expect(out.String()).NotTo(Or(ContainSubstring("Ivy"), ContainSubstring("Kim")))
 	})
 
 	It("cuts each report at the top entries", func() {

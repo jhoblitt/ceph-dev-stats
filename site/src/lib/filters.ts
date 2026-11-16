@@ -120,7 +120,10 @@ export interface Filters {
   excludeDrafts: boolean;
   /** Keep only the PRs reopened at least once. */
   reopenedOnly: boolean;
-  /** Keep only the PRs this login opened; a login from meta's `people`, or null for anyone. */
+  /**
+   * Keep only the PRs this person opened; an entry of meta's `people`, a
+   * login or a deleted account's `ghost:` and name, or null for anyone.
+   */
   author: string | null;
   /**
    * Keep only the PRs this login reviewed or commented on during the period,

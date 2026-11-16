@@ -2,7 +2,8 @@ import { describe, expect, it } from 'vitest';
 import events2026 from '../__fixtures__/data/events-2026.json';
 import prs2026 from '../__fixtures__/data/prs-2026.json';
 import table2026 from '../__fixtures__/data/table-2026.json';
-import { parseTable, parseYear } from '../data';
+import { NAMED_A, NAMED_B, POOLED, deletedMeta } from '../__fixtures__/deleted';
+import { parseMeta, parseTable, parseYear } from '../data';
 import { META, at, dataset, fixture } from '../stats/testing';
 import {
   type DataFigures,
@@ -84,12 +85,37 @@ describe('inline figures on the fixture', () => {
     ['people.largestLines', '2,200'],
     // 2,200 of 3,694.
     ['people.largestShare', '60%'],
+    // The fixture has no deleted account.
+    ['people.deletedNamedPrs', '0'],
+    ['people.deletedNames', '0'],
+    ['people.deletedPooledPrs', '0'],
   ])('%s is %s', (name, expected) => {
     expect(value(name)).toBe(expected);
   });
 
   it('has a spec above for every inline figure', () => {
-    expect(Object.keys(INLINE_FIGURES).length).toBe(44);
+    expect(Object.keys(INLINE_FIGURES).length).toBe(47);
+  });
+});
+
+describe('the deleted accounts’ figures', () => {
+  // Ada two PRs, Åsa one, the pooled entry one, on main in the period.
+  const t = at('2026-06-01T00:00:00Z');
+  const named = dataset(
+    [NAMED_A, NAMED_A, NAMED_B, POOLED].map((author) => ({ created: t, author })),
+    [],
+    parseMeta(deletedMeta()),
+  );
+  const figures: Loadable<DataFigures> = { state: 'ready', value: dataFigures(named, DAYS) };
+  const noTables: Loadable<TableFigures> = { state: 'loading' };
+  const shown = (name: string) => inlineView(name, named.meta, figures, noTables);
+
+  it('counts the PRs credited to names, the names, and the pooled entry’s PRs', () => {
+    expect(['people.deletedNamedPrs', 'people.deletedNames', 'people.deletedPooledPrs'].map(shown)).toEqual([
+      { state: 'ready', value: '3' },
+      { state: 'ready', value: '2' },
+      { state: 'ready', value: '1' },
+    ]);
   });
 });
 

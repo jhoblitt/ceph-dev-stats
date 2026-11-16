@@ -85,22 +85,27 @@ var _ = Describe("Records", func() {
 			}))
 		})
 
-		It("never takes a deleted account for the author, even on a deleted account's PR", func() {
-			r := pr(1)
-			r.Author = record.Actor{Login: fetch.GhostLogin}
-			r.Comments = []record.Comment{
-				{By: fetch.GhostLogin, Text: "thanks"},
-				{By: fetch.GhostLogin, Text: "jenkins test make check"},
-			}
-			r.Reviews = []record.Review{{By: fetch.GhostLogin, State: record.ReviewApproved}}
+		DescribeTable("never take a deleted account for the author, even on a deleted account's PR",
+			func(author record.Actor) {
+				r := pr(1)
+				r.Author = author
+				r.Comments = []record.Comment{
+					{By: fetch.GhostLogin, Text: "thanks"},
+					{By: fetch.GhostLogin, Text: "jenkins test make check"},
+				}
+				r.Reviews = []record.Review{{By: fetch.GhostLogin, State: record.ReviewApproved}}
 
-			got := one(r)
-			Expect(got.Comments).To(Equal([]classify.Comment{
-				{Kind: classify.CommentOther},
-				{Kind: classify.CommandOther, Command: "make-check"},
-			}))
-			Expect(got.Reviews).To(Equal([]classify.Review{{Human: true, Other: true}}))
-		})
+				got := one(r)
+				Expect(got.AuthorHuman).To(BeTrue())
+				Expect(got.Comments).To(Equal([]classify.Comment{
+					{Kind: classify.CommentOther},
+					{Kind: classify.CommandOther, Command: "make-check"},
+				}))
+				Expect(got.Reviews).To(Equal([]classify.Review{{Human: true, Other: true}}))
+			},
+			Entry("one with no name", record.Actor{Login: fetch.GhostLogin}),
+			Entry("one named by its commits, still not known to be the commenter", record.Actor{Login: fetch.GhostLogin, Name: "Ivy Example"}),
+		)
 	})
 
 	Describe("reviews", func() {

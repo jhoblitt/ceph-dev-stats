@@ -13,6 +13,7 @@ import (
 
 	"github.com/jhoblitt/ceph-dev-stats/internal/extract"
 	"github.com/jhoblitt/ceph-dev-stats/internal/fetch"
+	"github.com/jhoblitt/ceph-dev-stats/internal/record"
 )
 
 func fixture(name string) fetch.Entry {
@@ -59,8 +60,57 @@ var _ = Describe("FromEntry", func() {
 		Entry("a PR closed, reopened, then merged, with reviews listed out of order", "reopened"),
 		Entry("a PR force-pushed three times", "force-pushed"),
 		Entry("a closed draft whose commits all postdate its opening, with offset commit times", "late-commits"),
-		Entry("null authors on the PR, a comment and a review", "ghost"),
+		Entry("null authors on the PR, a comment and a review, cached before entries held names", "ghost"),
+		Entry("a deleted account's backport, named by its committer, its comment and review by deleted accounts still ghost", "ghost-named"),
 	)
+
+	Describe("the author's name", func() {
+		names := func() *fetch.CommitNames {
+			return &fetch.CommitNames{Commits: []fetch.CommitName{{OID: "1", Author: "Kim Example", Committer: "Ivy Example"}}}
+		}
+
+		It("is given to no account but GitHub's ghost, whatever the entry holds", func() {
+			e := entry(1, "alice", time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC))
+			e.CommitNames = names()
+
+			r, err := extract.FromEntry(e)
+
+			Expect(err).NotTo(HaveOccurred())
+			Expect(r.Author).To(Equal(record.Actor{Login: "alice"}))
+		})
+
+		DescribeTable("is left out for a deleted account's pull request",
+			func(held *fetch.CommitNames) {
+				e := entry(1, fetch.GhostLogin, time.Date(2016, 6, 1, 0, 0, 0, 0, time.UTC))
+				e.CommitNames = held
+
+				r, err := extract.FromEntry(e)
+
+				Expect(err).NotTo(HaveOccurred())
+				Expect(r.Author).To(Equal(record.Actor{Login: fetch.GhostLogin}))
+				b, err := json.Marshal(r.Author)
+				Expect(err).NotTo(HaveOccurred())
+				Expect(b).To(MatchJSON(`{"login":"ghost","bot":false}`))
+			},
+			Entry("whose names were not read yet", (*fetch.CommitNames)(nil)),
+			Entry("whose commits give no usable name",
+				&fetch.CommitNames{Commits: []fetch.CommitName{{OID: "1", Committer: "GitHub", Author: " "}}}),
+			Entry("with no commits returned", &fetch.CommitNames{Commits: []fetch.CommitName{}}),
+		)
+
+		It("is the name its commits credit, for the ghost the cache stores and for a null author alike", func() {
+			for _, a := range []*fetch.Actor{nil, {Login: fetch.GhostLogin, Typename: "User"}} {
+				e := entry(1, "x", time.Date(2016, 6, 1, 0, 0, 0, 0, time.UTC))
+				e.Author = a
+				e.CommitNames = names()
+
+				r, err := extract.FromEntry(e)
+
+				Expect(err).NotTo(HaveOccurred())
+				Expect(r.Author).To(Equal(record.Actor{Login: fetch.GhostLogin, Name: "Ivy Example"}))
+			}
+		})
+	})
 
 	Describe("a comment's text", func() {
 		text := func(body string) string {

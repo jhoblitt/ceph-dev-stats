@@ -29,7 +29,7 @@ var _ = Describe("queries", func() {
 	}
 
 	all := func() []ghapi.Query {
-		qs := []ghapi.Query{ghapi.PullRequests, ghapi.Counts, ghapi.AuthorBaselines(3)}
+		qs := []ghapi.Query{ghapi.PullRequests, ghapi.Counts, ghapi.AuthorBaselines(3), ghapi.CommitNames(3), ghapi.CommitNamesPage}
 		for _, c := range ghapi.Connections {
 			qs = append(qs, ghapi.ConnectionPage(c))
 		}
@@ -90,6 +90,32 @@ var _ = Describe("queries", func() {
 		Expect(ghapi.Counts.Text).To(ContainSubstring("createdAt"))
 		Expect(ghapi.Counts.Text).To(ContainSubstring("total: pullRequests { totalCount }"))
 		Expect(ghapi.Counts.Text).To(ContainSubstring("open: pullRequests(states: OPEN) { totalCount }"))
+	})
+
+	It("asks for one aliased pull request per number, each with the first page of its commits' names", func() {
+		q := ghapi.CommitNames(25)
+		Expect(strings.Count(q.Text, "pullRequest(")).To(Equal(25))
+		Expect(q.Text).To(ContainSubstring("p24: pullRequest(number: $n24) {"))
+		Expect(q.Text).To(ContainSubstring("commits(first: $first) {"))
+		Expect(q.Text).To(ContainSubstring("nodes { commit { oid author { name } committer { name } } }"))
+	})
+
+	It("asks for a further page of one pull request's commits' names", func() {
+		Expect(ghapi.CommitNamesPage.Text).To(ContainSubstring("pullRequest(number: $number) {"))
+		Expect(ghapi.CommitNamesPage.Text).To(ContainSubstring("commits(first: $first, after: $after) {"))
+		Expect(ghapi.CommitNamesPage.Text).To(ContainSubstring("nodes { commit { oid author { name } committer { name } } }"))
+	})
+
+	It("asks for commits' names, never an address or an account, and only in the names queries", func() {
+		names := []string{ghapi.CommitNames(0).Name, ghapi.CommitNamesPage.Name}
+		for _, q := range all() {
+			Expect(q.Text).NotTo(MatchRegexp(`\bemail\b`), "query %s", q.Name)
+			if slices.Contains(names, q.Name) {
+				Expect(q.Text).NotTo(MatchRegexp(`\buser\b`), "query %s", q.Name)
+			} else {
+				Expect(q.Text).NotTo(ContainSubstring("committer"), "query %s", q.Name)
+			}
+		}
 	})
 
 	It("asks for one aliased search per author", func() {

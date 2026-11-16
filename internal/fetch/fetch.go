@@ -82,7 +82,10 @@ type walker struct {
 
 // Run walks pull requests into cfg.CacheDir in three phases: those updated
 // since cfg.Since, most recent first; every open one; then the prior-PR
-// count of each author not yet in authors.json. It ends by writing GitHub's
+// count of each author not yet in authors.json. A pull request whose author
+// is null, a deleted account's, is cached with its commits' names, and
+// before the third phase the entries an older fetch cached without them are
+// completed, until meta.json records that none is left. It ends by writing GitHub's
 // counts to meta.json, unless cfg.Since is later than a set cfg.DefaultSince,
 // when it leaves meta.json as it was and warns. A pull request already cached at the listed
 // updatedAt, in the current FormatVersion, is not fetched again, so a run
@@ -119,6 +122,9 @@ func Run(ctx context.Context, client *ghapi.Client, cfg Config) error {
 	if err := w.walk(ctx, "open", []string{"OPEN"}, time.Time{}); err != nil {
 		return err
 	}
+	if err := w.completeNames(ctx); err != nil {
+		return err
+	}
 	if err := w.baselines(ctx); err != nil {
 		return err
 	}
@@ -135,6 +141,9 @@ func Run(ctx context.Context, client *ghapi.Client, cfg Config) error {
 	if err != nil {
 		return err
 	}
+	// completeNames named every entry an earlier walk left without names,
+	// and store names each deleted account's entry it writes.
+	meta.DeletedAuthorsNamed = true
 	if err := writeJSON(filepath.Join(cfg.CacheDir, MetaFile), meta); err != nil {
 		return err
 	}
@@ -363,6 +372,13 @@ func (w *walker) store(ctx context.Context, n *prNode) (bool, error) {
 	if e.TimelineItems, err = rest(ctx, w, n.Number, ghapi.TimelineItems, n.TimelineItems); err != nil {
 		return false, err
 	}
+	if e.Author == nil {
+		names, err := w.askNames(ctx, []int{n.Number})
+		if err != nil {
+			return false, err
+		}
+		e.CommitNames = names[n.Number]
+	}
 
 	e.Author = orGhost(e.Author)
 	for i := range e.Comments {
@@ -387,6 +403,12 @@ func (w *walker) store(ctx context.Context, n *prNode) (bool, error) {
 // of pull request number. A first page or a later one that the reply left
 // out, or gave as null, is an error rather than an empty last page.
 func rest[T any](ctx context.Context, w *walker, number int, c ghapi.Connection, first *connection[T]) ([]T, error) {
+	return pages(ctx, w, number, c, ghapi.ConnectionPage(c), first)
+}
+
+// pages is rest, asking for each later page with q, which selects c of
+// repository.pullRequest.
+func pages[T any](ctx context.Context, w *walker, number int, c ghapi.Connection, q ghapi.Query, first *connection[T]) ([]T, error) {
 	if first == nil {
 		return nil, fmt.Errorf("listing pull request %d: reply without %s", number, c)
 	}
@@ -402,7 +424,7 @@ func rest[T any](ctx context.Context, w *walker, number int, c ghapi.Connection,
 			"owner": Owner, "name": Name, "number": number,
 			"first": w.cfg.NestedPageSize, "after": info.EndCursor,
 		}
-		if err := w.client.Do(ctx, ghapi.ConnectionPage(c), vars, &resp); err != nil {
+		if err := w.client.Do(ctx, q, vars, &resp); err != nil {
 			return nil, fmt.Errorf("paging %s of pull request %d: %w", c, number, err)
 		}
 		page := resp.Repository.PullRequest[string(c)]

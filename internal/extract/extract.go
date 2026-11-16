@@ -58,7 +58,7 @@ func fromEntry(e fetch.Entry) (r record.Record, withheld map[string]int, err err
 		Number:      e.Number,
 		Updated:     utc(e.UpdatedAt),
 		Title:       e.Title,
-		Author:      actor(e.Author),
+		Author:      author(e),
 		Association: strings.ToLower(e.AuthorAssociation),
 		Base:        e.BaseRefName,
 		Created:     utc(e.CreatedAt),
@@ -88,6 +88,17 @@ func actor(a *fetch.Actor) record.Actor {
 		return record.Actor{Login: fetch.GhostLogin}
 	}
 	return record.Actor{Login: a.Login, Bot: a.Typename == "Bot"}
+}
+
+// author is e's author, named by its commits when the account was deleted.
+// Only the pull request's author is: GitHub gives a deleted account's
+// comment or review no commits to name it by.
+func author(e fetch.Entry) record.Actor {
+	a := actor(e.Author)
+	if a.Login == fetch.GhostLogin {
+		a.Name = e.CommitNames.Name()
+	}
+	return a
 }
 
 func labels(ls []fetch.Label) []string {

@@ -249,6 +249,58 @@ var _ = Describe("fetch", func() {
 			Expect(prior).To(Equal(map[int]*int{1: new(0), 2: new(1)}))
 		})
 
+		It("credits a deleted account's pull request to its commits' committer through fetch, extract and rollup, and no one else's", func() {
+			for _, name := range []string{tables.ToolsFile, tables.BotsFile, tables.CommandsFile, tables.LabelsFile, tables.KindsFile} {
+				b, err := os.ReadFile(filepath.Join("..", "..", "data", name))
+				Expect(err).NotTo(HaveOccurred())
+				Expect(os.WriteFile(filepath.Join(dataDir, name), b, 0o600)).To(Succeed())
+			}
+			at := time.Date(2026, 11, 10, 0, 0, 0, 0, time.UTC)
+			commit := fetch.Commit{OID: "1111111111111111111111111111111111111111", AuthoredDate: at.Add(-3 * time.Hour), CommittedDate: at.Add(-2 * time.Hour), Message: "osd: fix a leak\n"}
+			deleted := closedPR(3, at)
+			deleted.Author = nil
+			deleted.Commits = []fetch.Commit{commit}
+			deleted.Comments = []fetch.Comment{{CreatedAt: at.Add(-30 * time.Minute), Body: "thanks"}}
+			deleted.CommitNames = &fetch.CommitNames{Commits: []fetch.CommitName{{OID: commit.OID, Author: "Kim Example", Committer: "Ivy Example"}}}
+			live := closedPR(1, at.Add(-time.Hour))
+			live.Commits = []fetch.Commit{commit}
+			live.CommitNames = &fetch.CommitNames{Commits: []fetch.CommitName{{OID: commit.OID, Author: "Lee Example", Committer: "Lee Example"}}}
+			server = fetchtest.NewServer(live, deleted)
+			DeferCleanup(server.Close)
+			server.SetCounts(2, map[string]int{"alice": 0})
+			outDir := GinkgoT().TempDir()
+
+			Expect(run()).To(Succeed())
+			Expect(cli.Run(context.Background(), []string{"extract", "--cache-dir", cacheDir, "--data", dataDir},
+				&bytes.Buffer{}, &bytes.Buffer{}, stderr)).To(Succeed())
+			Expect(cli.Run(context.Background(), []string{"rollup", "--data", dataDir, "--out", outDir},
+				&bytes.Buffer{}, &bytes.Buffer{}, stderr)).To(Succeed())
+
+			records, err := os.ReadFile(filepath.Join(dataDir, "prs", "2026-11.jsonl"))
+			Expect(err).NotTo(HaveOccurred())
+			Expect(string(records)).To(ContainSubstring(`"number":3,`))
+			Expect(string(records)).To(ContainSubstring(`"author":{"login":"ghost","bot":false,"name":"Ivy Example"}`))
+			Expect(string(records)).NotTo(ContainSubstring("Lee Example"))
+			var meta struct {
+				People        []string `json:"people"`
+				PeopleDeleted []int    `json:"people_deleted"`
+			}
+			b, err := os.ReadFile(filepath.Join(outDir, "meta.json"))
+			Expect(err).NotTo(HaveOccurred())
+			Expect(json.Unmarshal(b, &meta)).To(Succeed())
+			Expect(meta.People).To(Equal([]string{"alice", "ghost:Ivy Example", "ghost"}))
+			Expect(meta.PeopleDeleted).To(Equal([]int{1}))
+			var prs struct {
+				Number []int `json:"number"`
+				Author []int `json:"author"`
+			}
+			b, err = os.ReadFile(filepath.Join(outDir, "prs-2026.json"))
+			Expect(err).NotTo(HaveOccurred())
+			Expect(json.Unmarshal(b, &prs)).To(Succeed())
+			Expect(prs.Number).To(Equal([]int{1, 3}))
+			Expect(prs.Author).To(Equal([]int{0, 1}))
+		})
+
 		// The server's repository was created at the window start and its
 		// search counts one pull request fewer than it holds, as GitHub's
 		// search has been seen to do.

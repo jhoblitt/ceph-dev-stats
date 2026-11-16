@@ -4,6 +4,7 @@
 // seconds; -1 means none or unknown.
 
 import { UNKNOWN_KIND } from './filters';
+import { isNamedForm } from './handles';
 
 export interface Named {
   id: string;
@@ -33,11 +34,17 @@ export interface Meta {
   event_kinds: string[];
   /**
    * The login of every person an `author` or an `actor` index names, once
-   * each; a deleted account is `ghost`.
+   * each. A deleted account is `ghost`, except as the author of a pull
+   * request whose commits gave a name: then it is `ghost:` and that name.
    */
   people: string[];
   /** The indexes into `people` of the bot accounts, ascending. */
   people_bots: number[];
+  /**
+   * The indexes into `people` of the deleted accounts known by a name,
+   * ascending; empty for data written before the rollup gave names.
+   */
+  people_deleted: number[];
 }
 
 /** The `state` column. */
@@ -267,15 +274,23 @@ export function parseMeta(raw: unknown, file = 'meta.json'): Meta {
     event_kinds: field('event_kinds', isStringArray, 'a list of strings'),
     people: field('people', isStringArray, 'a list of logins'),
     people_bots: field('people_bots', isIntegers, 'a list of indexes'),
+    people_deleted: raw['people_deleted'] === undefined ? [] : field('people_deleted', isIntegers, 'a list of indexes'),
   };
   const seen = new Set<string>();
   for (const login of meta.people) {
     if (seen.has(login)) throw new DataError(file, `"people" names "${login}" twice`);
     seen.add(login);
   }
-  const check = checkIndex(file, 'people_bots', meta.people, 'people', false);
-  meta.people_bots.forEach((b, i) => check(b, `${i}`));
-  meta.people_bots = [...meta.people_bots].sort((a, b) => a - b);
+  for (const list of ['people_bots', 'people_deleted'] as const) {
+    const check = checkIndex(file, list, meta.people, 'people', false);
+    meta[list].forEach((p, i) => check(p, `${i}`));
+    meta[list] = [...meta[list]].sort((a, b) => a - b);
+  }
+  for (const p of meta.people_deleted) {
+    const login = meta.people[p] as string;
+    if (!isNamedForm(login)) throw new DataError(file, `"people_deleted" names "${login}", which is not "ghost:" and a name`);
+    if (meta.people_bots.includes(p)) throw new DataError(file, `"people_deleted" names "${login}", which "people_bots" lists too`);
+  }
   if (!meta.disclosure.includes('none')) throw new DataError(file, '"disclosure" has no "none"');
   const reserved = meta.kinds.find((k) => RESERVED_KIND_IDS.includes(k.id));
   if (reserved) {

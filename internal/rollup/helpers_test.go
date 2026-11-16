@@ -120,6 +120,7 @@ type metaJSON struct {
 	EventKinds     []string `json:"event_kinds"`
 	People         []string `json:"people"`
 	PeopleBots     []int    `json:"people_bots"`
+	PeopleDeleted  []int    `json:"people_deleted"`
 }
 
 func (o output) meta() metaJSON {
