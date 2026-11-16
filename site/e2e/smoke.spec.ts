@@ -172,6 +172,49 @@ for (const { name, choose, status } of [
   });
 }
 
+test('dragging across a chart zooms the period to that range, and Back returns to the whole history', async ({ page }) => {
+  await open(page);
+  const period = page.getByRole('group', { name: 'Period' });
+  const from = period.getByLabel('From');
+  const to = period.getByLabel('To');
+  const first = (await from.getAttribute('min')) ?? '';
+  const last = (await to.getAttribute('max')) ?? '';
+  await expect(from).toHaveValue(first);
+  await expect(to).toHaveValue(last);
+  const plot = countsChart(page).locator('svg[role="group"]');
+  const ticks = () => plot.locator('.axis-x text').allTextContents();
+  const whole = await ticks();
+
+  // From about 60% to about 80% of the plot's width, across its middle.
+  await plot.scrollIntoViewIfNeeded();
+  const box = (await plot.boundingBox())!;
+  const y = box.y + box.height / 2;
+  await page.mouse.move(box.x + box.width * 0.6, y);
+  await page.mouse.down();
+  await page.mouse.move(box.x + box.width * 0.7, y, { steps: 4 });
+  await page.mouse.move(box.x + box.width * 0.8, y, { steps: 4 });
+  await page.mouse.up();
+
+  await expect(page).toHaveURL(/[#&?]from=\d{4}-\d{2}-\d{2}&to=\d{4}-\d{2}-\d{2}(&|$)/);
+  const start = await from.inputValue();
+  const end = await to.inputValue();
+  expect(start > first && start < end && end < last, `${start} to ${end}, inside ${first} to ${last}`).toBe(true);
+  // The axis now runs over the range: its first tick moves, and every year it names is in the range.
+  await expect.poll(async () => (await ticks())[0]).not.toBe(whole[0]);
+  const years = (await ticks()).flatMap((t) => (/\d{4}/.exec(t) ?? []).map(Number));
+  expect(years.length).toBeGreaterThan(0);
+  for (const year of years) {
+    expect(year).toBeGreaterThanOrEqual(Number(start.slice(0, 4)));
+    expect(year).toBeLessThanOrEqual(Number(end.slice(0, 4)));
+  }
+
+  await page.goBack();
+  await expect(page).not.toHaveURL(/[#&?](from|to)=/);
+  await expect(from).toHaveValue(first);
+  await expect(to).toHaveValue(last);
+  await expect.poll(ticks).toEqual(whole);
+});
+
 test('opening a PR from the table shows its timeline, whose marks link to it on GitHub', async ({ page }) => {
   await open(page);
   const rows = await tableReady(page);

@@ -6,7 +6,7 @@
   through a grid, and a click chooses that PR. A canvas is invisible to
   assistive technology and to the keyboard, so the figure carries a text
   alternative and a table of counts, and the PR table is the keyboard's way
-  to any PR.
+  to any PR. Dragging across the plot sets the period (`PeriodBrush`).
 -->
 <script lang="ts">
   import { COLOURS } from '../lib/colours';
@@ -24,13 +24,17 @@
   import { DISCLOSED, NOT_DISCLOSED, periodRange } from '../lib/filters';
   import { getPage, sectionsBusy, sectionsStale } from '../lib/page';
   import { openedIn } from '../lib/select';
+  import { stepFor } from '../lib/stats/buckets';
+  import { linearAxis, periodZoom } from '../lib/zoom';
   import AxisX from './charts/AxisX.svelte';
   import AxisY from './charts/AxisY.svelte';
   import ChartFrame from './charts/ChartFrame.svelte';
+  import PeriodBrush from './charts/PeriodBrush.svelte';
   import Tooltip from './charts/Tooltip.svelte';
   import { measureWidth } from './charts/measure';
 
   const { selection, data, view } = getPage();
+  const zoom = periodZoom(getPage());
 
   const dataset = $derived($view.dataset);
   const filters = $derived($view.filters);
@@ -46,6 +50,8 @@
   const layout = $derived(dotLayout(period, d.longest, width, height));
   const points = $derived(project(d, layout));
   const index = $derived(indexDots(points.xs, points.ys, width, height));
+  const zoomAxis = $derived(linearAxis(layout.left, layout.right, period, stepFor(period)));
+  let dragging = $state(false);
 
   const RADIUS = 3;
   /** Half a mark's box: its radius and room for its stroke. */
@@ -156,7 +162,7 @@
     selection.update((s) => ({ ...s, pr }));
   }
 
-  const readout = $derived(hover >= 0 && hover < d.rows.length ? dotReadout(dataset, d, hover) : null);
+  const readout = $derived(!dragging && hover >= 0 && hover < d.rows.length ? dotReadout(dataset, d, hover) : null);
   const title = 'Days to merge or close, each PR opened in the period';
 </script>
 
@@ -184,38 +190,40 @@
     <span class="probe" bind:this={probeYes} style:color={COLOURS.disclosed}></span>
 
     <div class="plot" style:height="{height}px" {@attach measureWidth((w) => (measured = w))}>
-      <svg class="layer" {width} {height} aria-hidden="true">
-        <AxisY ticks={layout.yTicks} x0={layout.left} x1={layout.right} unit="days to merge or close, log scale" unitY={12} />
-        <AxisX ticks={layout.xTicks} y={layout.bottom} x0={layout.left} x1={layout.right} />
-      </svg>
-      <canvas
-        bind:this={canvas}
-        class="layer"
-        class:pointing={hover >= 0}
-        style:width="{width}px"
-        style:height="{height}px"
-        aria-hidden="true"
-        onmousemove={(e) => (hover = dotAt(e))}
-        onmouseleave={() => (hover = -1)}
-        {onclick}
-      ></canvas>
-      <svg class="layer overlay" {width} {height} aria-hidden="true">
-        {#if chosen >= 0}
-          <circle class="selected-ring" cx={points.xs[chosen]} cy={points.ys[chosen]} r="7" />
+      <PeriodBrush {zoom} axis={zoomAxis} top={layout.top} bottom={layout.bottom} bind:dragging>
+        <svg class="layer" {width} {height} aria-hidden="true">
+          <AxisY ticks={layout.yTicks} x0={layout.left} x1={layout.right} unit="days to merge or close, log scale" unitY={12} />
+          <AxisX ticks={layout.xTicks} y={layout.bottom} x0={layout.left} x1={layout.right} />
+        </svg>
+        <canvas
+          bind:this={canvas}
+          class="layer"
+          class:pointing={hover >= 0}
+          style:width="{width}px"
+          style:height="{height}px"
+          aria-hidden="true"
+          onmousemove={(e) => (hover = dotAt(e))}
+          onmouseleave={() => (hover = -1)}
+          {onclick}
+        ></canvas>
+        <svg class="layer overlay" {width} {height} aria-hidden="true">
+          {#if chosen >= 0}
+            <circle class="selected-ring" cx={points.xs[chosen]} cy={points.ys[chosen]} r="7" />
+          {/if}
+          {#if hover >= 0 && !dragging}
+            <circle class="hover-ring" cx={points.xs[hover]} cy={points.ys[hover]} r="6" />
+          {/if}
+        </svg>
+        {#if readout}
+          <Tooltip
+            title={readout.title}
+            rows={readout.rows}
+            x={points.xs[hover] as number}
+            y={Math.max(0, (points.ys[hover] as number) - 40)}
+            frameWidth={width}
+          />
         {/if}
-        {#if hover >= 0}
-          <circle class="hover-ring" cx={points.xs[hover]} cy={points.ys[hover]} r="6" />
-        {/if}
-      </svg>
-      {#if readout}
-        <Tooltip
-          title={readout.title}
-          rows={readout.rows}
-          x={points.xs[hover] as number}
-          y={Math.max(0, (points.ys[hover] as number) - 40)}
-          frameWidth={width}
-        />
-      {/if}
+      </PeriodBrush>
     </div>
   </ChartFrame>
 </section>
@@ -287,6 +295,10 @@
     inset: 0 auto auto 0;
     display: block;
     overflow: visible;
+  }
+
+  canvas {
+    cursor: crosshair;
   }
 
   canvas.pointing {

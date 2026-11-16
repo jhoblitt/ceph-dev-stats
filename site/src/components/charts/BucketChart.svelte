@@ -11,6 +11,7 @@
   the data covers only in part has faded bars, and its line values are hollow
   markers left unconnected, so a short bucket does not read as a fall. A
   value that can no longer be reached is marked in a strip above its panel.
+  Given a zoom, dragging across the plot sets the period (`PeriodBrush`).
 
   The chart takes its columns from `timeColumns`, as every chart over the
   period does, so a bucket sits at the same x as in the other charts.
@@ -41,8 +42,10 @@
     spaceTicks,
     timeColumns,
   } from '../../lib/plot';
+  import { type PeriodZoom, columnAxis } from '../../lib/zoom';
   import AxisX from './AxisX.svelte';
   import AxisY from './AxisY.svelte';
+  import PeriodBrush from './PeriodBrush.svelte';
   import Tooltip from './Tooltip.svelte';
   import { focusSibling, measureWidth } from './measure';
 
@@ -71,6 +74,8 @@
     sharedScale?: boolean;
     /** The value scale: linear, or log over durations in days, from one hour. */
     scale?: 'linear' | 'logDays';
+    /** Sets the period from a drag across the plot. */
+    zoom?: PeriodZoom;
   }
 
   let {
@@ -87,6 +92,7 @@
     panels,
     sharedScale = true,
     scale = 'linear',
+    zoom,
   }: Props = $props();
 
   let measured = $state(0);
@@ -166,6 +172,8 @@
   const plotTop = $derived((layout[0]?.top ?? TOP) - (layout[0]?.strip ? STRIP : 0));
 
   const x = $derived(timeColumns(width, n));
+  const zoomAxis = $derived(columnAxis(x, model.buckets, model.step));
+  let dragging = $state(false);
   // A bar takes three quarters of its column, centred in it.
   const barWidth = $derived(Math.min(24, x.step * 0.75));
   const centre = (i: number) => x.centre(i);
@@ -270,78 +278,80 @@
 </script>
 
 <div class="plot" {@attach measureWidth((w) => (measured = w))}>
-  <svg {width} {height} role="group" aria-label={label}>
-    <g aria-hidden="true">
-      {#each model.buckets as _, i (i)}
-        {#if model.shade?.[i]}
-          <rect class="shade" x={column(i)} y={plotTop} width={x.step} height={base - plotTop} style:fill={COLOURS.notYetKnown} />
+  <PeriodBrush {zoom} axis={zoomAxis} top={plotTop} bottom={base} bind:dragging>
+    <svg {width} {height} role="group" aria-label={label} class:zoomable={zoom !== undefined}>
+      <g aria-hidden="true">
+        {#each model.buckets as _, i (i)}
+          {#if model.shade?.[i]}
+            <rect class="shade" x={column(i)} y={plotTop} width={x.step} height={base - plotTop} style:fill={COLOURS.notYetKnown} />
+          {/if}
+        {/each}
+        {#if selectedIndex >= 0}
+          <rect class="selected" x={column(selectedIndex)} y={plotTop} width={x.step} height={base - plotTop} />
+          <rect class="selected-rule" x={column(selectedIndex)} y={base - 3} width={x.step} height={3} />
+        {/if}
+      </g>
+      {#each layout as p, k (k)}
+        <AxisY ticks={p.ticks} x0={LEFT} x1={x.right} unit={p.unit} unitY={p.top - p.reserve + 12} />
+        {#if k < layout.length - 1}
+          <line class="panel-base" aria-hidden="true" x1={LEFT} x2={x.right} y1={p.bottom} y2={p.bottom} />
         {/if}
       {/each}
-      {#if selectedIndex >= 0}
-        <rect class="selected" x={column(selectedIndex)} y={plotTop} width={x.step} height={base - plotTop} />
-        <rect class="selected-rule" x={column(selectedIndex)} y={base - 3} width={x.step} height={3} />
+      {#if active !== null && !dragging}
+        <line class="crosshair" aria-hidden="true" x1={centre(active)} x2={centre(active)} y1={plotTop} y2={base} />
       {/if}
-    </g>
-    {#each layout as p, k (k)}
-      <AxisY ticks={p.ticks} x0={LEFT} x1={x.right} unit={p.unit} unitY={p.top - p.reserve + 12} />
-      {#if k < layout.length - 1}
-        <line class="panel-base" aria-hidden="true" x1={LEFT} x2={x.right} y1={p.bottom} y2={p.bottom} />
+      {#each drawn as p, k (k)}
+        <g class="plot-panel" aria-hidden="true">
+          {#each p.stacks as segments, i (i)}
+            {#each segments as s (s.key)}
+              <path class="bar" class:partial={isPartial(i)} d={s.d} style:fill={s.color} />
+            {/each}
+          {/each}
+          {#each p.paths as l (l.key)}
+            <path class="line" class:dashed={l.dashed} d={l.d} style:stroke={l.color} />
+            {#each l.markers as m (m.i)}
+              <path
+                class="marker"
+                class:hollow={m.partial}
+                d={markerPath(l.shape)}
+                transform="translate({m.cx} {m.cy})"
+                style:fill={m.partial ? 'var(--surface)' : l.color}
+                style:stroke={m.partial ? l.color : 'var(--surface)'}
+              />
+            {/each}
+            {#each l.unreached as i (i)}
+              <path class="unreached" d={markerPath(l.shape, 40)} transform="translate({centre(i)} {p.top - 8})" style:stroke={l.color} />
+            {/each}
+          {/each}
+        </g>
+      {/each}
+      {#if axis}
+        <AxisX ticks={xTicks} y={base} x0={LEFT} x1={x.right} />
       {/if}
-    {/each}
-    {#if active !== null}
-      <line class="crosshair" aria-hidden="true" x1={centre(active)} x2={centre(active)} y1={plotTop} y2={base} />
-    {/if}
-    {#each drawn as p, k (k)}
-      <g class="plot-panel" aria-hidden="true">
-        {#each p.stacks as segments, i (i)}
-          {#each segments as s (s.key)}
-            <path class="bar" class:partial={isPartial(i)} d={s.d} style:fill={s.color} />
-          {/each}
-        {/each}
-        {#each p.paths as l (l.key)}
-          <path class="line" class:dashed={l.dashed} d={l.d} style:stroke={l.color} />
-          {#each l.markers as m (m.i)}
-            <path
-              class="marker"
-              class:hollow={m.partial}
-              d={markerPath(l.shape)}
-              transform="translate({m.cx} {m.cy})"
-              style:fill={m.partial ? 'var(--surface)' : l.color}
-              style:stroke={m.partial ? l.color : 'var(--surface)'}
-            />
-          {/each}
-          {#each l.unreached as i (i)}
-            <path class="unreached" d={markerPath(l.shape, 40)} transform="translate({centre(i)} {p.top - 8})" style:stroke={l.color} />
-          {/each}
+      <g>
+        {#each model.buckets as start, i (start)}
+          <rect
+            class="hit"
+            x={column(i)}
+            y={plotTop}
+            width={x.step}
+            height={base - plotTop}
+            role="button"
+            tabindex={i === tabStop ? 0 : -1}
+            aria-pressed={i === selectedIndex}
+            aria-label={name(i)}
+            onpointerenter={() => (active = i)}
+            onpointerleave={() => (active = null)}
+            onfocus={() => (active = focused = i)}
+            onblur={() => (active = null)}
+            onclick={() => onselect(start)}
+            onkeydown={(e) => onkeydown(e, i)}
+          />
         {/each}
       </g>
-    {/each}
-    {#if axis}
-      <AxisX ticks={xTicks} y={base} x0={LEFT} x1={x.right} />
-    {/if}
-    <g>
-      {#each model.buckets as start, i (start)}
-        <rect
-          class="hit"
-          x={column(i)}
-          y={plotTop}
-          width={x.step}
-          height={base - plotTop}
-          role="button"
-          tabindex={i === tabStop ? 0 : -1}
-          aria-pressed={i === selectedIndex}
-          aria-label={name(i)}
-          onpointerenter={() => (active = i)}
-          onpointerleave={() => (active = null)}
-          onfocus={() => (active = focused = i)}
-          onblur={() => (active = null)}
-          onclick={() => onselect(start)}
-          onkeydown={(e) => onkeydown(e, i)}
-        />
-      {/each}
-    </g>
-  </svg>
-  {#if active !== null}
+    </svg>
+  </PeriodBrush>
+  {#if active !== null && !dragging}
     <Tooltip
       title={bucketHead(model, active)}
       rows={bucketReadout(model, active, format)}
@@ -418,6 +428,10 @@
   .hit {
     fill: transparent;
     cursor: pointer;
+  }
+
+  .zoomable .hit {
+    cursor: crosshair;
   }
 
   .hit:focus {

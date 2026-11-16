@@ -43,11 +43,13 @@
   import { type Span, outcomeCurve } from '../lib/stats/curve';
   import { reviewLoad } from '../lib/stats/reviewers';
   import { weekly } from '../lib/stats/weekly';
+  import { periodZoom } from '../lib/zoom';
   import BucketChart from './charts/BucketChart.svelte';
   import ChartFrame from './charts/ChartFrame.svelte';
   import StepCurve from './charts/StepCurve.svelte';
 
   const { selection, data, view } = getPage();
+  const zoom = periodZoom(getPage());
 
   const dataset = $derived($view.dataset);
   const filters = $derived($view.filters);
@@ -176,6 +178,7 @@
       scale="logDays"
       {selected}
       onselect={onbucket}
+      {zoom}
     />
   </ChartFrame>
 {/snippet}
@@ -201,6 +204,7 @@
       height={420}
       {selected}
       onselect={onbucket}
+      {zoom}
     />
   </ChartFrame>
 
@@ -219,6 +223,7 @@
       integer
       {selected}
       onselect={onbucket}
+      {zoom}
     />
   </ChartFrame>
 
@@ -284,6 +289,7 @@
           axis={last}
           {selected}
           onselect={onbucket}
+          {zoom}
         />
       </div>
     {/each}

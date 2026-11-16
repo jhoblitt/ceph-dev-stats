@@ -7,11 +7,13 @@
   import { backlog } from '../lib/stats/backlog';
   import { weekly } from '../lib/stats/weekly';
   import { backlogModel, prsModel } from '../lib/velocity';
+  import { periodZoom } from '../lib/zoom';
   import BucketChart from './charts/BucketChart.svelte';
   import ChartFrame from './charts/ChartFrame.svelte';
   import StackedArea from './charts/StackedArea.svelte';
 
   const { selection, data, view } = getPage();
+  const zoom = periodZoom(getPage());
 
   const dataset = $derived($view.dataset);
   const filters = $derived($view.filters);
@@ -64,7 +66,9 @@
       integer
       {selected}
       onselect={onbucket}
+      {zoom}
     />
+    <p class="hint">Drag across a chart to zoom to that range</p>
   </ChartFrame>
 
   <ChartFrame title={backlogTitle} summary={describeArea(open)} {empty} legend={areaLegend(open)} table={areaTable(open)}>
@@ -74,6 +78,7 @@
       unit="open PRs"
       selected={{ bucket: selected, key: $selection.band }}
       onselect={onband}
+      {zoom}
     />
   </ChartFrame>
 </section>
@@ -92,6 +97,13 @@
 
   h2 {
     margin: 0;
+  }
+
+  /* The one place the page says a chart can be dragged across. */
+  .hint {
+    margin: 0;
+    color: var(--text-muted);
+    font-size: var(--text-sm);
   }
 
   /* While a wider period loads, the charts keep their last figures, dimmed. */

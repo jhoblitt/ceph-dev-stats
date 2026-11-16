@@ -16,11 +16,13 @@
   import { sectionHash } from '../lib/state';
   import { disclosureCounts } from '../lib/stats/measures';
   import { weekly } from '../lib/stats/weekly';
+  import { periodZoom } from '../lib/zoom';
   import BucketChart from './charts/BucketChart.svelte';
   import ChartFrame from './charts/ChartFrame.svelte';
   import Key from './charts/Key.svelte';
 
   const { meta, selection, data, view } = getPage();
+  const zoom = periodZoom(getPage());
 
   const dataset = $derived($view.dataset);
   const filters = $derived($view.filters);
@@ -74,6 +76,7 @@
       height={200}
       {selected}
       onselect={onbucket}
+      {zoom}
     />
   </ChartFrame>
 
@@ -93,6 +96,7 @@
       height={Math.max(160, 40 + families.panels.length * 84)}
       {selected}
       onselect={onbucket}
+      {zoom}
     />
   </ChartFrame>
 
