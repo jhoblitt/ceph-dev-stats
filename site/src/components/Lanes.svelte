@@ -22,7 +22,6 @@
     shownNote,
   } from '../lib/lanes';
   import { getPage } from '../lib/page';
-  import { select } from '../lib/select';
   import { hashFromState } from '../lib/state';
   import { formatDate } from '../lib/timeline-axis';
   import ChartFrame from './charts/ChartFrame.svelte';
@@ -39,12 +38,12 @@
   }
 
   let { order, orderName = 'newest opened first' }: Props = $props();
-  const { selection, data, meta } = getPage();
+  const { selection, view, meta } = getPage();
 
-  const dataset = $derived($data.dataset);
-  const filters = $derived($selection.filters);
+  const dataset = $derived($view.dataset);
+  const filters = $derived($view.filters);
   const period = $derived(periodRange(filters));
-  const rows = $derived(order ?? byOpening(dataset, select(dataset, filters)));
+  const rows = $derived(order ?? byOpening(dataset, $view.rows));
   const model = $derived(laneModel(dataset, rows));
   const lanes = $derived(model.lanes);
   const empty = $derived(lanes.length === 0);

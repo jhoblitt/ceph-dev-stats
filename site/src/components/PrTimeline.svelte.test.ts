@@ -10,7 +10,7 @@ import rawPrs2026 from '../lib/__fixtures__/data/prs-2026.json';
 import rawTable2026 from '../lib/__fixtures__/data/table-2026.json';
 import { fixturePage, memoryLocation, meta } from '../lib/__fixtures__/page';
 import { DataLoader } from '../lib/data';
-import { createDataStore, yearsForState } from '../lib/page';
+import { createDataStore, createViewStore, yearsForState } from '../lib/page';
 import { createStateStore } from '../lib/state';
 import { at } from '../lib/stats/testing';
 
@@ -245,7 +245,7 @@ describe('before the timeline is on screen', () => {
     const loader = new DataLoader(meta, BASE, fetched.fetch);
     const years = yearsForState(meta, get(selection));
     const data = createDataStore(loader, selection, years, await loader.load(years));
-    render(App, { props: { page: { meta, selection, data, loader } } });
+    render(App, { props: { page: { meta, selection, data, view: createViewStore(selection, data), loader } } });
     const section = await screen.findByRole('region', { name: 'Timeline of #67000' });
     await new Promise((r) => setTimeout(r, 20));
     const tables = () => fetched.requested.filter((u) => u.includes('table-'));

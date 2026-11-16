@@ -36,7 +36,7 @@
     waitsModel,
     waitsNothing,
   } from '../lib/review';
-  import { openedIn, select } from '../lib/select';
+  import { openedIn } from '../lib/select';
   import { chooseBucket } from '../lib/selection';
   import { awaitingResponse } from '../lib/stats/backlog';
   import { capacity } from '../lib/stats/capacity';
@@ -48,14 +48,14 @@
   import ChartFrame from './charts/ChartFrame.svelte';
   import StepCurve from './charts/StepCurve.svelte';
 
-  const { selection, data } = getPage();
+  const { selection, data, view } = getPage();
 
-  const dataset = $derived($data.dataset);
-  const filters = $derived($selection.filters);
+  const dataset = $derived($view.dataset);
+  const filters = $derived($view.filters);
   const period = $derived(periodRange(filters));
   // The calendar charts count every PR active in the period; the curves, the
   // waits and bot-command use are about the PRs opened in it.
-  const rows = $derived(select(dataset, filters));
+  const rows = $derived($view.rows);
   const opened = $derived(openedIn(dataset, rows, period));
   const empty = $derived(rows.length === 0);
 

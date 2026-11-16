@@ -3,7 +3,6 @@
   import { dayStart, periodRange } from '../lib/filters';
   import { formatCount } from '../lib/format';
   import { getPage } from '../lib/page';
-  import { select } from '../lib/select';
   import { chooseBand, chooseBucket } from '../lib/selection';
   import { backlog } from '../lib/stats/backlog';
   import { weekly } from '../lib/stats/weekly';
@@ -12,13 +11,13 @@
   import ChartFrame from './charts/ChartFrame.svelte';
   import StackedArea from './charts/StackedArea.svelte';
 
-  const { selection, data } = getPage();
+  const { selection, data, view } = getPage();
 
-  const dataset = $derived($data.dataset);
-  const filters = $derived($selection.filters);
+  const dataset = $derived($view.dataset);
+  const filters = $derived($view.filters);
   const period = $derived(periodRange(filters));
   // The calendar charts count every PR active in the period.
-  const rows = $derived(select(dataset, filters));
+  const rows = $derived($view.rows);
   const empty = $derived(rows.length === 0);
 
   const prs = $derived(

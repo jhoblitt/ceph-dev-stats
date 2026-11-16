@@ -22,23 +22,20 @@
     project,
   } from '../lib/dots';
   import { periodRange } from '../lib/filters';
-  import { keepEqual, sameFilters } from '../lib/memo';
   import { getPage } from '../lib/page';
-  import { openedIn, select } from '../lib/select';
+  import { openedIn } from '../lib/select';
   import AxisX from './charts/AxisX.svelte';
   import AxisY from './charts/AxisY.svelte';
   import ChartFrame from './charts/ChartFrame.svelte';
   import Tooltip from './charts/Tooltip.svelte';
   import { measureWidth } from './charts/measure';
 
-  const { selection, data } = getPage();
+  const { selection, data, view } = getPage();
 
-  const dataset = $derived($data.dataset);
-  // Choosing a PR leaves the dots alone, so they are not built and drawn again.
-  const keep = keepEqual(sameFilters);
-  const filters = $derived(keep($selection.filters));
+  const dataset = $derived($view.dataset);
+  const filters = $derived($view.filters);
   const period = $derived(periodRange(filters));
-  const rows = $derived(select(dataset, filters));
+  const rows = $derived($view.rows);
   const opened = $derived(openedIn(dataset, rows, period));
   const empty = $derived(rows.length === 0);
   const d = $derived(dots(dataset, opened));

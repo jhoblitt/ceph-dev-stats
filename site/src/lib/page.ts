@@ -2,9 +2,11 @@
 // each section reads it in its own file and none is wired through another.
 
 import { createContext } from 'svelte';
-import { type Readable, writable } from 'svelte/store';
+import { type Readable, get, writable } from 'svelte/store';
 import { type DataLoader, type Dataset, type LoadError, type LoadResult, type Meta, yearsFor } from './data';
-import { periodRange } from './filters';
+import { type Filters, periodRange } from './filters';
+import { keepEqual, sameFilters } from './memo';
+import { select } from './select';
 import type { AppState, StateStore } from './state';
 
 export interface DataState {
@@ -20,8 +22,17 @@ export interface Page {
   meta: Meta;
   selection: StateStore;
   data: Readable<DataState>;
+  /** The filters and the rows they select; what every section's figures are computed from. */
+  view: Readable<View>;
   /** For files fetched on demand, such as a year's table. */
   loader: DataLoader;
+}
+
+export interface View {
+  dataset: Dataset;
+  filters: Filters;
+  /** The rows the filters select from `dataset`, ascending. */
+  rows: Uint32Array;
 }
 
 export const [getPage, setPage] = createContext<Page>();
@@ -56,4 +67,45 @@ export function createDataStore(
     });
   });
   return { subscribe: inner.subscribe, destroy: stop };
+}
+
+/**
+ * The selection every section reads. The state store hands out a new filters
+ * object on every change of the URL, choosing a PR or a sort included, and a
+ * Svelte derivation compares by identity; this one notifies only when the
+ * filters' values or the dataset change, so a statistic over the selection is
+ * computed again only then.
+ */
+export function createViewStore(
+  selection: Readable<AppState>,
+  data: Readable<DataState>,
+): Readable<View> & { destroy(): void } {
+  const keep = keepEqual(sameFilters);
+  let state = get(selection);
+  let dataset = get(data).dataset;
+  const view = (filters: Filters): View => ({ dataset, filters, rows: select(dataset, filters) });
+  let current = view(keep(state.filters));
+  const inner = writable(current);
+
+  const update = () => {
+    const filters = keep(state.filters);
+    if (current.filters === filters && current.dataset === dataset) return;
+    current = view(filters);
+    inner.set(current);
+  };
+  const stopState = selection.subscribe((s) => {
+    state = s;
+    update();
+  });
+  const stopData = data.subscribe((d) => {
+    dataset = d.dataset;
+    update();
+  });
+  return {
+    subscribe: inner.subscribe,
+    destroy: () => {
+      stopState();
+      stopData();
+    },
+  };
 }

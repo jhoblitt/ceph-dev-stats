@@ -10,10 +10,10 @@
 <script lang="ts">
   import { SvelteMap } from 'svelte/reactivity';
   import { DataError, locateRow } from '../lib/data';
-  import { keepEqual, sameFilters } from '../lib/memo';
+  import { keepEqual } from '../lib/memo';
   import { getPage } from '../lib/page';
   import { periodRange } from '../lib/filters';
-  import { openedIn, select } from '../lib/select';
+  import { openedIn } from '../lib/select';
   import { type SortColumn, nextSort, sameSort } from '../lib/sort';
   import {
     TABLE_COLUMNS,
@@ -31,17 +31,16 @@
   import SelectedPr from './SelectedPr.svelte';
   import { onScreen } from './onscreen';
 
-  const { selection, data, loader } = getPage();
+  const { selection, data, view, loader } = getPage();
 
-  const dataset = $derived($data.dataset);
-  // Choosing a PR leaves the rows and their order alone, so neither is worked out again.
-  const keepFilters = keepEqual(sameFilters);
+  const dataset = $derived($view.dataset);
+  // Choosing a PR leaves the order alone, so it is not worked out again.
   const keepSort = keepEqual(sameSort);
-  const filters = $derived(keepFilters($selection.filters));
+  const filters = $derived($view.filters);
   const week = $derived($selection.week);
   const band = $derived($selection.band);
   const sort = $derived(keepSort($selection.sort));
-  const selected = $derived(select(dataset, filters));
+  const selected = $derived($view.rows);
   const rows = $derived(narrowRows(dataset, selected, { filters, week, band }));
   // "no PRs match" is for an empty selection; a week or band with none says so in its own words.
   const empty = $derived(selected.length === 0);
@@ -98,8 +97,8 @@
     observer.observe(node);
     return () => observer.disconnect();
   }
-  const view = $derived(windowRows(scrollTop, viewport > 0 ? viewport : 480, ROW, ordered.length, 8));
-  const visible = $derived(Array.from(ordered.subarray(view.start, view.end)));
+  const win = $derived(windowRows(scrollTop, viewport > 0 ? viewport : 480, ROW, ordered.length, 8));
+  const visible = $derived(Array.from(ordered.subarray(win.start, win.end)));
 
   const repo = $derived(dataset.meta.repo);
   const choose = (pr: number) => selection.update((s) => ({ ...s, pr }));
@@ -169,13 +168,13 @@
             </tr>
           </thead>
           <tbody>
-            {#if view.start > 0}
-              <tr class="spacer" aria-hidden="true" style:height="{view.start * ROW}px"><td colspan={TABLE_COLUMNS.length}></td></tr>
+            {#if win.start > 0}
+              <tr class="spacer" aria-hidden="true" style:height="{win.start * ROW}px"><td colspan={TABLE_COLUMNS.length}></td></tr>
             {/if}
             {#each visible as r, i (r)}
               {@const number = dataset.prs.number[r] as number}
               {@const title = cellText(dataset, r, 'title', text)}
-              <tr aria-rowindex={view.start + i + 2} aria-current={number === $selection.pr ? 'true' : undefined}>
+              <tr aria-rowindex={win.start + i + 2} aria-current={number === $selection.pr ? 'true' : undefined}>
                 <td class="number">
                   <a
                     href={prUrl(repo, number)}
@@ -194,8 +193,8 @@
                 {/each}
               </tr>
             {/each}
-            {#if view.end < ordered.length}
-              <tr class="spacer" aria-hidden="true" style:height="{(ordered.length - view.end) * ROW}px"
+            {#if win.end < ordered.length}
+              <tr class="spacer" aria-hidden="true" style:height="{(ordered.length - win.end) * ROW}px"
                 ><td colspan={TABLE_COLUMNS.length}></td></tr
               >
             {/if}

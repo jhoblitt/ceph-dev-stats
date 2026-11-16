@@ -6,7 +6,7 @@ import App from '../App.svelte';
 import { BASE, fixtureFetch } from '../lib/__fixtures__/fetch';
 import { memoryLocation, meta } from '../lib/__fixtures__/page';
 import { DataLoader } from '../lib/data';
-import { createDataStore, yearsForState } from '../lib/page';
+import { createDataStore, createViewStore, yearsForState } from '../lib/page';
 import { createStateStore, stateFromHash } from '../lib/state';
 import { fixture } from '../lib/stats/testing';
 import { DEFAULT_SORT } from '../lib/sort';
@@ -28,7 +28,8 @@ async function page(hash: string, files: Record<string, unknown> = {}) {
   const loader = new DataLoader(meta, BASE, fetched.fetch);
   const years = yearsForState(meta, get(selection));
   const store = createDataStore(loader, selection, years, await loader.load(years));
-  return { props: { page: { meta, selection, data: store, loader } }, loc, requested: fetched.requested };
+  const view = createViewStore(selection, store);
+  return { props: { page: { meta, selection, data: store, view, loader } }, loc, requested: fetched.requested };
 }
 
 function region() {
