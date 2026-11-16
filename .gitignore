@@ -14,6 +14,8 @@ coverage.out
 /site/dist/
 /site/public/data/
 /site/test-results/
+# The transpiled components svelte-check --tsgo writes for tsgo to read.
+/site/.svelte-check/
 
 # Local agent scratch and harness state.
 /.superpowers/
