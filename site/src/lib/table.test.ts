@@ -149,6 +149,14 @@ describe('tableRows', () => {
       `open at the end of the week of 2026-06-01, aged ${AGE_BANDS[2].label}`,
     );
   });
+
+  it('names a month a period counts by without "the"', () => {
+    const long = { ...state, filters: { ...state.filters, from: '2024-11-16' } };
+    expect(narrowing(data, { ...long, week: '2026-06-01' })).toBe('opened in June 2026');
+    expect(narrowing(data, { ...long, week: '2026-06-01', band: '30-90' })).toBe(
+      `open at the end of June 2026, aged ${AGE_BANDS[2].label}`,
+    );
+  });
 });
 
 describe('cells', () => {

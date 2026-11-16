@@ -6,7 +6,7 @@ import { type BucketModel, type LineSeries, type Panel } from './charts';
 import { COLOURS } from './colours';
 import type { Dataset, Named } from './data';
 import { dayOf } from './filters';
-import { bucketName, formatCount, formatMean, formatShare } from './format';
+import { bucketPhrase, formatCount, formatMean, formatShare } from './format';
 import { curveQuantiles } from './review';
 import { outcomeCurve } from './stats/curve';
 import { type DisclosureCounts, type Distribution, distribution, mergedWithin } from './stats/measures';
@@ -156,8 +156,8 @@ export function describeShares(model: BucketModel): string {
     for (const k of known) if (k.v > peak.v) peak = k;
     const low = Math.min(...known.map((k) => k.v));
     const label = l.label.charAt(0).toUpperCase() + l.label.slice(1);
-    const where = bucketName(model.buckets[peak.i] as number, model.step);
-    out.push(`${label}: from ${percent(low)} to ${percent(peak.v)}, highest in the ${where}.`);
+    const where = bucketPhrase(model.buckets[peak.i] as number, model.step);
+    out.push(`${label}: from ${percent(low)} to ${percent(peak.v)}, highest in ${where}.`);
   }
   const none = model.lines[0]?.values.filter((v) => v === null).length ?? 0;
   if (none > 0) out.push(`No PRs opened in ${plural(none, model.step)}.`);

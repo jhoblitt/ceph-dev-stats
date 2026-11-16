@@ -65,6 +65,16 @@ describe('shareModel', () => {
       /^By week, 27 weeks from 2026-05-11 to 2026-11-09\. Disclosing: from 0% to 100%, highest in the week of 2026-08-03\. No PRs opened in 21 weeks\./,
     );
   });
+
+  it('names the highest month as a month is named, without "the"', () => {
+    // Over two years the buckets are months: May 2026 50%, June and July 0%, August 100%.
+    const long = periodRange({ from: '2024-11-16', to: '2026-11-15' });
+    const monthly = shareModel(weekly(data, select(data, { ...filters, from: '2024-11-16' }), long, 'disclosureShare'));
+    expect(monthly.step).toBe('month');
+    expect(describeShares(monthly)).toMatch(
+      /^By month, 25 months from 2024-11-01 to 2026-11-01\. Disclosing: from 0% to 100%, highest in August 2026\. /,
+    );
+  });
 });
 
 describe('the tool families', () => {

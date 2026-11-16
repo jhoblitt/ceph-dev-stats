@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { bucketName, bucketTick, formatCount, formatDays, formatMean, formatShare } from './format';
+import { bucketName, bucketPhrase, bucketTick, formatCount, formatDays, formatMean, formatShare } from './format';
 
 const at = (iso: string) => Date.parse(iso) / 1000;
 
@@ -59,5 +59,10 @@ describe('bucket labels', () => {
     expect(bucketTick(at('2026-01-01T00:00:00Z'), 'month')).toBe('Jan 2026');
     expect(bucketName(at('2026-05-18T00:00:00Z'), 'week')).toBe('week of 2026-05-18');
     expect(bucketName(at('2026-06-01T00:00:00Z'), 'month')).toBe('June 2026');
+  });
+
+  it('names a bucket after a preposition, a week with "the" and a month without', () => {
+    expect(`in ${bucketPhrase(at('2026-05-18T00:00:00Z'), 'week')}`).toBe('in the week of 2026-05-18');
+    expect(`in ${bucketPhrase(at('2026-06-01T00:00:00Z'), 'month')}`).toBe('in June 2026');
   });
 });
