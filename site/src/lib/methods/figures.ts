@@ -1,11 +1,12 @@
 // The figures the methods page gives about the data, computed from what the
 // site loads when the page is shown. Each is over the PRs open at some point
 // in the period it is given, the report's default period on the page, on
-// every branch, split into main and the rest where the two differ in kind;
+// every branch, split into the development branch, main or master, and the
+// rest where the two differ in kind;
 // event counts take only the events inside that period.
 
 import { type Dataset, type TableYear, locateEvent, locateRow } from '../data';
-import { DAY, type Filters } from '../filters';
+import { DAY, type Filters, developmentBases } from '../filters';
 import { isBot } from '../handles';
 import { openedIn, select } from '../select';
 import { defaultFilters } from '../state';
@@ -13,7 +14,7 @@ import type { Period } from '../stats/buckets';
 import { nearestRank } from '../stats/measures';
 import { authorRows, reviewerRows } from '../stats/people';
 
-/** A count of PRs on main and on every other branch. */
+/** A count of PRs on the development branch, under either name, and on every other branch. */
 export interface Split {
   main: number;
   other: number;
@@ -33,11 +34,11 @@ function openedDuring(data: Dataset, r: number, period: Period): boolean {
 }
 
 function split(data: Dataset, rows: Uint32Array, keep: (r: number) => boolean): Split {
-  const main = data.meta.bases.indexOf('main');
+  const development = developmentBases(data.meta.bases);
   const out = { main: 0, other: 0 };
   for (const r of rows) {
     if (!keep(r)) continue;
-    if (data.prs.base[r] === main) out.main++;
+    if (development[data.prs.base[r] as number] === 1) out.main++;
     else out.other++;
   }
   return out;
@@ -211,7 +212,7 @@ export function eventRefs(
   return kinds.flatMap((kind, k) => ((events[k] as number) > 0 ? [{ kind, events: events[k] as number, missing: missing[k] as number }] : []));
 }
 
-/** The report's default view over `days`: PRs on main open at some point in it. */
+/** The report's default view over `days`: PRs on the development branch open at some point in it. */
 export function defaultRows(data: Dataset, days: Days): Uint32Array {
   return select(data, { ...defaultFilters(data.meta), ...days });
 }

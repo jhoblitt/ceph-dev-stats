@@ -20,6 +20,44 @@ export const TARGETS = [
 ] as const satisfies readonly Choice<string>[];
 export type Target = (typeof TARGETS)[number]['id'];
 
+/**
+ * The names of ceph/ceph's development branch: `master` until it was renamed
+ * `main` in 2022, and `main` since. Both name the same branch at different
+ * times, and the records hold pull requests under each; some opened before
+ * the rename are now on `main`.
+ */
+const DEVELOPMENT_BRANCHES: readonly string[] = ['main', 'master'];
+
+/**
+ * Whether a base branch is the development branch, under either name: what
+ * the `main` target keeps and every place that tells main from the other
+ * branches asks. A release or feature branch is not.
+ */
+export function isDevelopmentBranch(base: string): boolean {
+  return DEVELOPMENT_BRANCHES.includes(base);
+}
+
+/** A flag per name in meta's `bases`, set for the development branch's, for a loop over the `base` column. */
+export function developmentBases(bases: readonly string[]): Uint8Array {
+  return Uint8Array.from(bases, (b) => (isDevelopmentBranch(b) ? 1 : 0));
+}
+
+/** The target that keeps the development branch. */
+const MAIN_TARGET = TARGETS.find((t) => t.id === 'main') as Extract<(typeof TARGETS)[number], { id: 'main' }>;
+
+/** What the `main` target is, in the words the report gives wherever it says so. */
+export const MAIN_TARGET_NOTE = `${MAIN_TARGET.label} is the development branch, named master until its rename`;
+
+/**
+ * What a PR's panel says of its base when the `main` target holds it under
+ * a name other than the target's own; else null.
+ */
+export function baseNote(base: string): string | null {
+  return isDevelopmentBranch(base) && base !== MAIN_TARGET.id
+    ? `On ${base}, so under the ${MAIN_TARGET.label} target: ${MAIN_TARGET_NOTE}.`
+    : null;
+}
+
 /** By lines added plus lines deleted. */
 export const SIZE_BANDS = [
   { id: 'le10', label: 'up to 10', min: 0, max: 10 },

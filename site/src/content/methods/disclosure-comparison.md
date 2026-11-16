@@ -13,7 +13,7 @@ There is no median time to merge: the groups can differ in age, and a median far
 
 ## What else sets the groups apart
 
-This table sets the two groups side by side on things other than disclosure: the pull requests on `main` opened in the default period, which are those the LLM-use section compares on the report's default view, as of {{asOf}}:
+This table sets the two groups side by side on things other than disclosure: the pull requests on the development branch, `main` or `master`, opened in the default period, which are those the LLM-use section compares on the report's default view, as of {{asOf}}:
 
 {{table.disclosureGroups}}
 

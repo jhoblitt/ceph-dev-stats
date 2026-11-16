@@ -57,7 +57,7 @@ export interface DataFigures {
   people: PeopleFigures;
   /**
    * The PRs the LLM-use section compares on the report's default view, those
-   * on main opened in the period, split by disclosure.
+   * on the development branch opened in the period, split by disclosure.
    */
   groups: { notDisclosed: GroupProfile; disclosed: GroupProfile };
   /** How many PRs that comparison holds. */
@@ -196,7 +196,7 @@ export interface TableModel {
   rows: string[][];
 }
 
-const SPLIT_HEAD = ['main', 'other branches', 'all'];
+const SPLIT_HEAD = ['development branch', 'other branches', 'all'];
 const splitCells = (s: Split) => [formatCount(s.main), formatCount(s.other), formatCount(total(s))];
 /** The period the figures are over, as the captions name it. */
 const periodOf = (d: DataFigures) => `the default period, ${d.period.from} to ${d.period.to}`;
@@ -278,7 +278,7 @@ export const TABLE_FIGURES: Record<string, Figure<TableModel>> = {
       const pct = (v: number | null | undefined) => (v === null || v === undefined ? '–' : formatShare(v));
       const kinds = [...m.kinds.map((k) => ({ id: k.id, name: k.name })), { id: 'unknown', name: 'Unknown' }];
       return {
-        caption: `The ${formatCount(d.compared)} pull requests on main opened in ${periodOf(d)}, those the LLM-use section compares on the report's default view, by disclosure, as of ${dayOf(m.fetched_through)}`,
+        caption: `The ${formatCount(d.compared)} pull requests on the development branch opened in ${periodOf(d)}, those the LLM-use section compares on the report's default view, by disclosure, as of ${dayOf(m.fetched_through)}`,
         head: ['', 'not disclosed', 'disclosed'],
         rows: [
           ['pull requests', ...cells((g) => formatCount(g.prs))],

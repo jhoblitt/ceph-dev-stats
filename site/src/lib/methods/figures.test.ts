@@ -98,6 +98,29 @@ describe('neverReady', () => {
   });
 });
 
+describe('the split by target', () => {
+  // master is the development branch's name before its rename to main.
+  const OLD = { bases: ['main', 'master', 'nautilus'], window_start: at('2019-01-01T00:00:00Z') };
+  const OLD_DAYS = { from: '2019-01-01', to: '2026-11-15' };
+  const d = dataset(
+    [
+      { created: at('2019-03-01T00:00:00Z'), commits: 0, base: 1, state: 1, closed: at('2019-03-02T00:00:00Z') },
+      { created: at('2019-03-01T00:00:00Z'), commits: 0, base: 2, state: 1, closed: at('2019-03-02T00:00:00Z') },
+      { created: at('2023-03-01T00:00:00Z'), commits: 0, base: 0 },
+    ],
+    [],
+    OLD,
+  );
+
+  it('counts a PR on master with those on main, and a release branch with the other branches', () => {
+    expect(noCommits(d, baseRows(d, OLD_DAYS))).toEqual({ main: 2, other: 1 });
+  });
+
+  it("keeps a PR on master in the report's default view over a period that reaches it", () => {
+    expect([...defaultRows(d, OLD_DAYS)]).toEqual([0, 2]);
+  });
+});
+
 describe('firstCommitUnknown', () => {
   it('counts the PRs with commits whose first commit is unknown', () => {
     expect(firstCommitUnknown(data, rows)).toEqual({ main: 1, other: 0 });
