@@ -8,9 +8,10 @@
 //   #/methods?target=main&section=disclosure
 //
 // <route> is empty for the report or `methods`. The target is always written;
-// the period only when it differs from the default, the last six months, so
-// a link to the default view keeps following the data as it grows. Parsing never throws:
-// what is unknown, malformed or outside the data falls back to its default.
+// the period only when it differs from the default, the whole window, so a
+// link to the default view keeps following the data as it grows. Parsing
+// never throws: what is unknown, malformed or outside the data falls back to
+// its default.
 
 import { type Readable, writable } from 'svelte/store';
 import type { Meta } from './data';
@@ -118,8 +119,8 @@ export function parseHash(hash: string): RawState {
   return { route, params };
 }
 
-/** How many calendar months the default period reaches back from the last fetched day. */
-export const DEFAULT_MONTHS = 6;
+/** How many calendar months the recent period, `recentFilters`, reaches back from the last fetched day. */
+export const RECENT_MONTHS = 6;
 
 /**
  * The `YYYY-MM-DD` day `months` calendar months before `day`; when that
@@ -140,12 +141,11 @@ export function dataDays(meta: Meta): { first: string; last: string } {
   return { first: dayOf(meta.window_start), last: dayOf(meta.fetched_through) };
 }
 
-/** The last six months of the data, or the whole window when it is shorter. */
+/** What the report opens on: the whole window, on the development branch, with no other filter. */
 export function defaultFilters(meta: Meta): Filters {
   const { first, last } = dataDays(meta);
-  const back = monthsBefore(last, DEFAULT_MONTHS);
   return {
-    from: back > first ? back : first,
+    from: first,
     to: last,
     target: 'main',
     component: null,
@@ -158,6 +158,17 @@ export function defaultFilters(meta: Meta): Filters {
     author: null,
     reviewer: null,
   };
+}
+
+/**
+ * The default filters over the last six calendar months of the data, ending
+ * on the last fetched day, or over the whole window when it is shorter: the
+ * filter bar's "Last 6 months", and the period of the methods page's figures.
+ */
+export function recentFilters(meta: Meta): Filters {
+  const d = defaultFilters(meta);
+  const back = monthsBefore(d.to, RECENT_MONTHS);
+  return { ...d, from: back > d.from ? back : d.from };
 }
 
 export function defaultState(meta: Meta): AppState {
@@ -182,14 +193,17 @@ function isRoute(s: string): s is Route {
 /**
  * Each end of the period that is a real day inside the data, from the
  * window's start to the last fetch, is kept, the other falls back to its
- * default; a period that ends before it starts is the default.
+ * default; a period that ends before it starts is the default. An address
+ * naming an end and no start was written when the report opened on the last
+ * six months, and `hashFromState` writes no such address now, so its start
+ * is still the recent period's: such a link keeps the period it had.
  */
 function validPeriod(
   from: string | undefined,
   to: string | undefined,
-  d: Filters,
-  days: { first: string; last: string },
+  meta: Meta,
 ): Pick<Filters, 'from' | 'to'> {
+  const days = dataDays(meta);
   const first = dayStart(days.first) as number;
   const last = dayStart(days.last) as number;
   const inData = (day: string | undefined): string | null => {
@@ -197,7 +211,9 @@ function validPeriod(
     const start = dayStart(day);
     return start !== null && start >= first && start <= last ? day : null;
   };
-  const period = { from: inData(from) ?? d.from, to: inData(to) ?? d.to };
+  const [start, end] = [inData(from), inData(to)];
+  const d = start === null && end !== null ? recentFilters(meta) : defaultFilters(meta);
+  const period = { from: start ?? d.from, to: end ?? d.to };
   return period.from <= period.to ? period : { from: d.from, to: d.to };
 }
 
@@ -220,7 +236,7 @@ export function validateState(raw: RawState, meta: Meta): AppState {
   const component = p.component;
   const kind = p.kind;
   const filters: Filters = {
-    ...validPeriod(p.from, p.to, d, dataDays(meta)),
+    ...validPeriod(p.from, p.to, meta),
     target: findChoice(TARGETS, p.target) ?? d.target,
     component: component !== undefined && meta.components.some((c) => c.id === component) ? component : null,
     size: findChoice(SIZE_BANDS, p.size),
@@ -257,7 +273,9 @@ export function hashFromState(state: AppState, meta: Meta): string {
   const d = defaultFilters(meta);
   const f = state.filters;
   const parts = [`target=${enc(f.target)}`];
-  if (f.from !== d.from) parts.push(`from=${enc(f.from)}`);
+  // An end written alone is read as the end of the recent period, so a
+  // period with any end of its own names its start too.
+  if (f.from !== d.from || f.to !== d.to) parts.push(`from=${enc(f.from)}`);
   if (f.to !== d.to) parts.push(`to=${enc(f.to)}`);
   if (f.component !== null) parts.push(`component=${enc(f.component)}`);
   if (f.kind !== null) parts.push(`kind=${enc(f.kind)}`);

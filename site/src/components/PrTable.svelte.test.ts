@@ -187,7 +187,7 @@ describe('PrTable', () => {
   });
 
   it('loads no table file of a year before the period, nor of a year it lists no PR from', async () => {
-    const { props, requested } = await page('', earlier, twoYears);
+    const { props, requested } = await page('#/?from=2026-05-15', earlier, twoYears);
     render(App, props);
     await waitFor(() => expect(within(table()).getByText('mds: rework the client session table')).toBeTruthy());
     expect(requested.filter((u) => u.includes('-2025'))).toEqual([]);

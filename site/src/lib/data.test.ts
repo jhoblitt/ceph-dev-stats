@@ -444,7 +444,21 @@ describe('DataLoader', () => {
     expect(dataset.size).toBe(13);
   });
 
-  it("fetches only the years asked for: the fixture's default period needs 2026 alone", async () => {
+  it('says which years have arrived, each as it does, a year that failed never', async () => {
+    const { fetch } = twoYearFetch();
+    const loader = new DataLoader(twoYears, BASE, (url) =>
+      url.endsWith('events-2025.json') ? Promise.resolve(new Response('', { status: 503 })) : fetch(url),
+    );
+    const arrived: number[] = [];
+    await loader.load([2026, 2025], (y) => arrived.push(y));
+    expect(arrived).toEqual([2026]);
+    expect([loader.has(2025), loader.has(2026)]).toEqual([false, true]);
+    arrived.length = 0;
+    await loader.load([2026], (y) => arrived.push(y));
+    expect(arrived).toEqual([2026]);
+  });
+
+  it("fetches only the years asked for: the fixture's last six months need 2026 alone", async () => {
     const { fetch, requested } = twoYearFetch();
     await new DataLoader(twoYears, BASE, fetch).load([2026]);
     expect(requested).toEqual([`${BASE}prs-2026.json`, `${BASE}events-2026.json`]);

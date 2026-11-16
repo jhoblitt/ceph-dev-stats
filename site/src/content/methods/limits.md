@@ -1,6 +1,6 @@
 # What the data cannot show
 
-The window starts on {{windowStart}}. A pull request opened before then is counted only when it was still open on or after that day. Its record then holds its comments, reviews and lifecycle events from before that day too, but counts of events take only those inside the period. The records can also hold one that finished before then, as [What is counted](#counted) says, but no period starts before that day, so it is never counted. So the site can show the state of the project since {{windowStart}} and how that state has moved, and not how it worked before. The report opens on its default period, from {{periodStart}} to {{asOf}}, and shows another only when a reader chooses it.
+The window starts on {{windowStart}}. A pull request opened before then is counted only when it was still open on or after that day. Its record then holds its comments, reviews and lifecycle events from before that day too, but counts of events take only those inside the period. The records can also hold one that finished before then, as [What is counted](#counted) says, but no period starts before that day, so it is never counted. So the site can show the state of the project since {{windowStart}} and how that state has moved, and not how it worked before. The report opens on the whole window, from {{windowStart}} to {{asOf}}, and shows a shorter period only when a reader chooses it.
 
 ## No comparison across years
 
@@ -10,7 +10,7 @@ This page draws no comparison between the years before LLM tools were common and
 
 An author's standing is how many pull requests they had opened in ceph/ceph before the one counted. It is counted from a baseline, GitHub's own count of the author's pull requests opened before {{windowStart}}, plus the author's pull requests in the data opened since then and before this one. So it is unknown for a pull request opened before {{windowStart}}, and for an author with no baseline: accounts GitHub types as bots and deleted accounts get none. The standing filter's "unknown" band holds these.
 
-On the data as of {{asOf}}, standing is unknown for {{standing.unknown}} of the {{prs.active}} pull requests open at some point in the default period: {{standing.unknownBeforeWindow}} opened before {{windowStart}}, and {{standing.unknownInWindow}} opened since then by an author with no baseline.
+On the data as of {{asOf}}, standing is unknown for {{standing.unknown}} of the {{prs.active}} pull requests open at some point in the last {{const.recentMonths}} months: {{standing.unknownBeforeWindow}} opened before {{windowStart}}, and {{standing.unknownInWindow}} opened since then by an author with no baseline.
 
 ## Older pull requests
 

@@ -1,6 +1,6 @@
 // The figures the methods page gives about the data, computed from what the
 // site loads when the page is shown. Each is over the PRs open at some point
-// in the period it is given, the report's default period on the page, on
+// in the period it is given, the last six months on the page, on
 // every branch, split into the development branch, main or master, and the
 // rest where the two differ in kind;
 // event counts take only the events inside that period.
@@ -212,7 +212,7 @@ export function eventRefs(
   return kinds.flatMap((kind, k) => ((events[k] as number) > 0 ? [{ kind, events: events[k] as number, missing: missing[k] as number }] : []));
 }
 
-/** The report's default view over `days`: PRs on the development branch open at some point in it. */
+/** The report's default filters over `days`: PRs on the development branch open at some point in it. */
 export function defaultRows(data: Dataset, days: Days): Uint32Array {
   return select(data, { ...defaultFilters(data.meta), ...days });
 }

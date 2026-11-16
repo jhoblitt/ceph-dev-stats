@@ -31,6 +31,30 @@ export function fixtureFetch(overrides: Record<string, unknown> = {}): { fetch: 
   return { fetch, requested };
 }
 
+/**
+ * A fetch of the fixture with `files` replaced, as `fixtureFetch`, holding
+ * back each year's files until `release` is called for that year; meta.json
+ * and index.json pass at once.
+ */
+export function heldByYear(files: Record<string, unknown> = {}) {
+  const { fetch } = fixtureFetch(files);
+  /** Every URL asked for, when it is asked for. */
+  const requested: string[] = [];
+  const waiting = new Map<number, (() => void)[]>();
+  const held: Fetch = (url) => {
+    requested.push(url);
+    const year = /-(\d{4})\.json$/.exec(url)?.[1];
+    if (year === undefined) return fetch(url);
+    return new Promise((resolve) => {
+      const list = waiting.get(Number(year)) ?? [];
+      list.push(() => resolve(fetch(url)));
+      waiting.set(Number(year), list);
+    });
+  };
+  const release = (year: number) => (waiting.get(year) ?? []).splice(0).forEach((go) => go());
+  return { fetch: held, requested, release, releaseAll: () => [...waiting.keys()].forEach(release) };
+}
+
 /** The number of the PR the earlier year holds. */
 export const EARLIER_PR = 60010;
 

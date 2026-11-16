@@ -40,7 +40,7 @@ function fixtureTables(): Map<number, TableYear> {
 const START = at('2026-05-15T00:00:00Z');
 const END = at('2026-11-16T00:00:00Z');
 const PERIOD = { start: START, end: END };
-/** A window two years longer than the period, as the full history's is longer than its default period. */
+/** A window two years longer than the period, as the full history's is longer than the last six months. */
 const EARLY = { window_start: at('2024-05-15T00:00:00Z') };
 
 describe('baseRows', () => {
@@ -116,7 +116,7 @@ describe('the split by target', () => {
     expect(noCommits(d, baseRows(d, OLD_DAYS))).toEqual({ main: 2, other: 1 });
   });
 
-  it("keeps a PR on master in the report's default view over a period that reaches it", () => {
+  it("keeps a PR on master under the report's default filters over a period that reaches it", () => {
     expect([...defaultRows(d, OLD_DAYS)]).toEqual([0, 2]);
   });
 });
@@ -282,13 +282,13 @@ describe('eventRefs', () => {
 });
 
 describe('defaultRows', () => {
-  it("keeps the report's default view: PRs on main open at some point in the period", () => {
+  it("keeps what the report's default filters select: PRs on main open at some point in the period", () => {
     expect([...defaultRows(data, DAYS)]).toEqual([0, 2, 3, 4, 5, 6, 8, 9, 10]);
   });
 });
 
 describe('peopleFigures', () => {
-  // On the default view the People tables count the PRs opened in the period
+  // Under the default filters the People tables count the PRs opened in the period
   // on main (rows 3, 4, 5, 6, 8, 9, 10) for the Authors table, and every
   // event in the period on rows 0, 2–6 and 8–10 for the Reviewers table.
   it('counts the authors, the bot accounts hidden among them and the reviewers, as the People tables do', () => {
@@ -343,7 +343,7 @@ describe('peopleFigures', () => {
 describe('disclosureGroups', () => {
   const g = disclosureGroups(data, defaultRows(data, DAYS), PERIOD);
 
-  it('splits the default view into the PRs that do not disclose and those that do', () => {
+  it('splits what the default filters select into the PRs that do not disclose and those that do', () => {
     expect(g.notDisclosed.prs).toBe(6);
     expect(g.disclosed.prs).toBe(3);
   });

@@ -36,7 +36,7 @@ describe('inline figures on the fixture', () => {
   it.each([
     ['asOf', '2026-11-15'],
     ['windowStart', '2026-05-15'],
-    // The default period's first day, which is the window's in the fixture.
+    // The last six months' first day, which is the window's in the fixture.
     ['periodStart', '2026-05-15'],
     ['prs.active', '12'],
     ['prs.openedInPeriod', '9'],
@@ -68,6 +68,7 @@ describe('inline figures on the fixture', () => {
     ['const.horizons', '7, 30 and 90'],
     ['const.minFollowed', '30'],
     ['const.topAuthors', '3'],
+    ['const.recentMonths', '6'],
     ['view.prs', '9'],
     // Rows 0 and 2, both not disclosing.
     ['view.openedBefore', '2'],
@@ -88,13 +89,13 @@ describe('inline figures on the fixture', () => {
   });
 
   it('has a spec above for every inline figure', () => {
-    expect(Object.keys(INLINE_FIGURES).length).toBe(43);
+    expect(Object.keys(INLINE_FIGURES).length).toBe(44);
   });
 });
 
 describe('figures over a period shorter than the window', () => {
   // The window starts two years before the period, as the full history's
-  // does before its default period: #1 was opened in the window but before
+  // does before its last six months: #1 was opened in the window but before
   // the period and is still open, #2 was opened in the period, #3 finished
   // before the period, and #4, of unknown standing, was opened before the
   // window.
@@ -134,7 +135,7 @@ describe('figures over a period shorter than the window', () => {
     const v = tableView('table.disclosureForms', early.meta, f, loading);
     if (v.state !== 'ready') throw new Error(`the table is ${v.state}`);
     expect(v.value.caption).toBe(
-      'Pull requests by the strongest form of disclosure they make, of the 3 pull requests open at some point in the default period, 2026-05-15 to 2026-11-15, as of 2026-11-15',
+      'Pull requests by the strongest form of disclosure they make, of the 3 pull requests open at some point in the last 6 months, 2026-05-15 to 2026-11-15, as of 2026-11-15',
     );
   });
 });
@@ -183,7 +184,7 @@ describe('table figures on the fixture', () => {
   it('says where each kind came from, by target', () => {
     expect(model('table.kindSources')).toEqual({
       caption:
-        'Where each pull request’s kind came from, of the 12 pull requests open at some point in the default period, 2026-05-15 to 2026-11-15, as of 2026-11-15',
+        'Where each pull request’s kind came from, of the 12 pull requests open at some point in the last 6 months, 2026-05-15 to 2026-11-15, as of 2026-11-15',
       head: ['decided by', 'development branch', 'other branches', 'all'],
       rows: [
         ['the PR’s checklist', '4', '0', '4'],
@@ -206,7 +207,7 @@ describe('table figures on the fixture', () => {
 
   it('lists the tool families in meta order', () => {
     expect(model('table.families').caption).toBe(
-      'Pull requests naming each tool family, of the 12 pull requests open at some point in the default period, 2026-05-15 to 2026-11-15, as of 2026-11-15. A pull request naming two families counts under both.',
+      'Pull requests naming each tool family, of the 12 pull requests open at some point in the last 6 months, 2026-05-15 to 2026-11-15, as of 2026-11-15. A pull request naming two families counts under both.',
     );
     expect(model('table.families').rows).toEqual([
       ['Claude', '2', '0', '2'],
@@ -215,11 +216,11 @@ describe('table figures on the fixture', () => {
     ]);
   });
 
-  it('sets side by side the two groups the LLM-use section compares on the default view', () => {
+  it('sets side by side the two groups the LLM-use section compares over the last six months', () => {
     // Rows 3, 4, 5, 6, 8, 9 and 10: main, opened in the period.
     expect(model('table.disclosureGroups')).toEqual({
       caption:
-        "The 7 pull requests on the development branch opened in the default period, 2026-05-15 to 2026-11-15, those the LLM-use section compares on the report's default view, by disclosure, as of 2026-11-15",
+        'The 7 pull requests on the development branch opened in the last 6 months, 2026-05-15 to 2026-11-15, those the LLM-use section compares over those months with every other filter as the report opens, by disclosure, as of 2026-11-15',
       head: ['', 'not disclosed', 'disclosed'],
       rows: [
         ['pull requests', '4', '3'],
@@ -238,7 +239,7 @@ describe('table figures on the fixture', () => {
 
   it('counts the events with no address of their own', () => {
     expect(model('table.eventRefs').caption).toBe(
-      'Events in the default period, 2026-05-15 to 2026-11-15, on the 12 pull requests open at some point in it, and those with no address of their own, as of 2026-11-15',
+      'Events in the last 6 months, 2026-05-15 to 2026-11-15, on the 12 pull requests open at some point in them, and those with no address of their own, as of 2026-11-15',
     );
     const rows = model('table.eventRefs').rows;
     expect(rows).toContainEqual(['reopened', '1', '1 (100%)']);

@@ -11,7 +11,7 @@
   import Velocity from '../components/Velocity.svelte';
   import { yearHolds } from '../lib/data';
   import { keepEqual } from '../lib/memo';
-  import { getPage } from '../lib/page';
+  import { type LoadProgress, getPage } from '../lib/page';
   import { type Sort, sameSort } from '../lib/sort';
   import { ALL_TABLE_ROWS, narrowing, rowText, sortWords, tableOrder } from '../lib/table';
   import { tableLoads } from '../lib/tables';
@@ -43,6 +43,21 @@
       ? 'Try again fetches what failed.'
       : 'A file arrived but could not be read, so trying again would not help; reloading the page after the data is next published may.',
   );
+  // What a load fetches, said once for the whole load: the line is a live
+  // region, so it changes when the load does, never as each year arrives.
+  const loadingWhat = (p: LoadProgress | null) => {
+    const years = p?.years ?? [];
+    const first = years[0];
+    const last = years.at(-1);
+    if (first === undefined || last === undefined) return 'Loading the data for this period.';
+    return years.length === 1
+      ? `Loading the data for this period: the files of ${first}.`
+      : `Loading the data for this period: the files of ${years.length} years, ${first} to ${last}.`;
+  };
+  // How far it has come, beside the line and outside it, for the eye and for
+  // a reader who asks; years.length is at least two.
+  const arrivedText = (p: LoadProgress) =>
+    `${p.arrived} of ${p.years.length} years ${p.arrived === 1 ? 'has' : 'have'} arrived.`;
   // A period is never shown over fewer years than it needs: while its years
   // load, or after one failed, the sections keep the last period that loaded
   // whole, and the line says which. A large recompute keeps the figures
@@ -51,7 +66,7 @@
     $data.loading
       ? $view.pending && !$view.first
         ? `Loading the data for this period; everything below is still for ${$view.filters.from} to ${$view.filters.to}, with the filters then chosen.`
-        : 'Loading the data for this period…'
+        : loadingWhat($data.progress)
       : $view.recomputing
         ? $view.first
           ? 'Computing the figures for this period…'
@@ -111,6 +126,9 @@
 {/if}
 
 <p class="loading" role="status" tabindex="-1" bind:this={statusLine}>{status}</p>
+{#if $data.progress !== null && $data.progress.years.length > 1}
+  <p class="progress">{arrivedText($data.progress)}</p>
+{/if}
 
 {#if $view.first}
   <!-- Reached from another route while the period's years load: no section has figures to show yet. -->
@@ -161,10 +179,16 @@
     min-height: 60vh;
   }
 
-  .loading {
+  .loading,
+  .progress {
     margin: 0;
     color: var(--text-muted);
     font-size: var(--text-sm);
+  }
+
+  /* The count reads as the end of the status line above it. */
+  .progress {
+    margin-top: calc(-1 * var(--space-5));
   }
 
   /* Out of the flow while empty, but still rendered, so the live region announces. */

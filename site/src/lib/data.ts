@@ -657,6 +657,11 @@ export class DataLoader {
     return p;
   }
 
+  /** Whether a year's files have loaded. */
+  has(year: number): boolean {
+    return this.#done.has(year);
+  }
+
   /** The years asked for as one dataset, now, when every one has already loaded; else null. */
   loaded(years: readonly number[]): LoadResult | null {
     const wanted = [...new Set(years)].sort((a, b) => a - b);
@@ -665,10 +670,21 @@ export class DataLoader {
     return { dataset: combine(this.meta, have as YearData[]), errors: [] };
   }
 
-  /** The years asked for, in ascending order, as one dataset; never rejects. */
-  async load(years: readonly number[]): Promise<LoadResult> {
+  /**
+   * The years asked for, in ascending order, as one dataset; never rejects.
+   * `arrived` is called with each year whose files have loaded, as it does,
+   * one already loaded included.
+   */
+  async load(years: readonly number[], arrived?: (year: number) => void): Promise<LoadResult> {
     const wanted = [...new Set(years)].sort((a, b) => a - b);
-    const settled = await Promise.allSettled(wanted.map((y) => this.#year(y)));
+    const settled = await Promise.allSettled(
+      wanted.map((y) =>
+        this.#year(y).then((data) => {
+          arrived?.(y);
+          return data;
+        }),
+      ),
+    );
     const loaded: YearData[] = [];
     const errors: LoadError[] = [];
     settled.forEach((s, i) => {

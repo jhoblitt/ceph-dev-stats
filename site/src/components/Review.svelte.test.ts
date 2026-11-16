@@ -106,13 +106,13 @@ describe('the note on reviews before GitHub recorded them', () => {
   const NOTE = /^GitHub recorded no reviews of pull requests before 14 Sep 2016, and this period starts earlier/;
   const notes = () => screen.queryAllByRole('note').filter((n) => NOTE.test(n.textContent ?? ''));
 
-  it('is absent over the default period', async () => {
-    render(App, (await fixturePage('', early)).props);
+  it('is absent over the last six months', async () => {
+    render(App, (await fixturePage('#/?from=2026-05-15', early)).props);
     expect(notes()).toEqual([]);
   }, SLOW);
 
-  it('shows over the review and bot-review figures and both People tables for a period from 2014, linking to the methods section', async () => {
-    render(App, (await fixturePage('#/?target=main&from=2014-01-01', early)).props);
+  it('shows over the review and bot-review figures and both People tables for the default period, the window from 2014, linking to the methods section', async () => {
+    render(App, (await fixturePage('', early)).props);
     const shown = notes();
     expect(shown.map((n) => n.closest('section')?.id)).toEqual(['review', 'llm', 'people']);
     // At the top of People, above the Authors table and its median to first response.
@@ -125,7 +125,7 @@ describe('the note on reviews before GitHub recorded them', () => {
     expect(shown[0]?.textContent).toContain('its first responses count only comments then, not reviews');
     for (const n of shown) {
       expect(within(n).getByRole('link').getAttribute('href')).toBe(
-        '#/methods?target=main&from=2014-01-01&section=limits-reviews-before-github-recorded-them',
+        '#/methods?target=main&section=limits-reviews-before-github-recorded-them',
       );
     }
   }, SLOW);

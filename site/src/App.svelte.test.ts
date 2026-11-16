@@ -4,10 +4,10 @@ import { get } from 'svelte/store';
 import { beforeAll, describe, expect, it } from 'vitest';
 import App from './App.svelte';
 import rawMeta from './lib/__fixtures__/data/meta.json';
-import { BASE, fixtureFetch, withEarlierYear } from './lib/__fixtures__/fetch';
+import { BASE, fixtureFetch, heldByYear, withEarlierYear, withYears } from './lib/__fixtures__/fetch';
 import { DataLoader, type Fetch, parseMeta } from './lib/data';
-import { type Page, createDataStore, createViewStore, firstYears } from './lib/page';
-import { DEFAULT_MONTHS, type HashLocation, createStateStore } from './lib/state';
+import { type Page, createDataStore, createPage, createViewStore, firstYears } from './lib/page';
+import { type HashLocation, RECENT_MONTHS, createStateStore } from './lib/state';
 
 const meta = parseMeta(rawMeta);
 
@@ -69,7 +69,7 @@ describe('App', () => {
     await waitFor(() => expect(held.length).toBeGreaterThan(0));
     await waitFor(() => expect(screen.getByRole('heading', { level: 1, name: 'Ceph pull requests' })).toBeTruthy());
 
-    expect(screen.getByText('Loading the data for this period…')).toBeTruthy();
+    expect(screen.getByText('Loading the data for this period: the files of 2 years, 2025 to 2026.')).toBeTruthy();
     expect(document.querySelector('.waiting')?.getAttribute('aria-busy')).toBe('true');
     expect(screen.queryByText(/no PRs match/)).toBeNull();
     expect(screen.queryByRole('heading', { level: 2, name: 'Velocity' })).toBeNull();
@@ -84,7 +84,7 @@ describe('App', () => {
   it('keeps the last period that loaded whole when a year an earlier start needs fails, says so, and comes back', async () => {
     const earlier = withEarlierYear();
     const twoYears = parseMeta(earlier['meta.json']);
-    render(App, (await page('', { ...earlier, 'events-2025.json': undefined }, twoYears)).props);
+    render(App, (await page('#/?from=2026-05-15', { ...earlier, 'events-2025.json': undefined }, twoYears)).props);
     const status = () => screen.getByText((_, el) => el?.classList.contains('loading') === true);
     const table = () => within(screen.getByRole('region', { name: /^Pull requests$/ }));
     const count = table().getByRole('status').textContent;
@@ -108,7 +108,7 @@ describe('App', () => {
     const held: (() => void)[] = [];
     const hold = (f: Fetch): Fetch => (url) =>
       url.includes('-2025') ? new Promise((go) => held.push(() => go(f(url)))) : f(url);
-    render(App, (await page('', earlier, twoYears, hold)).props);
+    render(App, (await page('#/?from=2026-05-15', earlier, twoYears, hold)).props);
     const status = () => screen.getByText((_, el) => el?.classList.contains('loading') === true);
 
     await fireEvent.click(screen.getByRole('button', { name: 'All, from 1 Jan 2025' }));
@@ -167,7 +167,7 @@ describe('App', () => {
         const answer = () => (reachable ? f(url) : Promise.resolve(new Response('', { status: 503 })));
         return holding ? new Promise((go) => held.push(() => go(answer()))) : answer();
       };
-      render(App, (await page('', earlier, twoYears, flaky)).props);
+      render(App, (await page('#/?from=2026-05-15', earlier, twoYears, flaky)).props);
       await fireEvent.click(screen.getByRole('button', { name: 'All, from 1 Jan 2025' }));
       await waitFor(() => expect(screen.getByRole('alert').textContent).toMatch(/events-2025\.json, HTTP 503/));
       return {
@@ -225,7 +225,7 @@ describe('App', () => {
 
     it('offers no try again when the file arrived but could not be read, and says what will help', async () => {
       const broken = { ...earlier, 'events-2025.json': { ...(earlier['events-2025.json'] as object), kind: [99] } };
-      render(App, (await page('', broken, twoYears)).props);
+      render(App, (await page('#/?from=2026-05-15', broken, twoYears)).props);
       await fireEvent.click(screen.getByRole('button', { name: 'All, from 1 Jan 2025' }));
       await waitFor(() => expect(screen.getByRole('alert').textContent).toMatch(/events-2025\.json/));
       expect(within(screen.getByRole('alert')).queryByRole('button')).toBeNull();
@@ -295,6 +295,69 @@ describe('App', () => {
     render(App, (await page('#/methods')).props);
     expect(screen.getByRole('heading', { level: 1, name: 'Methods' })).toBeTruthy();
     expect(screen.queryByRole('heading', { name: 'Filters' })).toBeNull();
+  });
+});
+
+describe('the first load of the whole history', () => {
+  // Fifteen earlier years, 2011 to 2025, of one PR each, before the fixture's 2026.
+  const history = withYears(2011, 1);
+  const historyMeta = parseMeta(history['meta.json']);
+  const status = () => document.querySelector('p.loading') as HTMLElement;
+  const progress = () => document.querySelector('p.progress');
+
+  /** The page as main.ts opens it, each year's files held back until released; `wrap` stands between. */
+  function opening(wrap = (f: Fetch) => f) {
+    const gate = heldByYear(history);
+    const loader = new DataLoader(historyMeta, BASE, wrap(gate.fetch));
+    const p = createPage(historyMeta, createStateStore(historyMeta, memoryLocation('')), loader);
+    render(App, { props: { page: p } });
+    return gate;
+  }
+
+  it('shows the waiting area, says once what it loads, and counts the years arrived outside the live region', async () => {
+    const gate = opening();
+    const loading = 'Loading the data for this period: the files of 16 years, 2011 to 2026.';
+    await waitFor(() => expect(status().textContent).toBe(loading));
+    expect(status().getAttribute('role')).toBe('status');
+    expect(document.querySelector('.waiting')?.getAttribute('aria-busy')).toBe('true');
+    expect(screen.queryByRole('heading', { level: 2, name: 'Velocity' })).toBeNull();
+    expect(progress()?.textContent).toBe('0 of 16 years have arrived.');
+    expect(progress()?.closest('[role="status"], [role="alert"], [aria-live]')).toBeNull();
+
+    gate.release(2011);
+    await waitFor(() => expect(progress()?.textContent).toBe('1 of 16 years has arrived.'));
+    gate.release(2012);
+    gate.release(2026);
+    await waitFor(() => expect(progress()?.textContent).toBe('3 of 16 years have arrived.'));
+    expect(status().textContent).toBe(loading);
+
+    gate.releaseAll();
+    await waitFor(() => expect(screen.getByRole('heading', { level: 2, name: 'Velocity' })).toBeTruthy());
+    expect(progress()).toBeNull();
+    expect(status().textContent).toBe('');
+    expect(screen.queryByRole('alert')).toBeNull();
+    expect(screen.getByRole('button', { name: 'All, from 1 Jan 2011' }).getAttribute('aria-pressed')).toBe('true');
+    expect(screen.getByRole('button', { name: 'Last 6 months' }).getAttribute('aria-pressed')).toBe('false');
+  });
+
+  it('names a year that failed, draws the figures over the rest, and fetches only it again on a retry', async () => {
+    let reachable = false;
+    const gate = opening((f) => (url) =>
+      url.endsWith('events-2014.json') && !reachable ? Promise.resolve(new Response('', { status: 503 })) : f(url),
+    );
+    gate.releaseAll();
+    await waitFor(() => expect(screen.getByRole('alert').textContent).toMatch(/PRs finished in 2014: events-2014\.json, HTTP 503/));
+    expect(screen.getByRole('alert').textContent).toMatch(/everything below leaves these years out/);
+    expect(screen.getByRole('heading', { level: 2, name: 'Velocity' })).toBeTruthy();
+
+    reachable = true;
+    const before = gate.requested.length;
+    await fireEvent.click(within(screen.getByRole('alert')).getByRole('button', { name: 'Try again' }));
+    gate.releaseAll();
+    await waitFor(() => expect(screen.queryByRole('alert')).toBeNull());
+    expect(status().textContent).toBe('All the data for this period has loaded.');
+    const years = gate.requested.slice(before).filter((u) => /\/(prs|events)-/.test(u));
+    expect(years.map((u) => u.slice(BASE.length)).sort()).toEqual(['events-2014.json', 'prs-2014.json']);
   });
 });
 
@@ -438,15 +501,26 @@ describe('filter bar', () => {
     expect(loc.hash()).toBe('#/?target=main');
   });
 
-  describe('over a window longer than the default six months', () => {
+  describe('over a window longer than six months', () => {
     const long = parseMeta({ ...rawMeta, window_start: Date.UTC(2025, 0, 1) / 1000 });
     const pressed = (name: string) => screen.getByRole('button', { name }).getAttribute('aria-pressed');
 
-    it('keeps a typed start before the default but inside the window', async () => {
+    it('opens on the whole window, its choice pressed, with the last six months one choice away', async () => {
+      const { props, loc } = await page('', {}, long);
+      render(App, props);
+      expect(presets()).toEqual([`Last ${RECENT_MONTHS} months`, 'All, from 1 Jan 2025']);
+      expect(pressed('All, from 1 Jan 2025')).toBe('true');
+      expect(pressed('Last 6 months')).toBe('false');
+      expect((screen.getByLabelText('From') as HTMLInputElement).value).toBe('2025-01-01');
+      expect((screen.getByLabelText('To') as HTMLInputElement).value).toBe('2026-11-15');
+      expect(loc.hash()).toBe('#/?target=main');
+    });
+
+    it('keeps a typed start inside the window', async () => {
       const { props, loc } = await page('', {}, long);
       render(App, props);
       const from = screen.getByLabelText('From') as HTMLInputElement;
-      expect(from.value).toBe('2026-05-15');
+      expect(from.value).toBe('2025-01-01');
       expect(from.min).toBe('2025-01-01');
       from.value = '2025-03-01';
       await fireEvent.change(from);
@@ -454,37 +528,33 @@ describe('filter bar', () => {
       expect(loc.hash()).toBe('#/?target=main&from=2025-03-01');
     });
 
-    it('moves the period to the whole window and back to the last six months in one choice each', async () => {
+    it('moves the period to the last six months and back to the whole window in one choice each', async () => {
       const { props, loc } = await page('#/?from=2026-07-01&to=2026-08-31', {}, long);
       render(App, props);
       expect(pressed('Last 6 months')).toBe('false');
       expect(pressed('All, from 1 Jan 2025')).toBe('false');
 
-      await fireEvent.click(screen.getByRole('button', { name: 'All, from 1 Jan 2025' }));
-      expect(loc.hash()).toBe('#/?target=main&from=2025-01-01');
-      expect((screen.getByLabelText('From') as HTMLInputElement).value).toBe('2025-01-01');
-      expect((screen.getByLabelText('To') as HTMLInputElement).value).toBe('2026-11-15');
-      expect(pressed('All, from 1 Jan 2025')).toBe('true');
-
       await fireEvent.click(screen.getByRole('button', { name: 'Last 6 months' }));
-      expect(loc.hash()).toBe('#/?target=main');
+      expect(loc.hash()).toBe('#/?target=main&from=2026-05-15');
+      expect((screen.getByLabelText('From') as HTMLInputElement).value).toBe('2026-05-15');
+      expect((screen.getByLabelText('To') as HTMLInputElement).value).toBe('2026-11-15');
       expect(pressed('Last 6 months')).toBe('true');
       expect(pressed('All, from 1 Jan 2025')).toBe('false');
-    });
-  });
 
-  it('offers no choice of the whole window when it is no longer than the default', async () => {
-    render(App, (await page('')).props);
-    expect(screen.getByRole('button', { name: 'Last 6 months' }).getAttribute('aria-pressed')).toBe('true');
-    expect(screen.queryByRole('button', { name: /^All, from/ })).toBeNull();
+      await fireEvent.click(screen.getByRole('button', { name: 'All, from 1 Jan 2025' }));
+      expect(loc.hash()).toBe('#/?target=main');
+      expect(pressed('All, from 1 Jan 2025')).toBe('true');
+      expect(pressed('Last 6 months')).toBe('false');
+    });
   });
 
   /** The labels of the period's one-choice buttons. */
   const presets = () => [...document.querySelectorAll('.presets button')].map((b) => b.textContent?.trim());
 
-  it('names the default period by the months it reaches back', async () => {
+  it('offers one choice, the whole window, pressed, when the window is six months long', async () => {
     render(App, (await page('')).props);
-    expect(presets()).toEqual([`Last ${DEFAULT_MONTHS} months`]);
+    expect(presets()).toEqual(['All, from 15 May 2026']);
+    expect(screen.getByRole('button', { name: 'All, from 15 May 2026' }).getAttribute('aria-pressed')).toBe('true');
   });
 
   it('offers one choice, the whole window, when the window is shorter than the default reach', async () => {

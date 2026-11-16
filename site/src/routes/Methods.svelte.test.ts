@@ -2,7 +2,7 @@
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/svelte';
 import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import App from '../App.svelte';
-import { withEarlierYear } from '../lib/__fixtures__/fetch';
+import { withEarlierYear, withYears } from '../lib/__fixtures__/fetch';
 import { fixturePage } from '../lib/__fixtures__/page';
 import { sections } from '../lib/methods/sections';
 import { stateFromHash } from '../lib/state';
@@ -162,26 +162,37 @@ describe('the methods page', () => {
     await waitFor(() => expect(screen.queryByRole('status')).toBeNull());
     const text = article().textContent ?? '';
     expect(text).toContain(
-      "On the data as of 2026-11-15, 12 pull requests, on every branch, were open at some point in the report's default period, 2026-05-15 to 2026-11-15: 9 opened in it and 3 before it.",
+      'On the data as of 2026-11-15, 12 pull requests, on every branch, were open at some point in the last 6 months, 2026-05-15 to 2026-11-15: 9 opened in them and 3 before them.',
     );
-    expect(text).toContain('1 of the 12 pull requests open at some point in the default period are of unknown kind (8.3%)');
+    expect(text).toContain('1 of the 12 pull requests open at some point in the last 6 months are of unknown kind (8.3%)');
     expect(text).toContain('3 (27%) were bot commands, 2 of them by the pull request');
-    expect(text).toContain('0 of the 7 force-pushes in the default period (0%) and 0 of the 6 merges in it have no commit to link to');
-    expect(text.replace(/\s+/g, ' ')).toContain("as of 2026-11-15, over the report's default period, 2026-05-15 to 2026-11-15.");
+    expect(text).toContain('0 of the 7 force-pushes in the last 6 months (0%) and 0 of the 6 merges in it have no commit to link to');
+    expect(text.replace(/\s+/g, ' ')).toContain('as of 2026-11-15, over the last 6 months of it, 2026-05-15 to 2026-11-15; the report itself opens on the whole window.');
     const kinds = screen.getByRole('table', { name: /Where each pull request’s kind came from/ });
     expect(within(kinds).getByRole('row', { name: /the PR’s checklist/ }).textContent).toMatch(/the PR’s checklist\s*4\s*0\s*4/);
   });
 
-  it("loads only the years from the default period's start onward, and only their tables", async () => {
-    // With 2025 before the fixture's year: the default period, from
-    // 2026-05-15, needs 2026's files alone.
+  it("loads only the years from the last six months' start onward, and only their tables", async () => {
+    // With 2025 before the fixture's year: the last six months, from
+    // 2026-05-15, need 2026's files alone, though the report opens on both years.
     const { load, table } = await methods(withEarlierYear());
     await waitFor(() => expect(screen.queryByRole('status')).toBeNull());
     expect(load.mock.calls).toEqual([[[2026]]]);
     expect(table.mock.calls).toEqual([[2026]]);
   });
 
-  it("fetches on a fresh load only the default period's year files and tables, though the address carries a longer period", async () => {
+  it('fetches on a fresh load of a fifteen-year window only the last six months’ year files and tables', async () => {
+    const { props, requested } = await fixturePage('#/methods', withYears(2011, 1));
+    render(App, props);
+    await waitFor(() => expect(screen.queryByRole('status')).toBeNull());
+    expect(requested.map((u) => u.slice(u.lastIndexOf('/') + 1))).toEqual([
+      'prs-2026.json',
+      'events-2026.json',
+      'table-2026.json',
+    ]);
+  });
+
+  it("fetches on a fresh load only the last six months' year files and tables, though the address carries a longer period", async () => {
     const { props, requested } = await fixturePage('#/methods?from=2025-03-01', withEarlierYear());
     render(App, props);
     await waitFor(() => expect(screen.queryByRole('status')).toBeNull());
@@ -201,7 +212,7 @@ describe('the methods page', () => {
     await methods({ 'table-2026.json': undefined });
     await waitFor(() => expect(screen.getByRole('alert').textContent).toMatch(/table-2026\.json: HTTP 404/));
     const text = article().textContent ?? '';
-    expect(text).toContain('12 pull requests, on every branch, were open at some point in the report');
+    expect(text).toContain('12 pull requests, on every branch, were open at some point in the last 6 months');
     expect(text).toContain('(not available) of the (not available) force-pushes');
     expect(text).toContain('This table could not be computed');
     for (const s of sections()) expect(document.getElementById(s.id)).not.toBeNull();
@@ -210,7 +221,7 @@ describe('the methods page', () => {
   it('keeps the prose when a year of data fails', async () => {
     await methods({ 'events-2026.json': undefined });
     await waitFor(() => expect(screen.getByRole('alert').textContent).toMatch(/events-2026\.json: HTTP 404/));
-    expect(article().textContent).toContain('(not available) pull requests, on every branch, were open at some point in the report');
+    expect(article().textContent).toContain('(not available) pull requests, on every branch, were open at some point in the last 6 months');
     expect(article().textContent).toContain("Ceph's rule asking for an Assisted-by trailer was a draft on 2026-10-12.");
   });
 });

@@ -76,9 +76,12 @@ async function tableReady(page: Page): Promise<Locator> {
   return rows;
 }
 
+/** How long the first figures may take: the default period loads every year, and the workers load the page at once. */
+const FIRST_FIGURES = 20_000;
+
 async function open(page: Page, hash = ''): Promise<void> {
   await page.goto(hash === '' ? './' : `./${hash}`);
-  await expect(countsChart(page)).toBeVisible();
+  await expect(countsChart(page)).toBeVisible({ timeout: FIRST_FIGURES });
 }
 
 test('the page loads whole, with every section', async ({ page }) => {
@@ -93,6 +96,31 @@ test('the page loads whole, with every section', async ({ page }) => {
   await tableReady(page);
 });
 
+test('the page opens on the whole history, the last six months one choice away and back', async ({ page }) => {
+  await open(page);
+  const period = page.getByRole('group', { name: 'Period' });
+  const all = period.getByRole('button', { name: /^All, from / });
+  const recent = period.getByRole('button', { name: 'Last 6 months', exact: true });
+  const from = period.getByLabel('From');
+  await expect(all).toHaveAttribute('aria-pressed', 'true');
+  await expect(recent).toHaveAttribute('aria-pressed', 'false');
+  // The whole window: the first day the start may take, and no period in the address.
+  await expect(from).toHaveValue((await from.getAttribute('min')) ?? '');
+  await expect(page).not.toHaveURL(/[#&?](from|to)=/);
+  await expect(page.getByRole('group', { name: 'Target' }).getByRole('radio', { name: 'main' })).toBeChecked();
+  const whole = await headline(page);
+
+  await recent.click();
+  await expect(page).toHaveURL(/[#&?]from=\d{4}-\d{2}-\d{2}(&|$)/);
+  await expect(recent).toHaveAttribute('aria-pressed', 'true');
+  await expect(all).toHaveAttribute('aria-pressed', 'false');
+  await expect(countsChart(page)).not.toHaveAccessibleDescription(whole);
+
+  await all.click();
+  await expect(page).not.toHaveURL(/[#&?](from|to)=/);
+  await expect(countsChart(page)).toHaveAccessibleDescription(whole);
+});
+
 test('changing the Target filter changes the headline figures', async ({ page }) => {
   await open(page);
   const target = page.getByRole('group', { name: 'Target' });
@@ -105,32 +133,44 @@ test('changing the Target filter changes the headline figures', async ({ page })
   await expect(countsChart(page)).not.toHaveAccessibleDescription(before);
 });
 
-test('selecting a week narrows the table to the PRs opened in it', async ({ page }) => {
-  await open(page);
-  const table = prTable(page);
-  await table.scrollIntoViewIfNeeded();
-  const all = await tableCount(page);
+// The whole history, which the page opens on, steps by month; the last six
+// months step by week.
+for (const { name, choose, status } of [
+  { name: 'a month of the whole history', choose: null, status: / opened in [A-Z][a-z]+ \d{4}$/ },
+  { name: 'a week of the last six months', choose: 'Last 6 months', status: / opened in the / },
+]) {
+  test(`selecting ${name} narrows the table to the PRs opened in it`, async ({ page }) => {
+    await open(page);
+    if (choose !== null) {
+      const before = await headline(page);
+      await page.getByRole('group', { name: 'Period' }).getByRole('button', { name: choose, exact: true }).click();
+      await expect(countsChart(page)).not.toHaveAccessibleDescription(before);
+    }
+    const table = prTable(page);
+    await table.scrollIntoViewIfNeeded();
+    const all = await tableCount(page);
 
-  // A reader picks a tall bar: the week with the most PRs opened, as each
-  // week's accessible name counts them.
-  const weeks = countsChart(page).getByRole('group').getByRole('button');
-  const opened = await weeks.evaluateAll((els) =>
-    els.map((el) => Number(/\bopened ([\d,]+)/.exec(el.getAttribute('aria-label') ?? '')?.[1]?.replaceAll(',', '') ?? -1)),
-  );
-  expect(opened.length).toBeGreaterThan(1);
-  const peak = opened.indexOf(Math.max(...opened));
-  const week = weeks.nth(peak);
-  await week.click();
-  await expect(week).toHaveAttribute('aria-pressed', 'true');
-  await expect(page).toHaveURL(/[#&?]week=\d{4}-\d{2}-\d{2}(&|$)/);
+    // A reader picks a tall bar: the bucket with the most PRs opened, as each
+    // bucket's accessible name counts them.
+    const buckets = countsChart(page).getByRole('group').getByRole('button');
+    const opened = await buckets.evaluateAll((els) =>
+      els.map((el) => Number(/\bopened ([\d,]+)/.exec(el.getAttribute('aria-label') ?? '')?.[1]?.replaceAll(',', '') ?? -1)),
+    );
+    expect(opened.length).toBeGreaterThan(1);
+    const peak = opened.indexOf(Math.max(...opened));
+    const bucket = buckets.nth(peak);
+    await bucket.click();
+    await expect(bucket).toHaveAttribute('aria-pressed', 'true');
+    await expect(page).toHaveURL(/[#&?]week=\d{4}-\d{2}-\d{2}(&|$)/);
 
-  await expect(table.getByRole('status')).toContainText(/ opened in the /);
-  const narrowed = await tableCount(page);
-  expect(narrowed).toBe(opened[peak]);
-  expect(narrowed).toBeGreaterThan(0);
-  expect(narrowed).toBeLessThan(all);
-  await expect(table.getByRole('table')).toHaveAttribute('aria-rowcount', String(narrowed + 1));
-});
+    await expect(table.getByRole('status')).toContainText(status);
+    const narrowed = await tableCount(page);
+    expect(narrowed).toBe(opened[peak]);
+    expect(narrowed).toBeGreaterThan(0);
+    expect(narrowed).toBeLessThan(all);
+    await expect(table.getByRole('table')).toHaveAttribute('aria-rowcount', String(narrowed + 1));
+  });
+}
 
 test('opening a PR from the table shows its timeline, whose marks link to it on GitHub', async ({ page }) => {
   await open(page);
@@ -246,7 +286,7 @@ test('the methods page renders every section, its figures, and an address to a s
   await expect(main.getByText(/could not be computed/)).toHaveCount(0);
   await expect(
     main.getByText(
-      /\b[\d,]+ pull requests, on every branch, were open at some point in the report's default period, \d{4}-\d{2}-\d{2} to \d{4}-\d{2}-\d{2}: [\d,]+ opened in it and [\d,]+ before it\b/,
+      /\b[\d,]+ pull requests, on every branch, were open at some point in the last 6 months, \d{4}-\d{2}-\d{2} to \d{4}-\d{2}-\d{2}: [\d,]+ opened in them and [\d,]+ before them\b/,
     ),
   ).toBeVisible();
 

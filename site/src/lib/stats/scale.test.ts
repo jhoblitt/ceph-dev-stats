@@ -4,7 +4,7 @@ import { dots } from '../dots';
 import { DAY, type Filters, dayOf, periodRange } from '../filters';
 import { openedIn, select } from '../select';
 import { DEFAULT_SORT } from '../sort';
-import { defaultFilters } from '../state';
+import { defaultFilters, recentFilters } from '../state';
 import { sortRows } from '../table';
 import { awaitingResponse, backlog } from './backlog';
 import type { Period } from './buckets';
@@ -127,9 +127,10 @@ describe('at 100,000 PRs and 2,000,000 events', () => {
 // The whole history's size: about 75,000 PRs and 1,000,000 events over
 // fifteen years, filed by the year each finished in as the rollup files
 // them. The bound on each step is the one above, a second, which is what a
-// reader waits for a change of filter at most; the default view's whole set
-// of figures together gets the same second, as it must for a first load
-// that feels as quick as today's six months.
+// reader waits for a change of filter at most; the last six months' whole
+// set of figures together gets the same second. The default view, the whole
+// history on the development branch, gets the two seconds that every
+// section of the fifteen years at once does.
 describe('at the whole history, 75,000 PRs and 1,000,000 events over fifteen years', () => {
   const PRS = 75_000;
   const EVENTS = 1_000_000;
@@ -246,14 +247,14 @@ describe('at the whole history, 75,000 PRs and 1,000,000 events over fifteen yea
       };
     }
 
-    const start = periodRange(defaultFilters(meta)).start;
+    const start = periodRange(recentFilters(meta)).start;
     const wanted = new Set(yearsFor(meta, start));
     return { whole: build(order), recent: build(order.filter((i) => wanted.has(finish[i] as number))), meta };
   }
 
   const { whole, recent, meta } = history();
-  const defaults = defaultFilters(meta);
-  const all15: Filters = { ...defaults, from: dayOf(FIRST), target: 'all' };
+  const lastSix = recentFilters(meta);
+  const all15: Filters = { ...lastSix, from: dayOf(FIRST), target: 'all' };
 
   /** The figures the report computes from a selection, as its sections do. */
   function figures(data: Dataset, filters: Filters) {
@@ -277,29 +278,29 @@ describe('at the whole history, 75,000 PRs and 1,000,000 events over fifteen yea
     return rows;
   }
 
-  it('is the size it says, and the default period loads its last year alone', () => {
+  it('is the size it says, and the last six months load their last year alone', () => {
     expect(whole.size).toBe(PRS);
     expect(whole.events.pr.length).toBe(EVENTS);
     expect(meta.years).toHaveLength(16);
-    expect(defaults.from).toBe('2026-05-15');
+    expect(lastSix.from).toBe('2026-05-15');
     expect(recent.years.map((y) => y.year)).toEqual([2026]);
     expect(recent.size).toBeLessThan(PRS / 5);
   });
 
-  it("selects the default view's PRs and computes all its figures well inside a second", () => {
-    expect(select(recent, defaults).length).toBeGreaterThan(1000);
-    expect(timed(() => figures(recent, defaults))).toBeLessThan(1000);
+  it("selects the last six months' PRs and computes all their figures well inside a second", () => {
+    expect(select(recent, lastSix).length).toBeGreaterThan(1000);
+    expect(timed(() => figures(recent, lastSix))).toBeLessThan(1000);
   });
 
   it('selects the same PRs whether the earlier years are loaded or not', () => {
-    const numbers = (d: Dataset) => [...select(d, defaults)].map((r) => d.prs.number[r]);
+    const numbers = (d: Dataset) => [...select(d, lastSix)].map((r) => d.prs.number[r]);
     expect(numbers(recent)).toEqual(numbers(whole));
   });
 
   it('selects over every loaded PR well inside a second, the reviewer filter included', () => {
     expect(timed(() => select(whole, all15))).toBeLessThan(1000);
     expect(timed(() => select(whole, { ...all15, reviewer: meta.people[4] as string }))).toBeLessThan(1000);
-    expect(timed(() => select(whole, { ...defaults, component: 'rgw', author: meta.people[2] as string }))).toBeLessThan(1000);
+    expect(timed(() => select(whole, { ...lastSix, component: 'rgw', author: meta.people[2] as string }))).toBeLessThan(1000);
   });
 
   it('buckets fifteen years by month, about 180 of them', () => {
@@ -329,7 +330,13 @@ describe('at the whole history, 75,000 PRs and 1,000,000 events over fifteen yea
     expect(timed(() => figures(whole, all15))).toBeLessThan(2000);
   });
 
-  it("computes the default view's figures well inside a second even with every earlier year loaded", () => {
-    expect(timed(() => figures(whole, defaults))).toBeLessThan(1000);
+  it("computes the last six months' figures well inside a second even with every earlier year loaded", () => {
+    expect(timed(() => figures(whole, lastSix))).toBeLessThan(1000);
+  });
+
+  it("computes the default view's figures, the whole history on the development branch, in under two seconds", () => {
+    const defaults = defaultFilters(meta);
+    expect(defaults.from).toBe(dayOf(FIRST));
+    expect(timed(() => figures(whole, defaults))).toBeLessThan(2000);
   });
 });

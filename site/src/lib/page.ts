@@ -3,11 +3,17 @@
 
 import { createContext } from 'svelte';
 import { type Readable, get, writable } from 'svelte/store';
-import { type DataLoader, type Dataset, type LoadError, type LoadResult, type Meta, yearsFor } from './data';
+import { type DataLoader, type Dataset, type LoadError, type LoadResult, type Meta, combine, yearsFor } from './data';
 import { type Filters, periodRange } from './filters';
 import { keepEqual, sameFilters } from './memo';
 import { select } from './select';
 import type { AppState, StateStore } from './state';
+
+/** How far a load has come: the years it loads, ascending, and how many of them have arrived. */
+export interface LoadProgress {
+  years: readonly number[];
+  arrived: number;
+}
 
 export interface DataState {
   /**
@@ -19,6 +25,8 @@ export interface DataState {
   errors: LoadError[];
   /** A load for a changed period is under way; `dataset` is the previous one until it lands. */
   loading: boolean;
+  /** The load under way, or null when none is. */
+  progress: LoadProgress | null;
   /**
    * Where the reader's last "try again" stands, until the period changes:
    * running, failed again (`at`, epoch milliseconds), or succeeded.
@@ -71,11 +79,12 @@ export interface View {
 
 /**
  * The dataset size from which a recompute is announced before it runs. The
- * default period, six months, loads at most the previous year's file and
- * half of the current one's: 13,602 rows on the data of 2026-11-16, which
- * took 126 ms to recompute on a desktop, and a two-year period's 19,684
- * took 167 ms. Below this size a recompute runs at once, unannounced, so
- * the default view never flashes a busy state.
+ * last six months load at most the previous year's file and half of the
+ * current one's: 13,602 rows on the data of 2026-11-16, which took 126 ms
+ * to recompute on a desktop, and a two-year period's 19,684 took 167 ms.
+ * Below this size a recompute runs at once, unannounced, so a short period
+ * never flashes a busy state. The default view, the whole window, is well
+ * above it, so every change of it is announced.
  */
 export const LARGE_DATASET = 15_000;
 
@@ -106,9 +115,10 @@ export function yearsForState(meta: Meta, state: AppState): number[] {
 }
 
 /**
- * The years the page loads before it first draws: the period's on the
- * report, none on the methods page, which loads the default period's years
- * itself and should not wait on a period the address carries for the report.
+ * The years the page loads first: the period's on the report, every year
+ * for the default period, and none on the methods page, which loads the
+ * last six months' years itself and should not wait on a period the
+ * address carries for the report.
  */
 export function firstYears(meta: Meta, state: AppState): number[] {
   return state.route === 'report' ? yearsForState(meta, state) : [];
@@ -123,14 +133,18 @@ export function firstYears(meta: Meta, state: AppState): number[] {
  * loads while another route is shown: the report's period loads when the
  * reader comes to it. `retry` loads the current period's years again after
  * one failed to arrive, which fetches again only those that failed.
+ *
+ * `initial` is what loading `years` gave; without it the store starts on an
+ * empty dataset and loads `years` itself, counting them as they arrive.
  */
 export function createDataStore(
   loader: DataLoader,
   selection: Readable<AppState>,
   years: readonly number[],
-  initial: LoadResult,
+  initial?: LoadResult,
 ): DataStore {
-  const inner = writable<DataState>({ ...initial, loading: false, retry: { state: 'none' } });
+  const empty: LoadResult = { dataset: combine(loader.meta, []), errors: [] };
+  const inner = writable<DataState>({ ...(initial ?? empty), loading: false, progress: null, retry: { state: 'none' } });
   let shown = years.join(',');
   let wanted: readonly number[] = years;
   let latest = 0;
@@ -141,14 +155,27 @@ export function createDataStore(
     // Years another route has loaded through the same loader are taken at once.
     const have = loader.loaded(wanted);
     if (have) {
-      inner.set({ ...have, loading: false, retry: after(have.errors) });
+      inner.set({ ...have, loading: false, progress: null, retry: after(have.errors) });
       return;
     }
-    inner.update((d) => ({ ...d, loading: true, retry: retrying ? { state: 'running' } : { state: 'none' } }));
-    void loader.load(wanted).then((result) => {
-      if (ticket === latest) inner.set({ ...result, loading: false, retry: after(result.errors) });
+    const years = wanted;
+    const arrived = new Set(years.filter((y) => loader.has(y)));
+    inner.update((d) => ({
+      ...d,
+      loading: true,
+      progress: { years, arrived: arrived.size },
+      retry: retrying ? { state: 'running' } : { state: 'none' },
+    }));
+    const onArrival = (year: number) => {
+      if (ticket !== latest || arrived.has(year)) return;
+      arrived.add(year);
+      inner.update((d) => ({ ...d, progress: { years, arrived: arrived.size } }));
+    };
+    void loader.load(years, onArrival).then((result) => {
+      if (ticket === latest) inner.set({ ...result, loading: false, progress: null, retry: after(result.errors) });
     });
   };
+  if (initial === undefined) load(false);
   const stop = selection.subscribe((state) => {
     if (state.route !== 'report') return;
     const next = yearsForState(loader.meta, state);
@@ -292,4 +319,14 @@ export function createViewStore(
       stopData();
     },
   };
+}
+
+/**
+ * The page as the browser opens it: the data store loads the years the
+ * address's period needs, every year for the default one, while the page
+ * shows that it is loading them.
+ */
+export function createPage(meta: Meta, selection: StateStore, loader: DataLoader): Page {
+  const data = createDataStore(loader, selection, firstYears(meta, get(selection)));
+  return { meta, selection, data, view: createViewStore(selection, data), loader };
 }
