@@ -522,6 +522,60 @@ export function yearsFor(meta: Meta, start: number): number[] {
   return meta.years.filter((y) => y >= first);
 }
 
+/** index.json: every PR's number, ascending, and at the same position the year whose files hold it. */
+export interface PrIndex {
+  numbers: Int32Array;
+  years: Int32Array;
+}
+
+const INDEX_FILE = 'index.json';
+
+export function parseIndex(raw: unknown, meta: Meta): PrIndex {
+  if (!isRecord(raw)) throw new DataError(INDEX_FILE, 'is not an object of columns');
+  const column = (name: string) => {
+    const v = raw[name];
+    if (!Array.isArray(v) || !v.every((n) => Number.isInteger(n) && Math.abs(n) <= INT32_MAX)) {
+      throw new DataError(INDEX_FILE, `column "${name}" is missing or not a list of integers`);
+    }
+    return Int32Array.from(v as number[]);
+  };
+  const numbers = column('numbers');
+  const years = column('years');
+  if (years.length !== numbers.length) {
+    throw new DataError(INDEX_FILE, `column "years" has ${years.length} values where "numbers" has ${numbers.length}`);
+  }
+  numbers.forEach((n, i) => {
+    if (n < 1) throw new DataError(INDEX_FILE, `column "numbers" has ${n} at ${i}, which is not a PR number`);
+    if (i > 0 && n <= (numbers[i - 1] as number)) {
+      throw new DataError(INDEX_FILE, `column "numbers" is not strictly ascending at ${i}`);
+    }
+  });
+  const known = new Set(meta.years);
+  years.forEach((y, i) => {
+    if (!known.has(y)) throw new DataError(INDEX_FILE, `column "years" has ${y} at ${i}, which meta's "years" does not list`);
+  });
+  return { numbers, years };
+}
+
+/** The year whose files hold PR `number`, or null when no year does. */
+export function yearOfPr(index: PrIndex, number: number): number | null {
+  const n = index.numbers;
+  let lo = 0;
+  let hi = n.length;
+  while (lo < hi) {
+    const mid = (lo + hi) >>> 1;
+    if ((n[mid] as number) < number) lo = mid + 1;
+    else hi = mid;
+  }
+  return n[lo] === number ? (index.years[lo] as number) : null;
+}
+
+/** A PR found in a year of its own: that year alone as a dataset, and the PR's row in it. */
+export interface Found {
+  dataset: Dataset;
+  row: number;
+}
+
 /**
  * The PRs a year's files hold, as the page names them: "PRs finished in
  * 2025", and for the year of the last fetch "PRs finished in 2026 or still
@@ -595,6 +649,34 @@ export class DataLoader {
       else errors.push({ year, file: prsFile(year), message: String(s.reason) });
     });
     return { dataset: combine(this.meta, loaded), errors };
+  }
+
+  #index: Promise<PrIndex> | null = null;
+
+  /** index.json, fetched on first use: only a PR asked for by number outside the loaded years needs it. */
+  index(): Promise<PrIndex> {
+    this.#index ??= fetchJson(this.#fetch, this.#baseUrl, INDEX_FILE).then((raw) => parseIndex(raw, this.meta));
+    return this.#index;
+  }
+
+  /** The year whose files hold PR `number`, from the index; null when no year does. */
+  async yearOf(number: number): Promise<number | null> {
+    return yearOfPr(await this.index(), number);
+  }
+
+  /**
+   * A PR wherever it is: the index names its year, which is loaded alone.
+   * Null for a number no year holds; rejects with a DataError when the
+   * index or the year cannot be loaded.
+   */
+  async find(number: number): Promise<Found | null> {
+    const year = await this.yearOf(number);
+    if (year === null) return null;
+    const { dataset, errors } = await this.load([year]);
+    const failed = errors[0];
+    if (failed) throw new DataError(failed.file, failed.message);
+    const row = dataset.prs.number.indexOf(number);
+    return row === -1 ? null : { dataset, row };
   }
 
   /** A year's table, fetched on first use. */

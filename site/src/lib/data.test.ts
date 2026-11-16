@@ -12,11 +12,13 @@ import {
   locateEvent,
   locateRow,
   parseEvents,
+  parseIndex,
   parseMeta,
   parsePrs,
   parseTable,
   parseYear,
   yearHolds,
+  yearOfPr,
   yearsFor,
 } from './data';
 
@@ -521,5 +523,63 @@ describe('DataLoader', () => {
     const table = await new DataLoader(twoYears, BASE, fetch).table(2025);
     expect(table.titles).toEqual([table2026.titles[0]]);
     expect(table.refs).toHaveLength(5);
+  });
+});
+
+describe('parseIndex', () => {
+  it('reads every PR number and the year whose files hold it', () => {
+    const index = parseIndex(earlier['index.json'], twoYears);
+    expect(yearOfPr(index, 60010)).toBe(2025);
+    expect(yearOfPr(index, 64010)).toBe(2026);
+    expect(yearOfPr(index, 67250)).toBe(2026);
+    expect(yearOfPr(index, 64011)).toBeNull();
+    expect(yearOfPr(index, 1)).toBeNull();
+    expect(yearOfPr(index, 99999)).toBeNull();
+  });
+
+  it('reads an empty index', () => {
+    expect(yearOfPr(parseIndex({ numbers: [], years: [] }, meta), 1)).toBeNull();
+  });
+
+  it.each([
+    ['not an object', [1, 2], /index\.json/],
+    ['without years', { numbers: [1] }, /index\.json.*"years"/],
+    ['with columns of different lengths', { numbers: [1, 2], years: [2026] }, /index\.json.*"years" has 1 values where "numbers" has 2/],
+    ['with numbers out of order', { numbers: [2, 1], years: [2026, 2026] }, /index\.json.*"numbers".*ascending.*1/],
+    ['with a number twice', { numbers: [1, 1], years: [2026, 2026] }, /index\.json.*"numbers".*ascending/],
+    ['with a number that is not a PR number', { numbers: [0], years: [2026] }, /index\.json.*"numbers"/],
+    ['with a year meta does not list', { numbers: [1], years: [2024] }, /index\.json.*"years" has 2024 at 0, which meta's "years" does not list/],
+  ])('rejects an index %s, naming the file', (_name, raw, message) => {
+    expect(() => parseIndex(raw, meta)).toThrow(DataError);
+    expect(() => parseIndex(raw, meta)).toThrow(message);
+  });
+});
+
+describe('DataLoader.find', () => {
+  it('finds a PR of a year not loaded through the index, loading that year alone', async () => {
+    const { fetch, requested } = fixtureFetch(earlier);
+    const loader = new DataLoader(twoYears, BASE, fetch);
+    await loader.load([2026]);
+    expect(requested.some((u) => u.endsWith('index.json'))).toBe(false);
+    const found = await loader.find(60010);
+    expect(found?.dataset.years.map((y) => y.year)).toEqual([2025]);
+    expect(found?.dataset.prs.number[found.row]).toBe(60010);
+    expect(requested.slice(2)).toEqual([`${BASE}index.json`, `${BASE}prs-2025.json`, `${BASE}events-2025.json`]);
+  });
+
+  it('gives null for a number in no year, fetching the index once across lookups', async () => {
+    const { fetch, requested } = fixtureFetch(earlier);
+    const loader = new DataLoader(twoYears, BASE, fetch);
+    expect(await loader.find(12345)).toBeNull();
+    expect(await loader.find(54321)).toBeNull();
+    expect(await loader.yearOf(66500)).toBe(2026);
+    expect(requested).toEqual([`${BASE}index.json`]);
+  });
+
+  it('rejects, naming the file, when the index or the year cannot be loaded', async () => {
+    const noIndex = new DataLoader(twoYears, BASE, fixtureFetch({ ...earlier, 'index.json': undefined }).fetch);
+    await expect(noIndex.find(60010)).rejects.toThrow(/index\.json.*404/);
+    const noYear = new DataLoader(twoYears, BASE, fixtureFetch({ ...earlier, 'prs-2025.json': undefined }).fetch);
+    await expect(noYear.find(60010)).rejects.toThrow(/prs-2025\.json.*404/);
   });
 });
