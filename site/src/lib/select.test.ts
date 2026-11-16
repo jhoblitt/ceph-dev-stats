@@ -3,9 +3,9 @@ import events2026 from './__fixtures__/data/events-2026.json';
 import rawMeta from './__fixtures__/data/meta.json';
 import prs2026 from './__fixtures__/data/prs-2026.json';
 import { combine, parseMeta, parseYear } from './data';
-import { type Filters, dayOf, dayStart, periodRange } from './filters';
+import { type Filters, dayOf, dayStart, isDevelopmentBranch, periodRange } from './filters';
 import { openedIn, openedInBucket, select } from './select';
-import { defaultFilters } from './state';
+import { defaultFilters, hashFromState, stateFromHash } from './state';
 import { META, all, at, dataset } from './stats/testing';
 import { weekly } from './stats/weekly';
 
@@ -146,6 +146,55 @@ describe('the Author and Reviewer filters', () => {
   it('select nothing for a login the data does not name', () => {
     expect(rows({ author: 'someone-else' })).toEqual([]);
     expect(rows({ reviewer: 'someone-else' })).toEqual([]);
+  });
+});
+
+describe('the development branch under both its names', () => {
+  // ceph/ceph's development branch was `master` until its rename to `main`.
+  // Bases sorted as the rollup sorts them; nautilus is a release branch and
+  // wip-feature a feature branch, both "other".
+  const meta = { ...META, bases: ['main', 'master', 'nautilus', 'wip-feature'], window_start: at('2019-01-01T00:00:00Z') };
+  const MAIN = 0;
+  const MASTER = 1;
+  const NAUTILUS = 2;
+  const FEATURE = 3;
+  const d = dataset(
+    [
+      { number: 26000, created: at('2019-03-01T00:00:00Z'), closed: at('2019-03-10T00:00:00Z'), state: 1, base: MASTER },
+      { number: 26100, created: at('2019-04-01T00:00:00Z'), closed: at('2019-04-10T00:00:00Z'), state: 1, base: NAUTILUS },
+      // Opened on master and moved to main by the rename while still open.
+      { number: 27000, created: at('2019-05-01T00:00:00Z'), closed: at('2023-01-10T00:00:00Z'), state: 1, base: MAIN },
+      { number: 50000, created: at('2023-03-01T00:00:00Z'), closed: at('2023-03-05T00:00:00Z'), state: 1, base: MAIN },
+      { number: 50100, created: at('2023-04-01T00:00:00Z'), closed: at('2023-04-05T00:00:00Z'), state: 2, base: FEATURE },
+    ],
+    [],
+    meta,
+  );
+  const of = (patch: Partial<Filters>) => [...select(d, { ...defaultFilters(d.meta), from: '2019-01-01', to: '2023-12-31', ...patch })];
+
+  it('names main and master the development branch, and no other branch', () => {
+    expect(['main', 'master', 'nautilus', 'reef', 'wip-feature', 'Main', 'master-old'].filter(isDevelopmentBranch)).toEqual(['main', 'master']);
+  });
+
+  it('keeps a PR on master from 2019 under the main target, and not under backports', () => {
+    expect(of({ target: 'main' })).toEqual([0, 2, 3]);
+    expect(of({ target: 'backports' })).toEqual([1, 4]);
+    expect(of({ target: 'all' })).toEqual([0, 1, 2, 3, 4]);
+  });
+
+  it('keeps a release branch from the same year under backports, and not under main', () => {
+    expect(of({ target: 'main', from: '2019-01-01', to: '2019-12-31' })).toEqual([0, 2]);
+    expect(of({ target: 'backports', from: '2019-01-01', to: '2019-12-31' })).toEqual([1]);
+    expect(of({ target: 'all', from: '2019-01-01', to: '2019-12-31' })).toEqual([0, 1, 2]);
+  });
+
+  it('reads an address made before master counted with the same target, which now keeps master', () => {
+    const hash = '#/?target=main&from=2019-01-01&to=2019-12-31';
+    const state = stateFromHash(hash, d.meta);
+    expect(state.filters.target).toBe('main');
+    expect(hashFromState(state, d.meta)).toBe(hash);
+    expect([...select(d, state.filters)]).toEqual([0, 2]);
+    expect(stateFromHash('#/?target=backports&from=2019-01-01&to=2019-12-31', d.meta).filters.target).toBe('backports');
   });
 });
 

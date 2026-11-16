@@ -278,6 +278,14 @@ describe('filter bar', () => {
     expect((screen.getByLabelText('To') as HTMLInputElement).value).toBe('2026-11-15');
   });
 
+  it('says what the main target is: the development branch under both its names', async () => {
+    render(App, (await page('')).props);
+    const target = screen.getByRole('group', { name: 'Target' });
+    expect(target.getAttribute('aria-describedby')).toBeTruthy();
+    const hint = document.getElementById(target.getAttribute('aria-describedby') as string);
+    expect(hint?.textContent).toBe('main is the development branch, named master until its rename');
+  });
+
   it('shows the filters a hash restores', async () => {
     render(App, (await page('#/?target=all&component=rbd&standing=unknown&drafts=exclude')).props);
     expect((screen.getByRole('radio', { name: 'all' }) as HTMLInputElement).checked).toBe(true);

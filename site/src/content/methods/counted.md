@@ -17,7 +17,7 @@ A pull request that finished before {{windowStart}} can be among the records too
 ## What a filter selects
 
 - **Period**: every pull request open at some point in the period, that is, opened before the period ends and not finished before it starts. Counts by calendar week, such as merges, reviews, bot commands and the backlog, count what happened in each week of the period to those pull requests; over a period longer than 53 weeks they count by calendar month instead. Counts of pull requests opened, the outcome curves and the figures by week opened take only those opened during the period.
-- **Target**: `main`, or every other branch together as "backports and other branches", or all.
+- **Target**: `main`, the development branch under either of its names, `main` or `master`; or every other branch together as "backports and other branches"; or all. See [Target, component and kind](#kind).
 - **Component** and **kind**: see [Target, component and kind](#kind). A pull request with two components is in both.
 - **Size**: lines added plus lines deleted.
 - **Author standing**: see [What the data cannot show](#limits).

@@ -16,8 +16,9 @@ import {
 } from './charts';
 import { COLOURS } from './colours';
 import type { Named } from './data';
-import { type Target, dayOf } from './filters';
+import { type Filters, type Target, dayOf, periodRange } from './filters';
 import { bucketName, formatCount, formatDays, formatMean, formatShare } from './format';
+import { formatDate } from './timeline-axis';
 import type { Step } from './stats/buckets';
 import { COMPARE_WEEKS, type Capacity, type WindowMean, compareEnds } from './stats/capacity';
 import type { CommandUse } from './stats/commands';
@@ -342,6 +343,42 @@ export function waitsNothing(model: BucketModel, span: Span, opened: number): st
   if (opened > 0 && model.notes?.some((n) => n === null)) return null;
   return curveNothing(span, opened);
 }
+
+/**
+ * The day GitHub began recording pull-request reviews, with their verdicts
+ * of approving, requesting changes or commenting: GitHub announced them at
+ * its Universe conference on 14 September 2016, as reported that day at
+ * https://techcrunch.com/2016/09/14/github-gets-built-in-project-management-tools-and-support-for-reviews/.
+ * Before it a pull request has no review in the data, nor a comment on a
+ * line of code, which the fetch reads only through reviews. In ceph/ceph's
+ * records the earliest review is on 29 September 2016, and no pull request
+ * opened in 2013 or 2014 has one.
+ *
+ * A constant rather than the earliest review in the years loaded: a window
+ * that opens after 2016 has a first review of its own, a day or a week in,
+ * which says nothing about whether reviews were recorded before it.
+ */
+export const REVIEWS_RECORDED_FROM = Date.UTC(2016, 8, 14) / 1000;
+
+/**
+ * What the report says over its figures about reviews when the period starts
+ * before GitHub recorded them; null when it starts on or after. A first
+ * response is the earlier of another person's conversation comment and
+ * review (the rollup's `responses`), so before that day it can only be a
+ * comment: the reviews are missing from it, not the response itself.
+ */
+export function reviewsRecordedNote(filters: Pick<Filters, 'from' | 'to'>): string | null {
+  if (periodRange(filters).start >= REVIEWS_RECORDED_FROM) return null;
+  const day = formatDate(REVIEWS_RECORDED_FROM);
+  return (
+    `GitHub recorded no reviews of pull requests before ${day}, and this period starts earlier. ` +
+    'Its figures about reviews, approvals and reviewers understate review before that day, ' +
+    'and its first responses count only comments then, not reviews.'
+  );
+}
+
+/** The methods page's subheading on what the data holds before reviews were recorded. */
+export const REVIEWS_RECORDED_SECTION = 'limits-reviews-before-github-recorded-them';
 
 const SPAN_TITLES: Record<'firstCommitToOpened' | 'openedToLastCommit' | 'afterLastCommit', string> = {
   firstCommitToOpened: 'First commit to opened',

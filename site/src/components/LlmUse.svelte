@@ -22,6 +22,7 @@
   import BucketChart from './charts/BucketChart.svelte';
   import ChartFrame from './charts/ChartFrame.svelte';
   import Key from './charts/Key.svelte';
+  import ReviewsRecordedNote from './ReviewsRecordedNote.svelte';
 
   const { meta, selection, data, view } = getPage();
 
@@ -146,6 +147,8 @@
       </table>
     </div>
   </ChartFrame>
+
+  <ReviewsRecordedNote />
 
   <p class="caveat">
     “Not disclosed” is not “no LLM”: disclosure is voluntary, and a PR can use an LLM without saying so. The two

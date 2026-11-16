@@ -7,6 +7,7 @@ import type { Dataset, Meta, TableYear } from '../data';
 import { dayOf, periodRange } from '../filters';
 import { formatCount, formatDays, formatShare } from '../format';
 import { HORIZONS, MIN_FOLLOWED } from '../llm';
+import { REVIEWS_RECORDED_FROM } from '../review';
 import { openedIn } from '../select';
 import { COMPARE_WEEKS } from '../stats/capacity';
 import { MIN_PRS } from '../stats/people';
@@ -57,7 +58,7 @@ export interface DataFigures {
   people: PeopleFigures;
   /**
    * The PRs the LLM-use section compares on the report's default view, those
-   * on main opened in the period, split by disclosure.
+   * on the development branch opened in the period, split by disclosure.
    */
   groups: { notDisclosed: GroupProfile; disclosed: GroupProfile };
   /** How many PRs that comparison holds. */
@@ -176,6 +177,7 @@ export const INLINE_FIGURES: Record<string, Figure<string>> = {
     needs: 'data',
     show: (_m, d) => (d.viewGroups.disclosed.openedInPeriod === null ? '–' : formatShare(d.viewGroups.disclosed.openedInPeriod)),
   },
+  'const.reviewsRecordedFrom': constant(dayOf(REVIEWS_RECORDED_FROM)),
   'const.compareWeeks': constant(formatCount(COMPARE_WEEKS)),
   'const.compareNeeded': constant(formatCount(2 * COMPARE_WEEKS)),
   'people.authors': count((d) => d.people.authors),
@@ -196,7 +198,7 @@ export interface TableModel {
   rows: string[][];
 }
 
-const SPLIT_HEAD = ['main', 'other branches', 'all'];
+const SPLIT_HEAD = ['development branch', 'other branches', 'all'];
 const splitCells = (s: Split) => [formatCount(s.main), formatCount(s.other), formatCount(total(s))];
 /** The period the figures are over, as the captions name it. */
 const periodOf = (d: DataFigures) => `the default period, ${d.period.from} to ${d.period.to}`;
@@ -278,7 +280,7 @@ export const TABLE_FIGURES: Record<string, Figure<TableModel>> = {
       const pct = (v: number | null | undefined) => (v === null || v === undefined ? '–' : formatShare(v));
       const kinds = [...m.kinds.map((k) => ({ id: k.id, name: k.name })), { id: 'unknown', name: 'Unknown' }];
       return {
-        caption: `The ${formatCount(d.compared)} pull requests on main opened in ${periodOf(d)}, those the LLM-use section compares on the report's default view, by disclosure, as of ${dayOf(m.fetched_through)}`,
+        caption: `The ${formatCount(d.compared)} pull requests on the development branch opened in ${periodOf(d)}, those the LLM-use section compares on the report's default view, by disclosure, as of ${dayOf(m.fetched_through)}`,
         head: ['', 'not disclosed', 'disclosed'],
         rows: [
           ['pull requests', ...cells((g) => formatCount(g.prs))],

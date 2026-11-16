@@ -10,12 +10,13 @@
   import { formatCount } from '../lib/format';
   import { getPage, sectionsBusy, sectionsStale } from '../lib/page';
   import { AUTHOR_TABLE, REVIEWER_TABLE, shownPeople, sortPeople } from '../lib/people';
-  import { periodRange } from '../lib/filters';
+  import { MAIN_TARGET_NOTE, periodRange } from '../lib/filters';
   import { openedIn } from '../lib/select';
   import { keepEqual } from '../lib/memo';
   import { type AuthorColumn, type ReviewerColumn, type Sort, nextSort, sameSort } from '../lib/sort';
   import { authorRows, reviewerRows } from '../lib/stats/people';
   import PeopleTable from './PeopleTable.svelte';
+  import ReviewsRecordedNote from './ReviewsRecordedNote.svelte';
 
   const { selection, data, view } = getPage();
   const uid = $props.id();
@@ -62,6 +63,8 @@
   {#if empty}
     <p class="muted">no PRs match</p>
   {:else}
+    <!-- Over both tables: the Authors table's median to first response reads reviews too. -->
+    <ReviewsRecordedNote />
     <div class="part">
       <h3 id="{uid}-authors">Authors</h3>
       <p role="status">
@@ -88,8 +91,8 @@
         <p>
           Commits and lines are those of the pull requests a person opened, because the data does not record who wrote
           each commit. A backport’s commits and lines count for whoever opened the backport, so the Target filter
-          separates original work on main from backports. Lines are a pull request’s whole diff, lines added plus lines
-          deleted, so one large import can dominate a total.
+          separates original work on main from backports ({MAIN_TARGET_NOTE}). Lines are a pull request’s whole
+          diff, lines added plus lines deleted, so one large import can dominate a total.
         </p>
         <p>
           The medians are read from the outcome curves over each person’s pull requests, as the Review section’s are:

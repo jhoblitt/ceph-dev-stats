@@ -73,6 +73,7 @@ describe('inline figures on the fixture', () => {
     ['view.openedBefore', '2'],
     ['view.notDisclosedInPeriod', '67%'],
     ['view.disclosedInPeriod', '100%'],
+    ['const.reviewsRecordedFrom', '2016-09-14'],
     ['const.compareWeeks', '4'],
     ['const.compareNeeded', '8'],
     ['people.authors', '6'],
@@ -87,7 +88,7 @@ describe('inline figures on the fixture', () => {
   });
 
   it('has a spec above for every inline figure', () => {
-    expect(Object.keys(INLINE_FIGURES).length).toBe(42);
+    expect(Object.keys(INLINE_FIGURES).length).toBe(43);
   });
 });
 
@@ -183,7 +184,7 @@ describe('table figures on the fixture', () => {
     expect(model('table.kindSources')).toEqual({
       caption:
         'Where each pull request’s kind came from, of the 12 pull requests open at some point in the default period, 2026-05-15 to 2026-11-15, as of 2026-11-15',
-      head: ['decided by', 'main', 'other branches', 'all'],
+      head: ['decided by', 'development branch', 'other branches', 'all'],
       rows: [
         ['the PR’s checklist', '4', '0', '4'],
         ['a tracker ticket’s type', '2', '0', '2'],
@@ -218,7 +219,7 @@ describe('table figures on the fixture', () => {
     // Rows 3, 4, 5, 6, 8, 9 and 10: main, opened in the period.
     expect(model('table.disclosureGroups')).toEqual({
       caption:
-        "The 7 pull requests on main opened in the default period, 2026-05-15 to 2026-11-15, those the LLM-use section compares on the report's default view, by disclosure, as of 2026-11-15",
+        "The 7 pull requests on the development branch opened in the default period, 2026-05-15 to 2026-11-15, those the LLM-use section compares on the report's default view, by disclosure, as of 2026-11-15",
       head: ['', 'not disclosed', 'disclosed'],
       rows: [
         ['pull requests', '4', '3'],

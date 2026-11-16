@@ -2,7 +2,7 @@
 // when its PR is.
 
 import type { Dataset, Meta } from './data';
-import { type Filters, SIZE_BANDS, STANDING_BANDS, UNKNOWN_KIND, periodRange } from './filters';
+import { type Filters, SIZE_BANDS, STANDING_BANDS, UNKNOWN_KIND, developmentBases, periodRange } from './filters';
 import { personIndex } from './handles';
 import { type Period, bucketOf, buckets } from './stats/buckets';
 import { HUMAN_REVIEWS, kindTable } from './stats/events';
@@ -21,7 +21,7 @@ export function select(data: Dataset, filters: Filters): Uint32Array {
   const reviewer = filters.reviewer === null ? null : personIndex(meta, filters.reviewer);
   if (author === -1 || reviewer === -1) return new Uint32Array(0);
   const reviewed = reviewer === null ? null : reviewedBy(data, reviewer, start, end);
-  const main = meta.bases.indexOf('main');
+  const development = developmentBases(meta.bases);
   const component = filters.component === null ? -1 : meta.components.findIndex((c) => c.id === filters.component);
   const kind = kindValue(meta, filters.kind);
   const size = SIZE_BANDS.find((b) => b.id === filters.size);
@@ -34,8 +34,8 @@ export function select(data: Dataset, filters: Filters): Uint32Array {
     if (!((p.created[r] as number) < end)) continue;
     const closed = p.closed[r] as number;
     if (closed >= 0 && closed < start) continue;
-    if (filters.target === 'main' && p.base[r] !== main) continue;
-    if (filters.target === 'backports' && p.base[r] === main) continue;
+    if (filters.target === 'main' && development[p.base[r] as number] !== 1) continue;
+    if (filters.target === 'backports' && development[p.base[r] as number] === 1) continue;
     if (filters.component !== null && !(p.components[r] as readonly number[]).includes(component)) continue;
     if (size) {
       const lines = (p.additions[r] as number) + (p.deletions[r] as number);

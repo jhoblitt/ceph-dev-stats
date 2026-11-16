@@ -6,7 +6,7 @@
 
 import { TIMELINE_COLOURS as C } from './colours';
 import { type Commit, type Dataset, PR_STATE, type TableYear, locateEvent, locateRow } from './data';
-import { DAY } from './filters';
+import { DAY, baseNote, isDevelopmentBranch } from './filters';
 import { formatCount, formatDays } from './format';
 import { type Handle, isBot, personHandle } from './handles';
 import { commitUrl, eventUrl, prUrl } from './links';
@@ -158,6 +158,8 @@ export interface PrTimeline {
   repo: string;
   url: string;
   base: string;
+  /** What the base is, when the `main` target holds it under another name; else null. */
+  baseNote: string | null;
   created: number;
   /** Merged or closed unmerged at the last such event, or open as of the last fetch. */
   disposition: Disposition;
@@ -351,7 +353,8 @@ export function prTimeline(data: Dataset, row: number, table: TableYear): PrTime
   // place before the events, and the events their order in the data.
   marks.sort((a, b) => a.at - b.at);
 
-  const target = meta.bases[p.base[row] as number] === 'main' ? 'main' : 'backports';
+  const base = meta.bases[p.base[row] as number] ?? '';
+  const target = isDevelopmentBranch(base) ? 'main' : 'backports';
   const open = disposition.state === 'open';
   const span = (key: SpanKey, from: number, to: number, days: number | null, soFar: boolean): TimelineSpan => {
     const title = spanTitle(key, target);
@@ -376,7 +379,8 @@ export function prTimeline(data: Dataset, row: number, table: TableYear): PrTime
     disclosure: DISCLOSURE_WORDS[meta.disclosure[p.disclosure[row] as number] ?? ''] ?? 'disclosed',
     repo: meta.repo,
     url,
-    base: meta.bases[p.base[row] as number] ?? '',
+    base,
+    baseNote: baseNote(base),
     created,
     disposition,
     firstCommit: first >= 0 ? first : null,
