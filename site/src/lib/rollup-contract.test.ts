@@ -109,6 +109,17 @@ describe('the rollup output for the hand-made dataset', () => {
     expect(meta.people).toContain('ghost');
   });
 
+  it('writes backport_link in every year, set exactly where the table names the PR a row backports', () => {
+    years.forEach((y, i) => {
+      expect(y.linksRecorded, `prs-${y.year}.json`).toBe(true);
+      expect([...y.prs.backport_link], `prs-${y.year}.json`).toEqual(tables[i]!.backport_of.map((n) => (n > 0 ? 1 : 0)));
+    });
+    // #66500 on squid says it is a backport of #66200.
+    const y2026 = years[1]!;
+    expect(y2026.prs.backport_link[y2026.prs.number.indexOf(66500)]).toBe(1);
+    expect([...y2026.prs.backport_link].filter((v) => v === 1)).toHaveLength(1);
+  });
+
   it('names the bot accounts among the people', () => {
     expect(meta.people_bots.map((b) => meta.people[b])).toEqual(['dependabot']);
   });

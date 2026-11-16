@@ -2,7 +2,15 @@
 // when its PR is.
 
 import type { Dataset, Meta } from './data';
-import { type Filters, SIZE_BANDS, STANDING_BANDS, UNKNOWN_KIND, developmentBases, periodRange } from './filters';
+import {
+  type Filters,
+  SIZE_BANDS,
+  STANDING_BANDS,
+  UNKNOWN_KIND,
+  developmentBases,
+  inTarget,
+  periodRange,
+} from './filters';
 import { personIndex } from './handles';
 import { type Period, bucketOf, buckets } from './stats/buckets';
 import { HUMAN_REVIEWS, kindTable } from './stats/events';
@@ -22,6 +30,9 @@ export function select(data: Dataset, filters: Filters): Uint32Array {
   if (author === -1 || reviewer === -1) return new Uint32Array(0);
   const reviewed = reviewer === null ? null : reviewedBy(data, reviewer, start, end);
   const development = developmentBases(meta.bases);
+  // A branch meta does not name is -1, which no row has.
+  const base = filters.base === null ? -1 : meta.bases.indexOf(filters.base);
+  const linked = filters.backportLink === null ? -1 : filters.backportLink === 'linked' ? 1 : 0;
   const component = filters.component === null ? -1 : meta.components.findIndex((c) => c.id === filters.component);
   const kind = kindValue(meta, filters.kind);
   const size = SIZE_BANDS.find((b) => b.id === filters.size);
@@ -36,6 +47,8 @@ export function select(data: Dataset, filters: Filters): Uint32Array {
     if (closed >= 0 && closed < start) continue;
     if (filters.target === 'main' && development[p.base[r] as number] !== 1) continue;
     if (filters.target === 'backports' && development[p.base[r] as number] === 1) continue;
+    if (filters.base !== null && p.base[r] !== base) continue;
+    if (linked !== -1 && p.backport_link[r] !== linked) continue;
     if (filters.component !== null && !(p.components[r] as readonly number[]).includes(component)) continue;
     if (size) {
       const lines = (p.additions[r] as number) + (p.deletions[r] as number);
@@ -55,6 +68,35 @@ export function select(data: Dataset, filters: Filters): Uint32Array {
     out[n++] = r;
   }
   return out.slice(0, n);
+}
+
+/** A choice of the Branch filter: a base branch and how many PRs on it are active in the period. */
+export interface BranchChoice {
+  base: string;
+  count: number;
+}
+
+/**
+ * The Branch filter's choices: every base branch the target holds, each with
+ * its PRs active in the period whatever the other filters, most first and
+ * then by name. A branch with none in the period is kept, so the choice
+ * never vanishes under a short period.
+ */
+export function branchChoices(data: Dataset, filters: Pick<Filters, 'from' | 'to' | 'target'>): BranchChoice[] {
+  const p = data.prs;
+  const { start, end } = periodRange(filters);
+  const counts = new Int32Array(data.meta.bases.length);
+  for (let r = 0; r < data.size; r++) {
+    if (!((p.created[r] as number) < end)) continue;
+    const closed = p.closed[r] as number;
+    if (closed >= 0 && closed < start) continue;
+    const b = p.base[r] as number;
+    counts[b] = (counts[b] as number) + 1;
+  }
+  return data.meta.bases
+    .map((base, i) => ({ base, count: counts[i] as number }))
+    .filter((c) => inTarget(filters.target, c.base))
+    .sort((a, b) => b.count - a.count || (a.base < b.base ? -1 : a.base > b.base ? 1 : 0));
 }
 
 /**

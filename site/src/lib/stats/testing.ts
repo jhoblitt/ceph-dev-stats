@@ -72,6 +72,7 @@ export function dataset(rows: readonly Row[], events: readonly Event[] = [], met
     standing: i32((r) => r.standing ?? -1),
     kind: i32((r) => r.kind ?? -1),
     author: i32((r) => r.author ?? 0),
+    backport_link: u8((r) => r.backport_link ?? 0),
   };
   const sorted = [...events].sort((a, b) => a.pr - b.pr || a.at - b.at);
   const kind = (name: string) => {
@@ -91,6 +92,7 @@ export function dataset(rows: readonly Row[], events: readonly Event[] = [], met
       actor: Int32Array.from(sorted, (e) => e.actor ?? -1),
     },
     years: [{ year: 2026, first: 0, count: rows.length, firstEvent: 0, eventCount: sorted.length }],
+    linksUnrecorded: [],
   };
 }
 

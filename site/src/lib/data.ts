@@ -92,7 +92,15 @@ const PR_SPEC = {
   kind: 'int',
   /** An index into meta's `people`. */
   author: 'int',
+  /** 1 when the description links the PR it backports: the table's `backport_of` is set. */
+  backport_link: 'small',
 } as const satisfies Record<string, ColumnKind>;
+
+/**
+ * The columns of prs-<year>.json a file written before the rollup wrote them
+ * may lack; such a file reads as 0 in every row.
+ */
+const LATER_PR_COLUMNS = ['backport_link'] as const;
 
 const EVENT_SPEC = {
   pr: 'int',
@@ -117,6 +125,8 @@ export interface YearData {
   prs: PrColumns;
   /** `pr` is a row of this year's `prs`. */
   events: EventColumns;
+  /** The prs file has `backport_link`; without it, every row reads as no link. */
+  linksRecorded: boolean;
 }
 
 /** Where a year's rows and events sit in a dataset. */
@@ -169,6 +179,8 @@ export interface Dataset {
   prs: PrColumns;
   events: EventColumns;
   years: YearSpan[];
+  /** The loaded years whose prs file has no `backport_link`, so every row of them reads as no link. */
+  linksUnrecorded: number[];
 }
 
 /** A commit of a PR: its SHA, then when it was authored and committed. */
@@ -330,8 +342,16 @@ function toColumn(kind: ColumnKind, values: unknown[]) {
   }
 }
 
-/** Reads an object of equal-length columns; every column of `spec` must be there. */
-function parseColumns<Spec extends Record<string, ColumnKind>>(raw: unknown, file: string, spec: Spec): Columns<Spec> {
+/**
+ * Reads an object of equal-length columns; every column of `spec` must be
+ * there but those named `later`, which read as 0 in every row when missing.
+ */
+function parseColumns<Spec extends Record<string, ColumnKind>>(
+  raw: unknown,
+  file: string,
+  spec: Spec,
+  later: readonly string[] = [],
+): Columns<Spec> {
   if (!isRecord(raw)) throw new DataError(file, 'is not an object of columns');
   const names = Object.keys(spec);
   const first = names[0];
@@ -339,7 +359,7 @@ function parseColumns<Spec extends Record<string, ColumnKind>>(raw: unknown, fil
   const out: Record<string, unknown> = {};
   for (const name of names) {
     const kind = spec[name] as ColumnKind;
-    const values = raw[name];
+    const values = raw[name] === undefined && later.includes(name) ? new Array(Math.max(length, 0)).fill(0) : raw[name];
     if (!Array.isArray(values)) throw new DataError(file, `column "${name}" is missing`);
     if (length === -1) length = values.length;
     else if (values.length !== length) {
@@ -370,7 +390,7 @@ function columnName(file: string, column: string): string {
 
 /** Reads a prs file; every index must be inside its dictionary in `meta`. */
 export function parsePrs(raw: unknown, file: string, meta: Meta): PrColumns {
-  const prs = parseColumns(raw, file, PR_SPEC);
+  const prs = parseColumns(raw, file, PR_SPEC, LATER_PR_COLUMNS);
   const scalars = [
     ['base', meta.bases, 'bases', false],
     ['disclosure', meta.disclosure, 'disclosure', false],
@@ -415,7 +435,12 @@ export function parseEvents(raw: unknown, file: string, rows: number, meta: Meta
 
 export function parseYear(year: number, prsRaw: unknown, eventsRaw: unknown, meta: Meta): YearData {
   const prs = parsePrs(prsRaw, prsFile(year), meta);
-  return { year, prs, events: parseEvents(eventsRaw, eventsFile(year), prs.number.length, meta) };
+  return {
+    year,
+    prs,
+    events: parseEvents(eventsRaw, eventsFile(year), prs.number.length, meta),
+    linksRecorded: isRecord(prsRaw) && prsRaw['backport_link'] !== undefined,
+  };
 }
 
 const SHA = /^[0-9a-f]{40}$/;
@@ -527,6 +552,7 @@ export function combine(meta: Meta, years: readonly YearData[]): Dataset {
     prs: concat(PR_SPEC, years.map((y) => y.prs)),
     events: concat(EVENT_SPEC, events),
     years: spans,
+    linksUnrecorded: years.filter((y) => !y.linksRecorded).map((y) => y.year),
   };
 }
 

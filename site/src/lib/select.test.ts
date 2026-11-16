@@ -4,8 +4,8 @@ import rawMeta from './__fixtures__/data/meta.json';
 import prs2026 from './__fixtures__/data/prs-2026.json';
 import { NAMED_A, NAMED_B, NAME_A, NAME_B, POOLED, deletedMeta } from './__fixtures__/deleted';
 import { combine, parseMeta, parseYear } from './data';
-import { type Filters, dayOf, dayStart, isDevelopmentBranch, periodRange } from './filters';
-import { openedIn, openedInBucket, select } from './select';
+import { type BackportLink, type Filters, type Target, dayOf, dayStart, isDevelopmentBranch, periodRange } from './filters';
+import { branchChoices, openedIn, openedInBucket, select } from './select';
 import { defaultFilters, hashFromState, stateFromHash } from './state';
 import { META, all, at, dataset } from './stats/testing';
 import { weekly } from './stats/weekly';
@@ -275,5 +275,112 @@ describe('openedIn', () => {
   it('leaves out the rows opened before the window', () => {
     const all = { start: 0, end: meta.fetched_through };
     expect([...openedIn(data, select(data, every), all)]).toEqual([3, 4, 5, 6, 7, 8, 9, 10, 11]);
+  });
+});
+
+describe('the Branch and Backport link filters', () => {
+  // Bases sorted as the rollup sorts them, names with each character a branch
+  // name holds beside letters.
+  const bases = ['feature/ptl-ci-test', 'main', 'master', 'pacific-16.2.7_RC1', 'reef', 'squid'];
+  const [FEATURE, MAIN, MASTER, PACIFIC_RC, REEF, SQUID] = [0, 1, 2, 3, 4, 5];
+  const meta = { ...META, bases, window_start: at('2019-01-01T00:00:00Z') };
+  const t = (day: string) => at(`${day}T00:00:00Z`);
+  const d = dataset(
+    [
+      { number: 100, created: t('2019-03-01'), closed: t('2019-03-10'), state: 1, base: MASTER },
+      { number: 101, created: t('2023-03-01'), closed: t('2023-03-05'), state: 1, base: MAIN, backport_link: 1 },
+      { number: 102, created: t('2023-04-01'), closed: t('2023-04-05'), state: 1, base: REEF, backport_link: 1 },
+      { number: 103, created: t('2023-05-01'), closed: t('2023-05-05'), state: 1, base: REEF },
+      { number: 104, created: t('2024-05-01'), closed: t('2024-05-05'), state: 1, base: REEF, backport_link: 1 },
+      { number: 105, created: t('2024-06-01'), closed: t('2024-06-05'), state: 2, base: SQUID, backport_link: 1 },
+      { number: 106, created: t('2024-07-01'), closed: t('2024-07-05'), state: 1, base: FEATURE },
+      { number: 107, created: t('2021-12-01'), closed: t('2021-12-05'), state: 1, base: PACIFIC_RC, backport_link: 1 },
+      { number: 108, created: t('2024-08-01'), closed: t('2024-08-05'), state: 1, base: MAIN },
+    ],
+    [],
+    meta,
+  );
+  const whole = { ...defaultFilters(d.meta), from: '2019-01-01', to: '2024-12-31' };
+  const of = (patch: Partial<Filters>) => [...select(d, { ...whole, ...patch })];
+
+  it.each([
+    ['main: main', 'main', 'main', [1, 8]],
+    ['main: master', 'main', 'master', [0]],
+    ['backports and other branches: reef', 'backports', 'reef', [2, 3, 4]],
+    ['backports and other branches: a name with a slash', 'backports', 'feature/ptl-ci-test', [6]],
+    ['backports and other branches: a name with dots and an underscore', 'backports', 'pacific-16.2.7_RC1', [7]],
+    ['all: master', 'all', 'master', [0]],
+    ['all: squid', 'all', 'squid', [5]],
+  ] satisfies [string, Target, string, number[]][])('a branch under the target %s', (_name, target, base, expected) => {
+    expect(of({ target, base })).toEqual(expected);
+  });
+
+  it('keeps every branch of the target with no branch chosen', () => {
+    expect(of({ target: 'backports', base: null })).toEqual([2, 3, 4, 5, 6, 7]);
+  });
+
+  it('selects nothing for a branch meta does not name', () => {
+    expect(of({ target: 'all', base: 'no-such-branch' })).toEqual([]);
+  });
+
+  it.each([
+    ['any', null, [0, 1, 2, 3, 4, 5, 6, 7, 8]],
+    ['links its original', 'linked', [1, 2, 4, 5, 7]],
+    ['no link', 'unlinked', [0, 3, 6, 8]],
+  ] satisfies [string, BackportLink | null, number[]][])('the backport link: %s', (_name, backportLink, expected) => {
+    expect(of({ target: 'all', backportLink })).toEqual(expected);
+  });
+
+  it('combines the branch, the backport link, the target and the period', () => {
+    expect(of({ target: 'backports', base: 'reef', backportLink: 'unlinked' })).toEqual([3]);
+    expect(of({ target: 'backports', base: 'reef', backportLink: 'linked' })).toEqual([2, 4]);
+    expect(of({ target: 'backports', base: 'reef', backportLink: 'linked', from: '2024-01-01' })).toEqual([4]);
+    expect(of({ target: 'main', backportLink: 'linked' })).toEqual([1]);
+  });
+
+  describe('branchChoices', () => {
+    const choices = (patch: Partial<Filters>) => branchChoices(d, { ...whole, ...patch });
+
+    it('lists the branches of the main target, most PRs in the period first', () => {
+      expect(choices({ target: 'main' })).toEqual([
+        { base: 'main', count: 2 },
+        { base: 'master', count: 1 },
+      ]);
+    });
+
+    it('lists every other branch under backports and other branches, ties by name', () => {
+      expect(choices({ target: 'backports' })).toEqual([
+        { base: 'reef', count: 3 },
+        { base: 'feature/ptl-ci-test', count: 1 },
+        { base: 'pacific-16.2.7_RC1', count: 1 },
+        { base: 'squid', count: 1 },
+      ]);
+    });
+
+    it('lists every branch under all', () => {
+      expect(choices({ target: 'all' }).map((c) => c.base)).toEqual([
+        'reef',
+        'main',
+        'feature/ptl-ci-test',
+        'master',
+        'pacific-16.2.7_RC1',
+        'squid',
+      ]);
+    });
+
+    it('counts the PRs active in the period, and keeps a branch with none in it, last', () => {
+      expect(choices({ target: 'backports', from: '2024-01-01' })).toEqual([
+        { base: 'feature/ptl-ci-test', count: 1 },
+        { base: 'reef', count: 1 },
+        { base: 'squid', count: 1 },
+        { base: 'pacific-16.2.7_RC1', count: 0 },
+      ]);
+    });
+
+    it('counts as if no other filter were chosen', () => {
+      expect(choices({ target: 'backports', base: 'reef', backportLink: 'unlinked', size: 'gt1000' })).toEqual(
+        choices({ target: 'backports' }),
+      );
+    });
   });
 });

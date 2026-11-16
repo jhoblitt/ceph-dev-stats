@@ -1,7 +1,8 @@
 // The reader's filters and selection, kept in the URL hash so any view can be
 // linked:
 //
-//   #/<route>?target=backports&from=2026-06-01&to=2026-08-31&component=rgw&kind=bugfix
+//   #/<route>?target=backports&base=reef&backport=unlinked&from=2026-06-01&to=2026-08-31
+//     &component=rgw&kind=bugfix
 //     &size=11-100&standing=first&disclosure=disclosed&drafts=exclude&reopened=only
 //     &author=<login>&reviewer=<login>&week=2026-06-01&band=lt7&pr=66600&sort=-size
 //     &authorsort=-lines&reviewersort=first&bots=show
@@ -18,6 +19,7 @@ import type { Meta } from './data';
 import {
   AGE_BANDS,
   type AgeBand,
+  BACKPORT_LINKS,
   DISCLOSURES,
   type Filters,
   SIZE_BANDS,
@@ -27,6 +29,7 @@ import {
   dayOf,
   dayStart,
   findChoice,
+  inTarget,
   isMonday,
   periodRange,
 } from './filters';
@@ -77,6 +80,8 @@ export interface AppState {
 
 const KEYS = [
   'target',
+  'base',
+  'backport',
   'from',
   'to',
   'component',
@@ -148,6 +153,8 @@ export function defaultFilters(meta: Meta): Filters {
     from: first,
     to: last,
     target: 'main',
+    base: null,
+    backportLink: null,
     component: null,
     size: null,
     standing: null,
@@ -235,9 +242,14 @@ export function validateState(raw: RawState, meta: Meta): AppState {
   const p = raw.params;
   const component = p.component;
   const kind = p.kind;
+  const base = p.base;
+  const target = findChoice(TARGETS, p.target) ?? d.target;
   const filters: Filters = {
     ...validPeriod(p.from, p.to, meta),
-    target: findChoice(TARGETS, p.target) ?? d.target,
+    target,
+    // A branch the target does not hold, as after the target changed, is none.
+    base: base !== undefined && meta.bases.includes(base) && inTarget(target, base) ? base : null,
+    backportLink: findChoice(BACKPORT_LINKS, p.backport),
     component: component !== undefined && meta.components.some((c) => c.id === component) ? component : null,
     size: findChoice(SIZE_BANDS, p.size),
     standing: findChoice(STANDING_BANDS, p.standing),
@@ -273,6 +285,8 @@ export function hashFromState(state: AppState, meta: Meta): string {
   const d = defaultFilters(meta);
   const f = state.filters;
   const parts = [`target=${enc(f.target)}`];
+  if (f.base !== null) parts.push(`base=${enc(f.base)}`);
+  if (f.backportLink !== null) parts.push(`backport=${enc(f.backportLink)}`);
   // An end written alone is read as the end of the recent period, so a
   // period with any end of its own names its start too.
   if (f.from !== d.from || f.to !== d.to) parts.push(`from=${enc(f.from)}`);
