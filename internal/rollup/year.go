@@ -48,6 +48,9 @@ type prsFile struct {
 	Standing      []int   `json:"standing"`
 	Kind          []int   `json:"kind"`
 	Author        []int   `json:"author"`
+	// BackportLink is 1 for a pull request whose description links the
+	// one it backports, the flag the site filters on without its table.
+	BackportLink []int `json:"backport_link"`
 }
 
 type eventsFile struct {
@@ -176,6 +179,7 @@ func (b *builder) add(r *record.Record, p *classify.PR) error {
 	f.Standing = append(f.Standing, standing(r))
 	f.Kind = append(f.Kind, kind)
 	f.Author = append(f.Author, author)
+	f.BackportLink = append(f.BackportLink, flag(backportOf(r) > 0))
 
 	t := &y.table
 	t.Titles = append(t.Titles, r.Title)
