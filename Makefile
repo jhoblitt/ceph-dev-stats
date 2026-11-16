@@ -81,6 +81,19 @@ check: generate-check fmt-check vet lint fix-check tidy-check test ## The local 
 
 # The committed data under data/. Outside the go-conventions contract above.
 
+# fetch reads the token from CEPHSTATS_GITHUB_TOKEN, GH_TOKEN or
+# GITHUB_TOKEN; with none of them set, gh's token is passed to fetch alone.
+.PHONY: data-refresh
+data-refresh: ## Pull from GitHub, re-derive the records, read new ticket types, check
+	@if [ -z "$${CEPHSTATS_GITHUB_TOKEN}$${GH_TOKEN}$${GITHUB_TOKEN}" ]; then \
+	  CEPHSTATS_GITHUB_TOKEN=$$(gh auth token) || exit 1; \
+	  export CEPHSTATS_GITHUB_TOKEN; \
+	fi; \
+	go run ./cmd/cephstats fetch
+	go run ./cmd/cephstats extract
+	go run ./cmd/cephstats tickets
+	go run ./cmd/cephstats check
+
 .PHONY: data-check
 data-check: ## Validate the hand-edited tables in data/ against the records
 	go run ./cmd/cephstats check
