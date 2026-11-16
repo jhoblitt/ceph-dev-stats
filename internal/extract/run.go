@@ -13,6 +13,7 @@ import (
 	"regexp"
 	"slices"
 	"strconv"
+	"time"
 
 	"github.com/jhoblitt/ceph-dev-stats/internal/fetch"
 	"github.com/jhoblitt/ceph-dev-stats/internal/record"
@@ -24,6 +25,10 @@ type Config struct {
 	CacheDir string
 	// DataDir holds the committed prs/, authors.json and meta.json.
 	DataDir string
+	// WindowStart is the start of the data window; fetch.WindowStart when
+	// zero. The cache's baselines must count the pull requests opened
+	// before it, since prior_prs adds the author's records from it on.
+	WindowStart time.Time
 	// Logger receives progress; slog.Default() when nil.
 	Logger *slog.Logger
 }
@@ -41,12 +46,21 @@ var entryName = regexp.MustCompile(`^(\d+)\.json$`)
 // counted in a warning instead. Every record's prior_prs is then
 // recomputed, since a newly added pull request can come before others by
 // the same author, and only the monthly files whose bytes change are
-// rewritten. The cache's baselines are added to data/authors.json, and its
-// meta, when it has one, becomes data/meta.json.
+// rewritten. The cache's baselines are added to data/authors.json or
+// replace it, as readSources decides, and the cache's meta, when it has
+// one, becomes data/meta.json. Before anything is written, every baseline
+// and count is checked to be for cfg.WindowStart.
 func Run(ctx context.Context, cfg Config) error {
 	log := cfg.Logger
 	if log == nil {
 		log = slog.Default()
+	}
+	if cfg.WindowStart.IsZero() {
+		cfg.WindowStart = fetch.WindowStart
+	}
+	src, err := readSources(cfg)
+	if err != nil {
+		return err
 	}
 	numbers, err := cachedNumbers(cfg.CacheDir)
 	if err != nil {
@@ -67,24 +81,27 @@ func Run(ctx context.Context, cfg Config) error {
 			slog.String("example", u.odd[0]))
 	}
 
-	authors, cacheHasAuthors, err := mergeAuthors(cfg)
-	if err != nil {
-		return err
-	}
 	recs := slices.SortedFunc(maps.Values(u.byNumber), func(a, b record.Record) int { return cmp.Compare(a.Number, b.Number) })
-	setPriorPRs(recs, authors)
+	setPriorPRs(recs, src.authors, cfg.WindowStart)
 
 	written, err := record.WriteRecords(cfg.DataDir, recs)
 	if err != nil {
 		return err
 	}
-	if cacheHasAuthors {
-		if _, err := record.WriteAuthors(cfg.DataDir, authors); err != nil {
+	if src.writeAuthors {
+		if _, err := record.WriteAuthors(cfg.DataDir, src.authors); err != nil {
 			return err
 		}
 	}
-	if err := copyMeta(cfg); err != nil {
-		return err
+	if src.meta != nil {
+		if _, err := record.WriteMeta(cfg.DataDir, record.Meta{
+			Repo:           fetch.Owner + "/" + fetch.Name,
+			WindowStart:    cfg.WindowStart,
+			FetchedThrough: utc(src.meta.WalkStarted),
+			GitHubCounts:   record.Counts{OpenedInWindow: src.meta.OpenedInWindow, Open: src.meta.Open},
+		}); err != nil {
+			return err
+		}
 	}
 	// withheld_by_domain's keys are a plain domain, "other" or "no address",
 	// never a whole withheld line. A plain domain is whatever run of letters,
@@ -194,34 +211,115 @@ func cachedNumbers(cacheDir string) ([]int, error) {
 	return numbers, nil
 }
 
-// mergeAuthors is the committed baselines with the cache's added over
-// them. A cache started afresh holds only the authors it has seen, so
-// copying it alone would drop baselines the committed file already has.
-// inCache is false when the cache has no authors.json.
-func mergeAuthors(cfg Config) (authors map[string]int, inCache bool, err error) {
-	authors, err = record.ReadAuthors(cfg.DataDir)
-	if errors.Is(err, fs.ErrNotExist) {
-		authors, err = map[string]int{}, nil
+// sources is what Run combines with the records, all for one window.
+type sources struct {
+	// authors is the baselines prior_prs starts from.
+	authors map[string]int
+	// writeAuthors is whether authors becomes data/authors.json, which it
+	// does when the cache has baselines.
+	writeAuthors bool
+	// meta is the cache's meta.json, nil when it has none.
+	meta *fetch.Meta
+}
+
+// readSources reads the baselines and counts, refusing any that are not
+// for cfg.WindowStart. A baseline counts the pull requests opened before
+// the window it was asked for and prior_prs adds the records from
+// cfg.WindowStart on, so a baseline of another window counts some pull
+// requests twice or not at all; a count of another window is checked
+// against the wrong records.
+//
+// Only fetch can ask them again, so the cache's authors.json or meta.json
+// for another window, or recording none, is an error naming that fetch.
+// data/authors.json is for data/meta.json's window_start. For this window
+// the cache's baselines are added over it, since a cache started afresh
+// holds only the authors it has seen. For another window, or with no
+// data/meta.json, it is replaced by the cache's baselines. It is an error
+// when the cache cannot replace a committed file: no meta.json in the
+// cache while data/meta.json is of another window, or no authors.json in
+// the cache while data/authors.json exists.
+func readSources(cfg Config) (sources, error) {
+	window := windowOf(cfg.WindowStart)
+	fix := "run `cephstats fetch` to ask GitHub again " + window
+
+	cachedPath := filepath.Join(cfg.CacheDir, fetch.AuthorsFile)
+	cached, err := fetch.ReadBaselines(cfg.CacheDir)
+	inCache := err == nil
+	switch {
+	case errors.Is(err, fs.ErrNotExist):
+	case err != nil:
+		return sources{}, err
+	case !cached.WindowStart.Equal(cfg.WindowStart):
+		return sources{}, fmt.Errorf("%s: the author baselines are %s, not %s: %s",
+			cachedPath, windowOf(cached.WindowStart), window, fix)
 	}
-	if err != nil {
-		return nil, false, err
+
+	var src sources
+	metaPath := filepath.Join(cfg.CacheDir, fetch.MetaFile)
+	var m fetch.Meta
+	err = fetch.ReadJSON(metaPath, &m)
+	switch {
+	case errors.Is(err, fs.ErrNotExist):
+	case err != nil:
+		return sources{}, err
+	case !m.WindowStart.Equal(cfg.WindowStart):
+		return sources{}, fmt.Errorf("%s: the counts are %s, not %s: %s",
+			metaPath, windowOf(m.WindowStart), window, fix)
+	default:
+		src.meta = &m
 	}
-	var cached map[string]int
-	err = fetch.ReadJSON(filepath.Join(cfg.CacheDir, fetch.AuthorsFile), &cached)
-	if errors.Is(err, fs.ErrNotExist) {
-		return authors, false, nil
+
+	committed, err := record.ReadAuthors(cfg.DataDir)
+	hasCommitted := err == nil
+	if err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return sources{}, err
 	}
-	if err != nil {
-		return nil, false, err
+	dataMeta, err := record.ReadMeta(cfg.DataDir)
+	hasDataMeta := err == nil
+	if err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return sources{}, err
 	}
-	maps.Copy(authors, cached)
-	return authors, true, nil
+	dataPath := filepath.Join(cfg.DataDir, record.MetaFile)
+	switch {
+	case hasDataMeta && dataMeta.WindowStart.Equal(cfg.WindowStart):
+		if !hasCommitted {
+			committed = map[string]int{}
+		}
+		maps.Copy(committed, cached.Authors)
+		src.authors, src.writeAuthors = committed, inCache
+		return src, nil
+	case hasDataMeta && src.meta == nil:
+		return sources{}, fmt.Errorf("%s is %s, not %s, and %s does not exist to replace it: %s",
+			dataPath, windowOf(dataMeta.WindowStart), window, metaPath, fix)
+	case hasCommitted && !inCache:
+		committedWindow := "for no recorded window, there being no " + dataPath
+		if hasDataMeta {
+			committedWindow = windowOf(dataMeta.WindowStart)
+		}
+		return sources{}, fmt.Errorf("%s is %s, not %s, and %s does not exist to replace it: %s",
+			filepath.Join(cfg.DataDir, record.AuthorsFile), committedWindow, window, cachedPath, fix)
+	}
+	src.authors = cached.Authors
+	if src.authors == nil {
+		src.authors = map[string]int{}
+	}
+	src.writeAuthors = inCache
+	return src, nil
+}
+
+// windowOf names the window a file records.
+func windowOf(window time.Time) string {
+	if window.IsZero() {
+		return "for no recorded window"
+	}
+	return "for the window from " + window.Format(time.DateOnly)
 }
 
 // setPriorPRs sets each record's prior_prs: its author's baseline plus the
-// author's records opened at or after the window start and before it. It
-// stays nil before the window start and for an author with no baseline.
-func setPriorPRs(recs []record.Record, baselines map[string]int) {
+// author's records opened at or after windowStart and before it. It stays
+// nil before windowStart and for an author with no baseline, as for a bot
+// or a deleted account.
+func setPriorPRs(recs []record.Record, baselines map[string]int, windowStart time.Time) {
 	order := make([]*record.Record, len(recs))
 	for i := range recs {
 		order[i] = &recs[i]
@@ -232,7 +330,7 @@ func setPriorPRs(recs []record.Record, baselines map[string]int) {
 	inWindow := map[string]int{}
 	for _, r := range order {
 		r.PriorPRs = nil
-		if r.Created.Before(fetch.WindowStart) {
+		if r.Created.Before(windowStart) {
 			continue
 		}
 		if base, ok := baselines[r.Author.Login]; ok {
@@ -240,23 +338,4 @@ func setPriorPRs(recs []record.Record, baselines map[string]int) {
 		}
 		inWindow[r.Author.Login]++
 	}
-}
-
-// copyMeta writes the cache's meta, when it has one, as data/meta.json.
-func copyMeta(cfg Config) error {
-	var m fetch.Meta
-	err := fetch.ReadJSON(filepath.Join(cfg.CacheDir, fetch.MetaFile), &m)
-	if errors.Is(err, fs.ErrNotExist) {
-		return nil
-	}
-	if err != nil {
-		return err
-	}
-	_, err = record.WriteMeta(cfg.DataDir, record.Meta{
-		Repo:           fetch.Owner + "/" + fetch.Name,
-		WindowStart:    fetch.WindowStart,
-		FetchedThrough: utc(m.WalkStarted),
-		GitHubCounts:   record.Counts{OpenedInWindow: m.OpenedInWindow, Open: m.Open},
-	})
-	return err
 }

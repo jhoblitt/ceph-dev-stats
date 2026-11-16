@@ -41,8 +41,8 @@ var _ = Describe("extract", func() {
 			BaseRefName: "main", Author: &fetch.Actor{Login: "alice", Typename: "User"},
 			FormatVersion: fetch.FormatVersion,
 		})
-		writeJSON(filepath.Join(cacheDir, "authors.json"), map[string]int{"alice": 2})
-		writeJSON(filepath.Join(cacheDir, "meta.json"), fetch.Meta{WalkStarted: time.Date(2026, 11, 15, 12, 0, 0, 0, time.UTC)})
+		writeJSON(filepath.Join(cacheDir, "authors.json"), map[string]any{"window_start": fetch.WindowStart, "authors": map[string]int{"alice": 2}})
+		writeJSON(filepath.Join(cacheDir, "meta.json"), map[string]any{"window_start": fetch.WindowStart, "walk_started": time.Date(2026, 11, 15, 12, 0, 0, 0, time.UTC)})
 	})
 
 	run := func(args ...string) error {

@@ -60,8 +60,9 @@ type Record struct {
 	Labels    []string `json:"labels"`
 	Commits   Commits  `json:"commits"`
 	// PriorPRs is the author's count of pull requests opened in ceph/ceph
-	// before this one. It is nil for a pull request opened before the
-	// window start, and when the author has no baseline in authors.json.
+	// before this one. It is nil when the author has no baseline in
+	// authors.json, as for a bot or a deleted account, and for a pull
+	// request opened before the window start.
 	PriorPRs   *int       `json:"prior_prs"`
 	Events     []Event    `json:"events"`
 	Reviews    []Review   `json:"reviews"`

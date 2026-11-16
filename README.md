@@ -30,8 +30,10 @@ environment variable.
 - `fetch` walks ceph/ceph's pull requests from GitHub into the local raw
   cache, `.cache/`: every pull request updated since a day before the
   `fetched_through` time in `data/meta.json` (or since the window start,
-  2026-05-15, when there is none), and every one still open. `--full` walks
-  back to the window start. It reads the GitHub token from
+  2011-09-01, the day ceph/ceph was created, when there is none or its
+  `window_start` is later), and every one still open. `--full` walks back
+  to the window start, listing every pull request in the repository's
+  history. It reads the GitHub token from
   `CEPHSTATS_GITHUB_TOKEN`, `GH_TOKEN` or `GITHUB_TOKEN`, in that order.
 - `extract` turns the cached pull requests into the committed records under
   `data/`, rewriting only the files whose content changes. Every run
@@ -68,8 +70,8 @@ are derived from it by `cephstats rollup` and are not committed.
 | File | What it holds | Written by |
 |---|---|---|
 | `prs/YYYY-MM.jsonl` | one record per pull request, in the file of the month it was opened: its times, state, size, labels, commits, lifecycle events, reviews and comments, and the lines that might disclose LLM use or say what kind of change it is | `extract` |
-| `authors.json` | for each author, how many pull requests they opened before the window start | `extract` |
-| `meta.json` | the window start, when the last walk began, and GitHub's counts from it | `extract` |
+| `authors.json` | for each author, how many pull requests they opened before `meta.json`'s `window_start`: the baseline their `prior_prs` starts from, and 0 for everyone once that is 2011-09-01. `extract` adds the cache's baselines to it while `meta.json` is of the window `extract` derives for, and otherwise replaces it with them | `extract` |
+| `meta.json` | the window start, when the last walk began, and GitHub's counts at its end: the pull requests opened since the window start, and those open | `extract` |
 | `tickets.json` | the type of each tracker ticket a record references, and the ticket a Backport ticket was copied from | `tickets` |
 | `tools.yaml` | what counts as a disclosure, and which tool it names | by hand |
 | `bots.yaml` | accounts GitHub types as users whose comments are automated | by hand |
@@ -117,22 +119,47 @@ cover yet. Then:
 3. Commit `data/`.
 
 When the cache format changes, the next `fetch` finds the entries in the
-older format and walks back to the window start by itself to fetch them
-again; the next `extract` then re-derives their records.
+older format and walks back to the window start by itself, through every
+pull request since ceph/ceph was created, to fetch them again; the next
+`extract` then re-derives their records.
 
-A refresh trusts GitHub's last-updated time: a pull request updated since
-the last walk is fetched again, and one that is not is kept as cached.
-Whether every kind of change to a pull request (a comment, a review, a push,
-a label, a close) moves that time has not been verified yet. Until it is,
-the fallback is
+A refresh trusts GitHub's last-updated time, `updatedAt`. `fetch` lists the
+pull requests updated since a day before the last walk began, then every
+open one, and fetches each one not cached yet or whose `updatedAt` is later
+than its cached copy's; one cached at the same `updatedAt`, in the current
+format, is kept as it is. `--full`, which `make data-refresh` takes from
+`CEPHSTATS_FULL=true`, lists every pull request since the window start
+instead. That catches one a narrower walk never listed, and fetches again
+every entry of an older cache format, but it does not fetch again an entry
+whose `updatedAt` has not moved.
+
+So neither sees a change GitHub makes without moving `updatedAt`. One such
+change has been seen: GitHub began returning the commit of an old
+force-push without touching the pull request. Comparing a refreshed cache
+with a walk into an empty one, over 6,270 pull requests, found it once,
+and it changed only that event's link. Only fetching afresh picks such a
+change up: move the cache aside and walk the window into an empty one.
 
 ```sh
+mv .cache .cache.old
 CEPHSTATS_FULL=true make data-refresh
 ```
 
-which runs the whole refresh with `fetch` walking back to the window
-start: `fetch` reads its `--full` flag from `CEPHSTATS_FULL`, and the other
-steps have no such flag.
+Over the six-month window that walk took about 28 minutes for 6,270 pull
+requests; the whole history is roughly twelve times as many. If it stops,
+run `CEPHSTATS_FULL=true make data-refresh` again, without the `mv`: it
+resumes into the same cache, skipping what it already fetched. To give it
+up instead, `rm -rf .cache` and `mv .cache.old .cache` put the old cache
+back.
+
+A fresh walk is also a refresh, so every pull request updated since the
+last commit of `data/`, or during the hours of the walk, changes its record
+anyway. What only a fresh walk finds is a record that changed while its
+`updated` time did not: in each month file `git diff --stat data/prs`
+lists, compare the committed version (`git show
+HEAD:data/prs/<month>.jsonl`) with the new one for the records whose
+`updated` is the same in both. Either way the new cache replaces the old
+one, and `.cache.old` can be removed.
 
 ## Publishing
 

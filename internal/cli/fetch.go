@@ -50,8 +50,8 @@ coverage mark, as it was.`,
 		},
 	}
 	f := cmd.Flags()
-	f.String("since", "", "walk back to pull requests updated at this RFC 3339 time; default a day before the data directory's fetched_through, or the window start (CEPHSTATS_SINCE)")
-	f.Bool("full", false, "walk back to the window start (CEPHSTATS_FULL)")
+	f.String("since", "", "walk back to pull requests updated at this RFC 3339 time; default a day before the data directory's fetched_through, or, with no meta.json there, the window start, when ceph/ceph was created (CEPHSTATS_SINCE)")
+	f.Bool("full", false, "walk back to the window start, when ceph/ceph was created, listing every pull request (CEPHSTATS_FULL)")
 	f.String("cache-dir", ".cache", "raw cache directory (CEPHSTATS_CACHE_DIR)")
 	f.String("data", "data", "committed data directory, read for meta.json (CEPHSTATS_DATA)")
 	f.String("api-url", ghapi.DefaultEndpoint, "GitHub GraphQL endpoint (CEPHSTATS_API_URL)")

@@ -16,6 +16,7 @@ import (
 	"github.com/jhoblitt/ceph-dev-stats/internal/fetch"
 	"github.com/jhoblitt/ceph-dev-stats/internal/fetch/fetchtest"
 	"github.com/jhoblitt/ceph-dev-stats/internal/ghapi"
+	"github.com/jhoblitt/ceph-dev-stats/internal/record"
 )
 
 var _ = Describe("fetch", func() {
@@ -211,6 +212,40 @@ var _ = Describe("fetch", func() {
 
 		It("rejects --since with --full", func() {
 			Expect(run("--full", "--since", "2026-11-01T00:00:00Z")).To(MatchError("--since and --full are mutually exclusive"))
+		})
+
+		// The data and the cache are as a refresh of a later window left
+		// them, with baselines in a bare map that records no window.
+		It("walks the whole window and asks every baseline again when the data is of a later window, so extract counts standing once", func() {
+			later := time.Date(2026, 5, 20, 0, 0, 0, 0, time.UTC)
+			Expect(later.After(fetch.WindowStart)).To(BeTrue(), "the data's window must start after the window in force")
+			Expect(os.WriteFile(filepath.Join(dataDir, "meta.json"), []byte(`{"repo":"ceph/ceph","window_start":"`+
+				later.Format(time.RFC3339)+`","fetched_through":"2026-11-14T12:00:00Z","github_counts":{"opened_in_window":1,"open":0}}`), 0o600)).To(Succeed())
+			Expect(os.WriteFile(filepath.Join(dataDir, "authors.json"), []byte(`{"alice": 5}`), 0o600)).To(Succeed())
+			Expect(os.WriteFile(filepath.Join(cacheDir, "authors.json"), []byte(`{"alice": 5}`), 0o600)).To(Succeed())
+			server.SetCounts(2, map[string]int{"alice": 0})
+
+			Expect(run()).To(Succeed())
+			Expect(cli.Run(context.Background(), []string{"extract", "--cache-dir", cacheDir, "--data", dataDir},
+				&bytes.Buffer{}, &bytes.Buffer{}, stderr)).To(Succeed())
+
+			Expect(cached()).To(ConsistOf("1.json", "2.json"), "PR 1, last updated months before the last walk, is fetched")
+			b, err := os.ReadFile(filepath.Join(dataDir, "authors.json"))
+			Expect(err).NotTo(HaveOccurred())
+			Expect(b).To(MatchJSON(`{"alice": 0}`))
+			Expect(record.ReadMeta(dataDir)).To(HaveField("WindowStart", fetch.WindowStart))
+			prior := map[int]*int{}
+			for _, month := range []string{"2026-05", "2026-11"} {
+				f, err := os.ReadFile(filepath.Join(dataDir, "prs", month+".jsonl"))
+				Expect(err).NotTo(HaveOccurred())
+				var rec struct {
+					Number   int  `json:"number"`
+					PriorPRs *int `json:"prior_prs"`
+				}
+				Expect(json.Unmarshal(f, &rec)).To(Succeed())
+				prior[rec.Number] = rec.PriorPRs
+			}
+			Expect(prior).To(Equal(map[int]*int{1: new(0), 2: new(1)}))
 		})
 	})
 })

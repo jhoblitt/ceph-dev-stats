@@ -11,6 +11,10 @@ import (
 	"github.com/jhoblitt/ceph-dev-stats/internal/rollup"
 )
 
+// metaWindow is testdata/data/meta.json's window_start, which Build takes
+// over fetch.WindowStart.
+var metaWindow = time.Date(2026, 5, 15, 0, 0, 0, 0, time.UTC)
+
 func event(at time.Time, kind string) record.Event { return record.Event{At: at, Kind: kind} }
 
 func review(at time.Time, by, state string) record.Review {
@@ -208,8 +212,8 @@ var _ = Describe("Build", func() {
 				r.Created = created
 				Expect(build(r).col(created.Year(), "in_window")).To(Equal([]int64{want}))
 			},
-			Entry("opened at the window start", fetch.WindowStart, int64(1)),
-			Entry("opened a second before it", fetch.WindowStart.Add(-time.Second), int64(0)),
+			Entry("opened at the window start", metaWindow, int64(1)),
+			Entry("opened a second before it", metaWindow.Add(-time.Second), int64(0)),
 		)
 
 		It("counts human reviews, bot reviews and bot commands", func() {
@@ -601,7 +605,7 @@ var _ = Describe("Build", func() {
 			old.Created = time.Date(2025, 11, 3, 0, 0, 0, 0, time.UTC)
 			m := build(pr(2), old).meta()
 			Expect(m.Repo).To(Equal("ceph/ceph"))
-			Expect(m.WindowStart).To(Equal(epoch(fetch.WindowStart)))
+			Expect(m.WindowStart).To(Equal(epoch(metaWindow)))
 			Expect(m.FetchedThrough).To(Equal(epoch(time.Date(2026, 11, 15, 6, 0, 0, 0, time.UTC))))
 			Expect(m.Years).To(Equal([]int{2025, 2026}))
 			Expect(m.Components).To(Equal([]named{{"cephfs", "CephFS"}, {"rbd", "RBD"}, {"rgw", "RGW"}}))

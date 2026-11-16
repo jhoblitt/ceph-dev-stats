@@ -23,8 +23,12 @@ const (
 	Name  = "ceph"
 )
 
-// WindowStart is the start of the data window. It never moves.
-var WindowStart = time.Date(2026, 5, 15, 0, 0, 0, 0, time.UTC)
+// WindowStart is the start of the data window: 2011-09-01, the day ceph/ceph
+// was created on GitHub, three weeks before its first pull request. A
+// window that starts before every pull request makes the data the whole
+// history: each author's baseline of earlier pull requests is zero, and
+// prior_prs counts the author's earlier records.
+var WindowStart = time.Date(2011, 9, 1, 0, 0, 0, 0, time.UTC)
 
 // Defaults for Config's zero values.
 const (
@@ -38,11 +42,15 @@ const (
 type Config struct {
 	// CacheDir holds raw/, authors.json and meta.json.
 	CacheDir string
+	// WindowStart is the start of the data window, WindowStart when zero.
+	// The baselines count each author's pull requests opened before it,
+	// and meta.json's opened_in_window those opened from it on.
+	WindowStart time.Time
 	// Since ends the walk over recently updated pull requests at the first
 	// one updated before it.
 	Since time.Time
 	// SinceIsDefault says Since is the default rather than the operator's
-	// choice. The walk then goes back to WindowStart instead when the
+	// choice. The walk then goes back to the window start instead when the
 	// cache holds entries of an older FormatVersion, so that every one of
 	// them is listed and fetched again.
 	SinceIsDefault bool
@@ -79,8 +87,8 @@ type walker struct {
 // when it leaves meta.json as it was and warns. A pull request already cached at the listed
 // updatedAt, in the current FormatVersion, is not fetched again, so a run
 // that stops early can be repeated. While the cache holds entries of an
-// older FormatVersion, a walk from a default since starts at WindowStart
-// instead, so that it reaches them all.
+// older FormatVersion, a walk from a default since starts at the window
+// start instead, so that it reaches them all.
 func Run(ctx context.Context, client *ghapi.Client, cfg Config) error {
 	if cfg.PageSize == 0 {
 		cfg.PageSize = DefaultPageSize
@@ -93,6 +101,9 @@ func Run(ctx context.Context, client *ghapi.Client, cfg Config) error {
 	}
 	if cfg.Now == nil {
 		cfg.Now = time.Now
+	}
+	if cfg.WindowStart.IsZero() {
+		cfg.WindowStart = WindowStart
 	}
 	if err := reachStale(ctx, &cfg); err != nil {
 		return err
@@ -134,15 +145,15 @@ func Run(ctx context.Context, client *ghapi.Client, cfg Config) error {
 }
 
 // reachStale warns when the cache holds entries of an older FormatVersion,
-// and then moves a default cfg.Since back to WindowStart so that the walk
-// lists, and fetches again, every one of them.
+// and then moves a default cfg.Since back to cfg.WindowStart so that the
+// walk lists, and fetches again, every one of them.
 func reachStale(ctx context.Context, cfg *Config) error {
 	stale, err := staleEntries(cfg.CacheDir)
 	if err != nil || stale == 0 {
 		return err
 	}
 	if cfg.SinceIsDefault {
-		cfg.Since = WindowStart
+		cfg.Since = cfg.WindowStart
 	}
 	cfg.Logger.WarnContext(ctx, "cache holds entries of an older format",
 		slog.Int("entries", stale),
@@ -153,8 +164,9 @@ func reachStale(ctx context.Context, cfg *Config) error {
 
 // DefaultSince is where a walk starts when no --since is given: a day
 // before the last walk recorded in dataDir/meta.json, so updates that
-// slipped past that walk are picked up, or the window start when there is
-// no meta yet.
+// slipped past that walk are picked up. It is the window start when there
+// is no meta yet, or when the meta's window starts later, since walks of
+// that window never listed a closed pull request last updated before it.
 func DefaultSince(dataDir string) (time.Time, error) {
 	meta, err := record.ReadMeta(dataDir)
 	if errors.Is(err, fs.ErrNotExist) {
@@ -162,6 +174,9 @@ func DefaultSince(dataDir string) (time.Time, error) {
 	}
 	if err != nil {
 		return time.Time{}, err
+	}
+	if meta.WindowStart.After(WindowStart) {
+		return WindowStart, nil
 	}
 	return meta.FetchedThrough.UTC().Add(-24 * time.Hour), nil
 }
@@ -408,12 +423,27 @@ func orGhost(a *Actor) *Actor {
 
 // baselines records, for each human author in the cache not yet in
 // authors.json, how many pull requests they opened before the window.
+// Baselines asked for another window, or for none the file records, are
+// asked again, every one, and authors.json is rewritten for this window
+// after the first batch, or at the end when there is none to ask, so that
+// it never holds counts of two windows.
 func (w *walker) baselines(ctx context.Context) error {
 	path := filepath.Join(w.cfg.CacheDir, AuthorsFile)
-	known := map[string]int{}
-	if err := ReadJSON(path, &known); err != nil && !errors.Is(err, fs.ErrNotExist) {
+	cached, err := ReadBaselines(w.cfg.CacheDir)
+	switch {
+	case errors.Is(err, fs.ErrNotExist):
+		cached = Baselines{WindowStart: w.cfg.WindowStart, Authors: map[string]int{}}
+	case err != nil:
 		return err
+	case !cached.WindowStart.Equal(w.cfg.WindowStart):
+		w.log.WarnContext(ctx, "asking every author's prior pull requests again",
+			slog.String("reason", staleReason(cached.WindowStart)),
+			slog.Time("window_start", w.cfg.WindowStart),
+			slog.Int("authors", len(cached.Authors)),
+			slog.String("path", path))
+		cached = Baselines{WindowStart: w.cfg.WindowStart, Authors: map[string]int{}}
 	}
+	known := cached.Authors
 	paths, err := cachedEntries(w.cfg.CacheDir)
 	if err != nil {
 		return err
@@ -435,7 +465,7 @@ func (w *walker) baselines(ctx context.Context) error {
 	slices.Sort(todo)
 	w.log.InfoContext(ctx, "counting prior pull requests", slog.Int("authors", len(todo)))
 
-	before := WindowStart.Format(time.DateOnly)
+	before := w.cfg.WindowStart.Format(time.DateOnly)
 	for batch := range slices.Chunk(todo, authorsPerRequest) {
 		vars := make(map[string]any, len(batch))
 		for i, login := range batch {
@@ -456,14 +486,23 @@ func (w *walker) baselines(ctx context.Context) error {
 			}
 			known[login] = *r.IssueCount
 		}
-		if err := writeJSON(path, known); err != nil {
+		if err := writeJSON(path, cached); err != nil {
 			return err
 		}
 	}
 	if len(todo) == 0 {
-		return writeJSON(path, known)
+		return writeJSON(path, cached)
 	}
 	return nil
+}
+
+// staleReason says why baselines recorded for window are not for the
+// window in force.
+func staleReason(window time.Time) string {
+	if window.IsZero() {
+		return "the file does not record the window they were asked for"
+	}
+	return "they were asked for the window from " + window.Format(time.DateOnly)
 }
 
 // counts asks GitHub how many pull requests were opened in the window and
@@ -471,7 +510,7 @@ func (w *walker) baselines(ctx context.Context) error {
 func (w *walker) counts(ctx context.Context) (Meta, error) {
 	vars := map[string]any{
 		"owner": Owner, "name": Name,
-		"search": fmt.Sprintf("repo:%s/%s is:pr created:>=%s", Owner, Name, WindowStart.Format(time.DateOnly)),
+		"search": fmt.Sprintf("repo:%s/%s is:pr created:>=%s", Owner, Name, w.cfg.WindowStart.Format(time.DateOnly)),
 	}
 	var resp struct {
 		Search struct {
@@ -487,6 +526,7 @@ func (w *walker) counts(ctx context.Context) (Meta, error) {
 		return Meta{}, fmt.Errorf("counting pull requests: %w", err)
 	}
 	return Meta{
+		WindowStart:    w.cfg.WindowStart,
 		WalkStarted:    w.started,
 		OpenedInWindow: resp.Search.IssueCount,
 		Open:           resp.Repository.PullRequests.TotalCount,
