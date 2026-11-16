@@ -70,6 +70,7 @@ describe('inline figures on the fixture', () => {
     ['const.minFollowed', '30'],
     ['const.topAuthors', '3'],
     ['const.recentMonths', '6'],
+    ['const.laneCap', '200'],
     ['view.prs', '9'],
     // Rows 0 and 2, both not disclosing.
     ['view.openedBefore', '2'],
@@ -92,7 +93,7 @@ describe('inline figures on the fixture', () => {
   });
 
   it('has a spec above for every inline figure', () => {
-    expect(Object.keys(INLINE_FIGURES).length).toBe(45);
+    expect(Object.keys(INLINE_FIGURES).length).toBe(46);
   });
 });
 

@@ -6,6 +6,7 @@
 import type { Dataset, Meta, TableYear } from '../data';
 import { DISCLOSED, NOT_DISCLOSED, dayOf, periodRange } from '../filters';
 import { formatCount, formatDays, formatShare } from '../format';
+import { LANE_CAP } from '../lanes';
 import { HORIZONS, MIN_FOLLOWED } from '../llm';
 import { REVIEWS_RECORDED_FROM } from '../review';
 import { openedIn } from '../select';
@@ -168,6 +169,7 @@ export const INLINE_FIGURES: Record<string, Figure<string>> = {
   'const.minFollowed': constant(formatCount(MIN_FOLLOWED)),
   'const.topAuthors': constant(formatCount(TOP_AUTHORS)),
   'const.recentMonths': constant(formatCount(RECENT_MONTHS)),
+  'const.laneCap': constant(formatCount(LANE_CAP)),
   'view.prs': count((d) => d.viewSize),
   'view.openedBefore': count((d) => d.viewSize - d.compared),
   'view.notDisclosedInPeriod': {

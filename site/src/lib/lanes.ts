@@ -1,13 +1,14 @@
 // The lanes: the line of one PR's timeline drawn for many PRs at once, one
 // per row, against the calendar or against the time since each opened.
 
-import { scaleLog, scaleUtc } from 'd3-scale';
+import { scaleLog } from 'd3-scale';
 import { type Dataset, PR_STATE } from './data';
 import { DAY } from './filters';
 import { formatCount } from './format';
-import { HOUR, type Tick, durationTicks, logDays, spaceTicks } from './plot';
+import { HOUR, TICK_SPACING, type Tick, durationTicks, logDays, spaceTicks } from './plot';
+import type { Period } from './stats/buckets';
 import { eventRange } from './timeline';
-import { formatDate, formatDayMonth } from './timeline-axis';
+import { axisTicks, formatDate, formatMoment, timeAxis } from './timeline-axis';
 
 /** The most lanes drawn: a canvas draws more, but a reader cannot tell more rows apart. */
 export const LANE_CAP = 200;
@@ -99,67 +100,222 @@ export function laneAt(y: number, pitch: number, n: number): number | null {
   return y < 0 || i >= n ? null : i;
 }
 
+/**
+ * The stretch the calendar shows: never outside the period, and within it
+ * only the stretch the lanes take up.
+ */
+export interface CalendarSpan extends Period {
+  /**
+   * Whether a moment at `end` is drawn: it is where `end` is a lane's, and
+   * not where it is the period's end, which the period leaves out.
+   */
+  endDrawn: boolean;
+}
+
+/** The least the calendar shows, in seconds, when the lanes take up less or no time. */
+export const LEAST_SPAN = 3600;
+/**
+ * The pixels left after the lanes' latest end, so the mark there (merged,
+ * closed unmerged, still open) is drawn whole. Their earliest opening, at the
+ * left edge, has no mark.
+ */
+const END_ROOM = 4;
+
+/**
+ * The calendar's stretch: from the later of the period's start and the
+ * earliest opening among the lanes to the earlier of the period's end and
+ * their latest end (a merge, a close, or the last fetch while still open),
+ * and `END_ROOM` pixels of time after it where the period has them. A
+ * stretch shorter than `LEAST_SPAN` is widened to it around its middle,
+ * within the period. With no lanes it is the period.
+ */
+export function calendarSpan(lanes: readonly Lane[], period: Period, width: number): CalendarSpan {
+  if (lanes.length === 0) return { ...period, endDrawn: false };
+  let start = Math.max(period.start, Math.min(...lanes.map((l) => l.created)));
+  let to = Math.min(period.end, Math.max(...lanes.map((l) => l.end)));
+  if (to - start < LEAST_SPAN) {
+    to = Math.min(period.end, (Math.max(start, to) + start) / 2 + LEAST_SPAN / 2);
+    start = Math.max(period.start, to - LEAST_SPAN);
+    to = Math.min(period.end, start + LEAST_SPAN);
+  }
+  const end = Math.min(period.end, to + ((to - start) * END_ROOM) / Math.max(1, width - END_ROOM));
+  return { start, end, endDrawn: end < period.end };
+}
+
+export interface LaneTick extends Tick {
+  /** Which end of the label sits at `at`: its start at the plot's left edge, its end at its right. */
+  anchor: 'start' | 'middle' | 'end';
+}
+
 export interface LaneScale {
   /** A time of a lane, in pixels; null where the mode does not draw it. */
   x(lane: Lane, t: number): number | null;
-  ticks: Tick[];
+  ticks: LaneTick[];
 }
 
 /**
- * The calendar runs from the lanes' earliest opening, or the period's start
- * if that is later, to their latest end; what falls before is clamped to the
- * left edge. Since opening, every lane starts at its own opening on the page's
- * log duration scale, from an hour to the longest lane, so a PR's first days
- * are not crushed by the long-lived ones; what came before the opening is
- * not drawn there.
+ * The calendar runs over `span` (`calendarSpan`), with the ticks of a PR's
+ * timeline: hours, days or months, as its length gives them. What lies
+ * outside it is not drawn (`laneView`). Since opening, every lane starts at
+ * its own opening on the page's log duration scale, from an hour to the
+ * longest lane, so a PR's first days are not crushed by the long-lived ones;
+ * what came before the opening is not drawn there.
  */
-export function laneScale(mode: LaneMode, lanes: readonly Lane[], width: number, period: { start: number; end: number }): LaneScale {
+export function laneScale(mode: LaneMode, lanes: readonly Lane[], width: number, span: CalendarSpan): LaneScale {
   if (mode === 'calendar') {
-    // From the earliest opening among the lanes, but not before the period,
-    // to the latest end: the newest PRs of a long period still get the
-    // width, and a PR is drawn to its end, past the period if it went on.
-    const start = Math.max(period.start, Math.min(...lanes.map((l) => l.created)));
-    const end = Math.max(...lanes.map((l) => l.end));
-    const [from, to] = Number.isFinite(start) && Number.isFinite(end) && end > start ? [start, end] : [period.start, period.end];
-    const s = scaleUtc()
-      .domain([new Date(from * 1000), new Date(to * 1000)])
-      .range([0, width])
-      .clamp(true);
-    // A tick within a day, when a few days fill the width, gives its hour.
-    const raw = s.ticks(Math.max(2, Math.floor(width / 90))).map((d, i) => {
-      const t = d.getTime() / 1000;
-      if (t % DAY !== 0) return { at: s(d), label: d.toISOString().slice(11, 16) };
-      return { at: s(d), label: i === 0 ? formatDate(t) : formatDayMonth(t) };
-    });
-    return { x: (_, t) => s(new Date(t * 1000)), ticks: spaceTicks(raw, 64) };
+    const axis = timeAxis(
+      [
+        { at: span.start, row: 0 },
+        { at: span.end, row: 0 },
+      ],
+      { available: width, sep: 0, breakWidth: 0 },
+    );
+    // A tick at the period's end would name the day after it.
+    const ticks = axisTicks(axis, TICK_SPACING)
+      .filter((t) => span.endDrawn || t.time < span.end)
+      .map(({ at, label, anchor }) => ({ at, label, anchor }));
+    return { x: (_, t) => axis.x(t), ticks };
   }
   const longest = Math.max(0, ...lanes.map((l) => (l.end - l.created) / DAY));
   const [lo, hi] = logDays(longest);
   const s = scaleLog().domain([lo, hi]).range([0, width]).clamp(true);
+  const ticks = spaceTicks(
+    durationTicks(lo, hi).map((d) => ({ at: s(d.days), label: d.label })),
+    56,
+  );
   return {
     x: (l, t) => (t < l.created ? null : s(Math.max(HOUR, (t - l.created) / DAY))),
-    ticks: spaceTicks(
-      durationTicks(lo, hi).map((d) => ({ at: s(d.days), label: d.label })),
-      56,
-    ),
+    // A label at either edge is set inside it, not cut by it.
+    ticks: ticks.map((t) => ({ ...t, anchor: t.at < 32 ? 'start' : t.at > width - 32 ? 'end' : 'middle' })),
+  };
+}
+
+/** The calendar's stretch in words: its day, or its first day to its last. */
+export function spanText(span: CalendarSpan): string {
+  const first = formatDate(span.start);
+  const last = formatDate(span.endDrawn ? span.end : span.end - 1);
+  return first === last ? first : `${first} to ${last}`;
+}
+
+/** What the calendar covers, when it is less than the period; else null. */
+export function spanNote(span: CalendarSpan, period: Period): string | null {
+  if (span.start <= period.start && span.end >= period.end) return null;
+  return `The calendar runs over the part of the period these PRs take up, ${spanText(span)}.`;
+}
+
+export interface Span {
+  from: number;
+  to: number;
+}
+
+/** What a mode draws of a lane: on the calendar, only what lies within its stretch. */
+export interface LaneView {
+  /** Before the opening, from the first commit. */
+  beforeOpening: Span | null;
+  open: Span[];
+  /** Closed, before a reopening. */
+  closed: Span[];
+  activity: number[];
+  approvals: number[];
+  /** When it was merged or closed unmerged, or the last fetch while it is open; null where that is not drawn. */
+  ending: number | null;
+  /** Its life began earlier than the calendar shows: its first commit, or its opening, came before its start. */
+  before: boolean;
+  /** Its life went on later than the calendar shows: its merge, close, or last fetch while open came after its end. */
+  after: boolean;
+}
+
+const ALL_TIME: CalendarSpan = { start: -Infinity, end: Infinity, endDrawn: false };
+
+/**
+ * A lane as `mode` draws it: on the calendar, only what lies within `span`,
+ * each span of the lane cut at its edges, and whether the lane's life goes on
+ * past either edge; since opening, its whole life.
+ */
+export function laneView(mode: LaneMode, lane: Lane, span: CalendarSpan): LaneView {
+  const { start, end, endDrawn } = mode === 'calendar' ? span : ALL_TIME;
+  const inside = (t: number) => t >= start && (t < end || (endDrawn && t === end));
+  // A span of no length, a PR closed the moment it opened, is kept where it is inside.
+  const cut = (from: number, to: number): Span | null => {
+    const lo = Math.max(from, start);
+    const hi = Math.min(to, end);
+    return lo < hi || (from === to && inside(from)) ? { from: lo, to: hi } : null;
+  };
+  const open: Span[] = [];
+  const closed: Span[] = [];
+  const keep = (spans: Span[], s: Span | null) => {
+    if (s !== null) spans.push(s);
+  };
+  let from = lane.created;
+  for (const c of lane.closed) {
+    keep(open, cut(from, c.from));
+    keep(closed, cut(c.from, c.to));
+    from = c.to;
+  }
+  keep(open, cut(from, lane.end));
+  return {
+    beforeOpening: lane.firstCommit === null ? null : cut(lane.firstCommit, lane.created),
+    open,
+    closed,
+    activity: lane.activity.filter(inside),
+    approvals: lane.approvals.filter(inside),
+    ending: inside(lane.end) ? lane.end : null,
+    before: (lane.firstCommit ?? lane.created) < start,
+    after: lane.end > end || (lane.end === end && !endDrawn),
   };
 }
 
 const plural = (n: number, one: string, many = `${one}s`) => `${formatCount(n)} ${n === 1 ? one : many}`;
+const times = (n: number) => (n === 1 ? 'once' : n === 2 ? 'twice' : `${formatCount(n)} times`);
+const ENDING = { merged: 'merged', closed: 'closed unmerged', open: 'still open at the last fetch,' } as const;
 
-/** The lanes' text alternative: how many, in what order, from which PR to which, and how they ended. */
-export function describeLanes(lanes: readonly Lane[], total: number, orderName: string): string {
+/** A lane's accessible description: what its mode draws of it, in time order. */
+export function describeLane(lane: Lane, view: LaneView, mode: LaneMode): string {
+  const parts: string[] = [];
+  if (view.before) parts.push('its life goes on earlier than shown');
+  else if (view.beforeOpening !== null && mode === 'calendar') parts.push(`first commit ${formatMoment(view.beforeOpening.from)}`);
+  if (view.open[0]?.from === lane.created) parts.push(`opened ${formatMoment(lane.created)}`);
+  if (view.closed.length > 0) parts.push(`closed before a reopening ${times(view.closed.length)}`);
+  parts.push(plural(view.activity.length, 'comment, review or bot command', 'comments, reviews or bot commands'));
+  parts.push(plural(view.approvals.length, 'approval'));
+  if (view.ending !== null) parts.push(`${ENDING[lane.state]} ${formatMoment(view.ending)}`);
+  if (view.after) parts.push('its life goes on later than shown');
+  return `${mode === 'calendar' ? 'As the calendar shows it' : 'Its whole life, from its opening'}: ${parts.join('; ')}.`;
+}
+
+/**
+ * The lanes' text alternative: how many, in what order, from which PR to
+ * which, what is drawn of them, and what had become of them by the last
+ * fetch, which on the calendar may lie outside what it shows.
+ */
+export function describeLanes(
+  lanes: readonly Lane[],
+  views: readonly LaneView[],
+  total: number,
+  orderName: string,
+  mode: LaneMode,
+  span: CalendarSpan,
+): string {
   const first = lanes[0];
   const last = lanes.at(-1);
   if (first === undefined || last === undefined) return '';
   const count = (s: Lane['state']) => lanes.filter((l) => l.state === s).length;
   const reopened = lanes.filter((l) => l.reopened > 0).length;
   const how = total > lanes.length ? `${formatCount(lanes.length)} of ${formatCount(total)} PRs` : plural(lanes.length, 'PR');
+  const calendar = mode === 'calendar';
+  const what = calendar
+    ? `The timelines of ${how}, one per row, ${orderName}, each drawn only within the calendar shown, ${spanText(span)}, inside the period`
+    : `The whole timelines of ${how}, one per row, ${orderName}, each from its opening, whatever the period`;
+  const before = views.filter((v) => v.before).length;
+  const edges = calendar
+    ? `${formatCount(before)} ${before === 1 ? 'goes' : 'go'} on earlier than shown and ${formatCount(views.filter((v) => v.after).length)} later. `
+    : '';
   return (
-    `The timelines of ${how}, one per row, ${orderName}: ` +
-    `from #${first.number}, opened ${formatDate(first.created)}, to #${last.number}, opened ${formatDate(last.created)}. ` +
+    `${what}: from #${first.number}, opened ${formatDate(first.created)}, to #${last.number}, opened ${formatDate(last.created)}. ` +
+    edges +
+    `What became of them by the last fetch${calendar ? ', shown or not' : ''}: ` +
     `${formatCount(count('merged'))} merged, ${formatCount(count('closed'))} closed unmerged, ${formatCount(count('open'))} still open; ` +
-    `${reopened === 0 ? 'none was' : `${formatCount(reopened)} ${reopened === 1 ? 'was' : 'were'}`} closed and reopened.`
+    `${reopened === 0 ? 'none was' : `${formatCount(reopened)} ${reopened === 1 ? 'was' : 'were'}`} ever closed and reopened.`
   );
 }
 

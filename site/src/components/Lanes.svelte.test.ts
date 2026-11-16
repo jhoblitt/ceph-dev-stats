@@ -71,8 +71,11 @@ describe('Lanes', () => {
     expect(figure.getAttribute('aria-describedby')).toBeTruthy();
     const summary = document.getElementById(figure.getAttribute('aria-describedby') as string);
     expect(summary?.textContent).toMatch(
-      /^The timelines of 12 PRs, one per row, in the PR table’s order, by Opened, descending: from #67250/,
+      /^The timelines of 12 PRs, one per row, in the PR table’s order, by Opened, descending, each drawn only within the calendar shown, 15 May 2026 to 15 Nov 2026, inside the period: from #67250/,
     );
+    expect(summary?.textContent).toMatch(/ What became of them by the last fetch, shown or not: 6 merged, /);
+    // The room after the last fetch reaches the period's end, so the calendar is the period and says nothing more.
+    expect(section.queryByText(/^The calendar runs over/)).toBeNull();
     // The line saying which PRs and in what order shows whatever their count.
     expect(section.getByText('12 PRs open at some point in the period, in the PR table’s order, by Opened, descending.')).toBeTruthy();
     expect(section.getByRole('img').getAttribute('aria-label')).toBe('12 lanes, one per PR; each is a link in the list below.');
@@ -116,6 +119,9 @@ describe('Lanes', () => {
     const { section } = await lanes('#/?target=all&week=2026-05-18');
     const links = within(section.getByRole('list', { name: /PRs in the lanes/ })).getAllByRole('link');
     expect(links.map((l) => l.textContent)).toEqual(['#66510', '#66500']);
+    // The calendar runs from #66500's opening to #66510's close, not over the whole history, and says so.
+    expect(section.getByText('The calendar runs over the part of the period these PRs take up, 18 May 2026 to 1 Jun 2026.')).toBeTruthy();
+    expect([...section.getByRole('figure').querySelectorAll('.axis-x text')][0]?.textContent).toBe('18 May 2026');
     // The lanes say which PRs in the PR table's own words.
     expect(section.getByText('2 PRs opened in the week of 2026-05-18, in the PR table’s order, by Opened, descending.')).toBeTruthy();
     const table = within(screen.getByRole('region', { name: 'Pull requests' }));
@@ -134,7 +140,43 @@ describe('Lanes', () => {
   it('switches the time axis to days since opening', async () => {
     const { section } = await lanes('#/?target=all');
     await fireEvent.click(section.getByRole('radio', { name: 'Days since opening' }));
-    expect(section.getByText(/Each row starts when its PR opened, on a log scale/)).toBeTruthy();
+    expect(section.getByText(/Each row starts when its PR opened, on a log scale from an hour, and runs to its end, whatever the period/)).toBeTruthy();
     expect(section.queryByText('before opening, from the first commit')).toBeNull();
+    expect(section.queryByText(/its life goes on (earlier|later) than shown/)).toBeNull();
+  });
+
+  it('draws the calendar over the period, cut at its edges, and says so in every word; days since opening, whole lives', async () => {
+    // One day, 10 November 2026, the day #67250 opened; the fixture's other PRs opened before it.
+    const { section } = await lanes('#/?target=all&from=2026-11-10&to=2026-11-10');
+    const legend = within(section.getByRole('list', { name: 'Legend' }));
+    expect(legend.getByText('its life goes on earlier than shown')).toBeTruthy();
+    expect(legend.getByText('its life goes on later than shown')).toBeTruthy();
+    const axis = section.getByRole('figure').querySelectorAll('.axis-x text');
+    expect([...axis].map((t) => t.textContent)).toEqual(['10 Nov 2026', '03:00', '06:00', '09:00', '12:00', '15:00', '18:00', '21:00']);
+    const figure = section.getByRole('figure', { name: 'Each PR’s timeline, one per row' });
+    const summary = () => document.getElementById(figure.getAttribute('aria-describedby') as string)?.textContent ?? '';
+    expect(summary()).toMatch(/, each drawn only within the calendar shown, 10 Nov 2026, inside the period: /);
+    // The lanes span the day, so the calendar is the day and says nothing more of what it covers.
+    expect(section.queryByText(/^The calendar runs over/)).toBeNull();
+    expect(summary()).not.toMatch(/whole/);
+    const link = within(section.getByRole('list', { name: /PRs in the lanes/ })).getByRole('link', { name: '#67250' });
+    // A lane's link is described while the list is open, the only time it can be reached.
+    expect(link.getAttribute('aria-describedby')).toBeNull();
+    const details = section.getByText(/PRs in the lanes, as links/).closest('details') as HTMLDetailsElement;
+    details.open = true;
+    await fireEvent(details, new Event('toggle'));
+    const description = () => document.getElementById(link.getAttribute('aria-describedby') as string)?.textContent ?? '';
+    // Its first commit came the day before.
+    expect(description()).toBe(
+      'As the calendar shows it: its life goes on earlier than shown; opened 10 Nov 2026 16:00 UTC; 1 comment, review or bot command; 0 approvals; its life goes on later than shown.',
+    );
+
+    await fireEvent.click(section.getByRole('radio', { name: 'Days since opening' }));
+    expect(summary()).toMatch(/^The whole timelines of .*, each from its opening, whatever the period: /);
+    expect(summary()).not.toMatch(/calendar|shown/);
+    expect(section.queryByText(/^The calendar runs over/)).toBeNull();
+    expect(description()).toMatch(/^Its whole life, from its opening: opened 10 Nov 2026 \d\d:\d\d UTC; /);
+    expect(description()).not.toMatch(/period/);
+    expect(section.getByRole('figure').querySelectorAll('.axis-x text')[0]?.textContent).toBe('1 hour');
   });
 });
