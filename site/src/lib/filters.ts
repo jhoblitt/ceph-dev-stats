@@ -77,10 +77,14 @@ export const STANDING_BANDS = [
 ] as const satisfies readonly Band<string>[];
 export type StandingBand = (typeof STANDING_BANDS)[number]['id'];
 
+/** The names of the two disclosure groups, which say what was disclosed, wherever a label names a group. */
+export const DISCLOSED = 'AI use disclosed';
+export const NOT_DISCLOSED = 'AI use not disclosed';
+
 /** Disclosed is any `disclosure` other than meta's `none`. */
 export const DISCLOSURES = [
-  { id: 'disclosed', label: 'disclosed' },
-  { id: 'not-disclosed', label: 'not disclosed' },
+  { id: 'disclosed', label: DISCLOSED },
+  { id: 'not-disclosed', label: NOT_DISCLOSED },
 ] as const satisfies readonly Choice<string>[];
 export type Disclosure = (typeof DISCLOSURES)[number]['id'];
 

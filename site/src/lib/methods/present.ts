@@ -4,14 +4,14 @@
 // text, never markup.
 
 import type { Dataset, Meta, TableYear } from '../data';
-import { dayOf, periodRange } from '../filters';
+import { DISCLOSED, NOT_DISCLOSED, dayOf, periodRange } from '../filters';
 import { formatCount, formatDays, formatShare } from '../format';
 import { HORIZONS, MIN_FOLLOWED } from '../llm';
 import { REVIEWS_RECORDED_FROM } from '../review';
 import { openedIn } from '../select';
 import { COMPARE_WEEKS } from '../stats/capacity';
 import { MIN_PRS } from '../stats/people';
-import { defaultFilters } from '../state';
+import { RECENT_MONTHS, recentFilters } from '../state';
 import {
   type CommentCounts,
   type Coverage,
@@ -54,19 +54,20 @@ export interface DataFigures {
   disclosure: Record<string, Split>;
   families: FamilyCount[];
   comments: CommentCounts;
-  /** The People tables on the report's default view. */
+  /** The People tables over the period with every other filter as the report opens. */
   people: PeopleFigures;
   /**
-   * The PRs the LLM-use section compares on the report's default view, those
+   * The PRs the LLM-use section compares over the period with every other
+   * filter as the report opens, those
    * on the development branch opened in the period, split by disclosure.
    */
   groups: { notDisclosed: GroupProfile; disclosed: GroupProfile };
   /** How many PRs that comparison holds. */
   compared: number;
-  /** The whole default view split by disclosure, for the share of each group opened in the period. */
+  /** Every PR those filters select, split by disclosure, for the share of each group opened in the period. */
   viewGroups: { notDisclosed: GroupProfile; disclosed: GroupProfile };
-  /** How many PRs the default view holds. */
-  defaultView: number;
+  /** How many PRs those filters select. */
+  viewSize: number;
 }
 
 /** The figures that also need each year's table file. */
@@ -75,7 +76,7 @@ export interface TableFigures {
   eventRefs: EventRefs[];
 }
 
-/** The figures over `days`, which the page gives as the report's default period. */
+/** The figures over `days`, which the page gives as the last six months. */
 export function dataFigures(data: Dataset, days: Days): DataFigures {
   const period = periodRange(days);
   const rows = baseRows(data, days);
@@ -96,7 +97,7 @@ export function dataFigures(data: Dataset, days: Days): DataFigures {
     groups: disclosureGroups(data, compared, period),
     compared: compared.length,
     viewGroups: disclosureGroups(data, view, period),
-    defaultView: view.length,
+    viewSize: view.length,
   };
 }
 
@@ -136,7 +137,7 @@ const listed = (items: readonly string[]) =>
 export const INLINE_FIGURES: Record<string, Figure<string>> = {
   asOf: { needs: 'meta', show: (m) => dayOf(m.fetched_through) },
   windowStart: { needs: 'meta', show: (m) => dayOf(m.window_start) },
-  periodStart: { needs: 'meta', show: (m) => defaultFilters(m).from },
+  periodStart: { needs: 'meta', show: (m) => recentFilters(m).from },
   'prs.active': count((d) => d.coverage.active),
   'prs.openedInPeriod': count((d) => d.coverage.openedInPeriod),
   'prs.openedBeforePeriod': count((d) => d.coverage.active - d.coverage.openedInPeriod),
@@ -167,8 +168,9 @@ export const INLINE_FIGURES: Record<string, Figure<string>> = {
   'const.horizons': constant(listed(HORIZONS.map(formatCount))),
   'const.minFollowed': constant(formatCount(MIN_FOLLOWED)),
   'const.topAuthors': constant(formatCount(TOP_AUTHORS)),
-  'view.prs': count((d) => d.defaultView),
-  'view.openedBefore': count((d) => d.defaultView - d.compared),
+  'const.recentMonths': constant(formatCount(RECENT_MONTHS)),
+  'view.prs': count((d) => d.viewSize),
+  'view.openedBefore': count((d) => d.viewSize - d.compared),
   'view.notDisclosedInPeriod': {
     needs: 'data',
     show: (_m, d) => (d.viewGroups.notDisclosed.openedInPeriod === null ? '–' : formatShare(d.viewGroups.notDisclosed.openedInPeriod)),
@@ -201,7 +203,7 @@ export interface TableModel {
 const SPLIT_HEAD = ['development branch', 'other branches', 'all'];
 const splitCells = (s: Split) => [formatCount(s.main), formatCount(s.other), formatCount(total(s))];
 /** The period the figures are over, as the captions name it. */
-const periodOf = (d: DataFigures) => `the default period, ${d.period.from} to ${d.period.to}`;
+const periodOf = (d: DataFigures) => `the last ${RECENT_MONTHS} months, ${d.period.from} to ${d.period.to}`;
 const ofActive = (m: Meta, d: DataFigures, what: string, note?: string) =>
   `${what}, of the ${formatCount(d.coverage.active)} pull requests open at some point in ${periodOf(d)}, as of ${dayOf(m.fetched_through)}${note === undefined ? '' : `. ${note}`}`;
 
@@ -218,7 +220,7 @@ const DISCLOSURE_LABELS: Record<string, string> = {
   trailer: 'a disclosing trailer, such as Assisted-by:',
   coauthor: 'Co-authored-by: naming a tool',
   description: 'disclosure phrasing in the description or a commit message',
-  none: 'not disclosed',
+  none: NOT_DISCLOSED,
 };
 const DISCLOSURE_ORDER = ['trailer', 'coauthor', 'description', 'none'];
 
@@ -280,8 +282,8 @@ export const TABLE_FIGURES: Record<string, Figure<TableModel>> = {
       const pct = (v: number | null | undefined) => (v === null || v === undefined ? '–' : formatShare(v));
       const kinds = [...m.kinds.map((k) => ({ id: k.id, name: k.name })), { id: 'unknown', name: 'Unknown' }];
       return {
-        caption: `The ${formatCount(d.compared)} pull requests on the development branch opened in ${periodOf(d)}, those the LLM-use section compares on the report's default view, by disclosure, as of ${dayOf(m.fetched_through)}`,
-        head: ['', 'not disclosed', 'disclosed'],
+        caption: `The ${formatCount(d.compared)} pull requests on the development branch opened in ${periodOf(d)}, those the LLM-use section compares over those months with every other filter as the report opens, by disclosure, as of ${dayOf(m.fetched_through)}`,
+        head: ['', NOT_DISCLOSED, DISCLOSED],
         rows: [
           ['pull requests', ...cells((g) => formatCount(g.prs))],
           ['median lines changed', ...cells((g) => (g.medianLines === null ? '–' : formatCount(g.medianLines)))],
@@ -295,7 +297,7 @@ export const TABLE_FIGURES: Record<string, Figure<TableModel>> = {
   'table.eventRefs': {
     needs: 'tables',
     show: (m, d, t) => ({
-      caption: `Events in ${periodOf(d)}, on the ${formatCount(d.coverage.active)} pull requests open at some point in it, and those with no address of their own, as of ${dayOf(m.fetched_through)}`,
+      caption: `Events in ${periodOf(d)}, on the ${formatCount(d.coverage.active)} pull requests open at some point in them, and those with no address of their own, as of ${dayOf(m.fetched_through)}`,
       head: ['event', 'events', 'no address'],
       rows: t.eventRefs.map((r) => [
         EVENT_LABELS[r.kind] ?? r.kind,

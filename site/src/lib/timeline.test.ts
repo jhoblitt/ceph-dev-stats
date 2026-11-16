@@ -177,8 +177,8 @@ describe('prTimeline', () => {
   it('heads the timeline with the PR’s title, branch, commits and disclosure in words', () => {
     const data = dataset([{ number: 70000, created: OPENED, base: 1, commits: 3, disclosure: 3 }]);
     const tl = prTimeline(data, 0, { ...table(1, []), titles: ['rgw: a <b>bold</b> title'] });
-    expect([tl.title, tl.base, tl.commitCount, tl.disclosure]).toEqual(['rgw: a <b>bold</b> title', 'reef', 3, 'disclosed in a trailer']);
-    expect(prTimeline(dataset([{ number: 70000, created: OPENED }]), 0, table(1, [])).disclosure).toBe('not disclosed');
+    expect([tl.title, tl.base, tl.commitCount, tl.disclosure]).toEqual(['rgw: a <b>bold</b> title', 'reef', 3, 'AI use disclosed in a trailer']);
+    expect(prTimeline(dataset([{ number: 70000, created: OPENED }]), 0, table(1, [])).disclosure).toBe('AI use not disclosed');
   });
 
   it('draws a merge and the close GitHub records a second after it as the merge alone', () => {

@@ -52,7 +52,7 @@ describe('Velocity', () => {
     const segments = [...notDisclosed, ...disclosed].filter((v) => v > 0).length;
     expect(figure.querySelectorAll('.bar')).toHaveLength(segments);
     expect(figure.querySelectorAll('.line')).toHaveLength(2);
-    expect(figure.querySelector('.visually-hidden')?.textContent).toMatch(/^By week, 27 weeks from 2026-05-11 to 2026-11-09\. 7 opened \(4 not disclosed, 3 disclosed\)/);
+    expect(figure.querySelector('.visually-hidden')?.textContent).toMatch(/^By week, 27 weeks from 2026-05-11 to 2026-11-09\. 7 opened \(4 AI use not disclosed, 3 AI use disclosed\)/);
   });
 
   it('sets PRs opened over PRs merged and closed in two panels on one shared scale, no line over a bar', async () => {

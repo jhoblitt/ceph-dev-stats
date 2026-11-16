@@ -1,4 +1,4 @@
-# Disclosed against not disclosed
+# AI use disclosed against not disclosed
 
 The LLM-use section sets the pull requests that disclose LLM use against those that do not, figure by figure, among the selected pull requests opened during the period. A pull request is in the disclosed group when it discloses in any of the [forms](#disclosure), and in the other group otherwise. Each figure says how many pull requests it rests on, where there are any.
 
@@ -13,10 +13,10 @@ There is no median time to merge: the groups can differ in age, and a median far
 
 ## What else sets the groups apart
 
-This table sets the two groups side by side on things other than disclosure: the pull requests on the development branch, `main` or `master`, opened in the default period, which are those the LLM-use section compares on the report's default view, as of {{asOf}}:
+This table sets the two groups side by side on things other than disclosure: the pull requests on the development branch, `main` or `master`, opened in the last {{const.recentMonths}} months, which are those the LLM-use section compares over those months with every other filter as the report opens, as of {{asOf}}:
 
 {{table.disclosureGroups}}
 
-The report's default view also holds {{view.openedBefore}} pull requests opened before the default period, which the comparison leaves out: of all the pull requests on the default view, {{view.notDisclosedInPeriod}} of those that do not disclose were opened in the period, against {{view.disclosedInPeriod}} of those that do.
+Over those months, with the same filters, the report also holds {{view.openedBefore}} pull requests opened before them, which the comparison leaves out: of all the pull requests it holds, {{view.notDisclosedInPeriod}} of those that do not disclose were opened in the period, against {{view.disclosedInPeriod}} of those that do.
 
 The table shows how far apart the groups are in size, in age, in how much of each comes from a few people, and in the kind of change. Any of these can move a figure on its own, so a difference between the groups does not show an effect of using a tool. To compare like with like, narrow both groups with the same filters, by size or kind for example, and the comparison is redone over the pull requests that remain. And a pull request that does not disclose is not known to be tool-free: disclosure is voluntary.

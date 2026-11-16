@@ -13,24 +13,24 @@
   } from '../lib/filters';
   import { GHOST, findLogin } from '../lib/handles';
   import { getPage } from '../lib/page';
-  import { DEFAULT_MONTHS, dataDays, defaultFilters, monthsBefore } from '../lib/state';
+  import { RECENT_MONTHS, dataDays, recentFilters } from '../lib/state';
   import { formatDate } from '../lib/timeline-axis';
 
   const { meta, selection } = getPage();
   const uid = $props.id();
   const { first, last } = dataDays(meta);
-  const recent = defaultFilters(meta);
+  const recent = recentFilters(meta);
   const filters = $derived($selection.filters);
 
-  // A period the reader can reach in one choice: the default, and the whole
-  // window when it reaches further back, which the date inputs reach only
-  // a field at a time. A window shorter than the default's reach is the
-  // default itself, so it is one choice, named for what it is.
+  // A period the reader can reach in one choice, which the date inputs reach
+  // only a field at a time: the whole window, the default, and the last six
+  // months when the window reaches further back. A window no longer than
+  // that is the whole window, so it is one choice, named for what it is.
   const whole = { label: `All, from ${formatDate(meta.window_start)}`, from: first, to: last };
-  const presets =
-    monthsBefore(last, DEFAULT_MONTHS) < first
-      ? [whole]
-      : [{ label: `Last ${DEFAULT_MONTHS} months`, from: recent.from, to: recent.to }, ...(first < recent.from ? [whole] : [])];
+  const presets = [
+    ...(first < recent.from ? [{ label: `Last ${RECENT_MONTHS} months`, from: recent.from, to: recent.to }] : []),
+    whole,
+  ];
 
   function set(patch: Partial<Filters>) {
     selection.update((s) => ({ ...s, filters: { ...s.filters, ...patch } }));
@@ -116,7 +116,7 @@
     },
     {
       id: 'disclosure',
-      label: 'Disclosure',
+      label: 'AI use disclosure',
       value: filters.disclosure ?? '',
       options: [all, ...DISCLOSURES],
       change: (v) => set({ disclosure: findChoice(DISCLOSURES, v) }),
@@ -251,10 +251,18 @@
 </section>
 
 <style>
+  /* Every field is a label line, a control of one height beneath it, and any
+     hint beneath that. The fields of a row align at the top, so their labels
+     share a line and their controls a top edge, and a hint hangs below its
+     own control without moving another field. A group's legend is its label
+     line, and the Period's From and To sit beside their inputs on the
+     control line, so its dates and choices line up with the other controls. */
   .filter-bar {
+    --label-line: 1.25rem;
+    --control-height: 2.375rem;
     display: flex;
     flex-wrap: wrap;
-    align-items: end;
+    align-items: start;
     gap: var(--space-4) var(--space-5);
     padding: var(--space-4) var(--space-5);
     border: 1px solid var(--border);
@@ -282,16 +290,22 @@
   .field label {
     color: var(--text-muted);
     font-size: var(--text-sm);
+    line-height: var(--label-line);
   }
 
+  /* Floated, a legend is laid out in its fieldset's flow, one label line
+     tall, and what follows it clears it onto the control line. */
   legend {
+    float: left;
     padding: 0;
     margin-bottom: var(--space-1);
   }
 
   .days {
+    clear: both;
     display: flex;
     flex-wrap: wrap;
+    align-items: center;
     gap: var(--space-2) var(--space-3);
   }
 
@@ -301,10 +315,22 @@
     gap: var(--space-1);
   }
 
+  .days .field {
+    flex-direction: row;
+    align-items: center;
+    gap: var(--space-2);
+  }
+
+  /* From and To take one width, so the dates line up when they wrap onto lines of their own. */
+  .days .field label {
+    min-width: 2.5rem;
+  }
+
   input[type='date'],
   input[type='text'],
   select {
-    min-height: 2.25rem;
+    box-sizing: border-box;
+    height: var(--control-height);
     padding: var(--space-1) var(--space-2);
     border: 1px solid var(--border-strong);
     border-radius: var(--radius-sm);
@@ -320,9 +346,6 @@
     flex: 0 1 auto;
   }
 
-  /* The bar aligns its fields at the bottom; the Reviewer's line under its
-     input would lift that input above the Author's, so the pair aligns at
-     the top among themselves. */
   .people {
     display: flex;
     flex-wrap: wrap;
@@ -339,7 +362,7 @@
   .presets {
     display: flex;
     flex-wrap: wrap;
-    align-items: end;
+    align-items: center;
     gap: var(--space-2);
   }
 
@@ -355,7 +378,8 @@
 
   .person button,
   .presets button {
-    min-height: 2.25rem;
+    box-sizing: border-box;
+    height: var(--control-height);
     padding: var(--space-1) var(--space-2);
     border: 1px solid var(--border-strong);
     border-radius: var(--radius-sm);
@@ -374,7 +398,7 @@
   }
 
   .hint {
-    max-width: min(16rem, 100%);
+    max-width: 16rem;
   }
 
   .target-hint {
@@ -386,13 +410,20 @@
     position: absolute;
   }
 
+  /* As wide as its options, and as tall as every other control. */
   .segmented {
+    clear: both;
+    box-sizing: border-box;
     display: flex;
+    width: fit-content;
+    max-width: 100%;
+    height: var(--control-height);
     border: 1px solid var(--border-strong);
     border-radius: var(--radius-sm);
     overflow: hidden;
   }
 
+  /* An option may narrow on a phone to its longest word, its words wrapping inside the control's height. */
   .segmented label {
     position: relative;
     display: flex;
@@ -414,8 +445,9 @@
   .segmented span {
     display: flex;
     align-items: center;
-    min-height: 2.25rem;
-    padding: var(--space-1) var(--space-3);
+    height: 100%;
+    box-sizing: border-box;
+    padding: 0 var(--space-3);
     color: var(--text);
     background: var(--page);
   }
@@ -439,6 +471,13 @@
   @media (width < 480px) {
     .filter-bar {
       padding: var(--space-3) var(--space-4);
+    }
+
+    /* Two lines of the smaller size fit the control's height. */
+    .segmented span {
+      padding: 0 var(--space-2);
+      font-size: var(--text-sm);
+      line-height: 1.15;
     }
   }
 </style>

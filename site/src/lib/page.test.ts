@@ -1,12 +1,13 @@
 import { get, writable } from 'svelte/store';
 import { describe, expect, it, vi } from 'vitest';
-import { BASE, fixtureFetch, withEarlierYear } from './__fixtures__/fetch';
+import { BASE, fixtureFetch, heldByYear, withEarlierYear, withYears } from './__fixtures__/fetch';
 import { type Dataset, DataLoader, type Fetch, type Meta, type YearData, combine, parseMeta, yearsFor } from './data';
 import { type Filters, dayOf, periodRange } from './filters';
 import {
   LARGE_DATASET,
   type View,
   createDataStore,
+  createPage,
   createViewStore,
   firstYears,
   sectionsBusy,
@@ -21,13 +22,14 @@ import { authorRows, reviewerRows } from './stats/people';
 import { reviewLoad } from './stats/reviewers';
 import { type Event, type Row, at, dataset, random } from './stats/testing';
 import { weekly } from './stats/weekly';
-import { type AppState, defaultFilters, defaultState } from './state';
+import { type AppState, type HashLocation, createStateStore, defaultFilters, defaultState, recentFilters } from './state';
 
 // The fixture with 2025 before it: the window starts 2025-01-01, 2025's files
 // hold #60010 alone, merged 2025-06-10, and 2026's the fixture's twelve.
 const earlier = withEarlierYear();
 const meta: Meta = parseMeta(earlier['meta.json']);
-const recent = defaultState(meta);
+/** The last six months, which need 2026's files alone. */
+const recent: AppState = { ...defaultState(meta), filters: recentFilters(meta) };
 const back: AppState = { ...recent, filters: { ...recent.filters, from: '2025-03-01' } };
 
 /** The fixture's fetch with 2025 before it, holding back every response until `release` is called. */
@@ -45,7 +47,11 @@ function gatedFetch() {
 const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
 
 describe('yearsForState', () => {
-  it('needs the last year alone for the default period, the last six months', () => {
+  it('needs every year for the default period, the whole window', () => {
+    expect(yearsForState(meta, defaultState(meta))).toEqual([2025, 2026]);
+  });
+
+  it('needs the last year alone for the last six months', () => {
     expect(recent.filters.from).toBe('2026-05-15');
     expect(yearsForState(meta, recent)).toEqual([2026]);
   });
@@ -126,6 +132,108 @@ describe('createDataStore', () => {
     await vi.waitFor(() => expect(get(data).dataset.size).toBe(12));
     expect(get(data).dataset.years.map((y) => y.year)).toEqual([2026]);
     expect(requested.length).toBe(before);
+  });
+});
+
+// Fifteen earlier years, 2011 to 2025, of one PR each, before the fixture's 2026.
+const history = withYears(2011, 1);
+const historyMeta = parseMeta(history['meta.json']);
+const EVERY_YEAR = Array.from({ length: 16 }, (_, i) => 2011 + i);
+
+function memory(initial: string): HashLocation {
+  let hash = initial;
+  return { read: () => hash, push: (h) => (hash = h), replace: (h) => (hash = h), listen: () => () => {} };
+}
+
+describe('the first load', () => {
+  it('needs every year of a fifteen-year window for the default period, and the last year alone for the last six months', () => {
+    expect(firstYears(historyMeta, defaultState(historyMeta))).toEqual(EVERY_YEAR);
+    expect(firstYears(historyMeta, { ...defaultState(historyMeta), filters: recentFilters(historyMeta) })).toEqual([2026]);
+  });
+
+  it('starts at once with nothing to show, fetching every year file, and counts the years as they arrive', async () => {
+    const gate = heldByYear(history);
+    const loader = new DataLoader(historyMeta, BASE, gate.fetch);
+    const selection = writable(defaultState(historyMeta));
+    const data = createDataStore(loader, selection, firstYears(historyMeta, get(selection)));
+    expect(get(data)).toMatchObject({ loading: true, errors: [], progress: { arrived: 0, years: EVERY_YEAR } });
+    expect(get(data).dataset.size).toBe(0);
+    expect(gate.requested.map((u) => u.slice(BASE.length)).sort()).toEqual(
+      EVERY_YEAR.flatMap((y) => [`events-${y}.json`, `prs-${y}.json`]).sort(),
+    );
+
+    gate.release(2011);
+    gate.release(2026);
+    await vi.waitFor(() => expect(get(data).progress?.arrived).toBe(2));
+    expect(get(data).loading).toBe(true);
+    expect(get(data).dataset.size).toBe(0);
+
+    gate.releaseAll();
+    await vi.waitFor(() => expect(get(data).loading).toBe(false));
+    expect(get(data)).toMatchObject({ errors: [], progress: null });
+    expect(get(data).dataset.size).toBe(15 + 12);
+  });
+
+  it('reports a year that failed once the rest have arrived, and fetches only it again on a retry', async () => {
+    let reachable = false;
+    const { fetch, requested } = fixtureFetch(history);
+    const flaky: Fetch = (url) =>
+      url.endsWith('events-2014.json') && !reachable ? Promise.resolve(new Response('', { status: 503 })) : fetch(url);
+    const loader = new DataLoader(historyMeta, BASE, flaky);
+    const selection = writable(defaultState(historyMeta));
+    const data = createDataStore(loader, selection, firstYears(historyMeta, get(selection)));
+    await vi.waitFor(() => expect(get(data).loading).toBe(false));
+    expect(get(data).errors).toEqual([{ year: 2014, file: 'events-2014.json', message: 'HTTP 503', retry: true }]);
+    expect(get(data).dataset.size).toBe(14 + 12);
+
+    reachable = true;
+    const before = requested.length;
+    data.retry();
+    expect(get(data)).toMatchObject({ loading: true, retry: { state: 'running' }, progress: { arrived: 15, years: EVERY_YEAR } });
+    await vi.waitFor(() => expect(get(data).loading).toBe(false));
+    expect(get(data)).toMatchObject({ errors: [], retry: { state: 'succeeded' } });
+    expect(get(data).dataset.size).toBe(15 + 12);
+    expect(requested.slice(before).map((u) => u.slice(BASE.length)).sort()).toEqual(['events-2014.json', 'prs-2014.json']);
+  });
+
+  it('takes the years at once, loading nothing, when they are no years', () => {
+    const { fetch, requested } = fixtureFetch(history);
+    const loader = new DataLoader(historyMeta, BASE, fetch);
+    const selection = writable<AppState>({ ...defaultState(historyMeta), route: 'methods' });
+    const data = createDataStore(loader, selection, []);
+    expect(get(data)).toMatchObject({ loading: false, errors: [], progress: null });
+    expect(requested).toEqual([]);
+  });
+
+  it('wires the page as the browser opens it: the address, then every year of the default period', async () => {
+    const gate = heldByYear(history);
+    const loader = new DataLoader(historyMeta, BASE, gate.fetch);
+    const page = createPage(historyMeta, createStateStore(historyMeta, memory('')), loader);
+    expect(get(page.selection).filters).toEqual(defaultFilters(historyMeta));
+    expect(get(page.data).progress?.years).toEqual(EVERY_YEAR);
+    expect(get(page.view)).toMatchObject({ first: true, pending: true });
+    gate.releaseAll();
+    await vi.waitFor(() => expect(get(page.view).first).toBe(false));
+    expect(get(page.view).rows.length).toBeGreaterThan(0);
+  });
+
+  it('hands out the first figures after the first load without ever marking shown sections busy', async () => {
+    const gate = heldByYear(history);
+    const loader = new DataLoader(historyMeta, BASE, gate.fetch);
+    const selection = writable(defaultState(historyMeta));
+    const data = createDataStore(loader, selection, firstYears(historyMeta, get(selection)));
+    const jobs: (() => void)[] = [];
+    // Large enough that the first figures wait for a paint, as on the real data.
+    const view = createViewStore(selection, data, { large: 1, defer: (job) => (jobs.push(job), () => {}) });
+    const seen: { first: boolean; busy: boolean; stale: boolean }[] = [];
+    view.subscribe((v) => seen.push({ first: v.first, busy: sectionsBusy(v, get(data)), stale: sectionsStale(v, get(data)) }));
+    gate.releaseAll();
+    await vi.waitFor(() => expect(jobs).toHaveLength(1));
+    expect(get(view)).toMatchObject({ first: true, recomputing: true });
+    jobs.splice(0).forEach((job) => job());
+    expect(get(view)).toMatchObject({ first: false, pending: false, recomputing: false });
+    // Sections are drawn only once `first` is false; none of those views is busy or stale.
+    expect(seen.filter((v) => !v.first)).toEqual([{ first: false, busy: false, stale: false }]);
   });
 });
 
@@ -573,11 +681,12 @@ describe('the view while a change recomputes over a large dataset', () => {
     ]);
   });
 
-  it('keeps the default view’s sequence: the default size is above what the default period loads', () => {
-    // The default period, six months, loads at most the previous year's file
-    // and half of the current one's: on the data of 2026-11-16, 2025's 5,542
-    // rows and 2026's 8,060 so far. Recomputing 13,602 rows took 126 ms on a
-    // desktop; a two-year period's 19,684 took 167 ms.
+  it('announces a recompute over the default view, which loads every year: the size is below one year of data', () => {
+    // The last six months load at most the previous year's file and half of
+    // the current one's: on the data of 2026-11-16, 2025's 5,542 rows and
+    // 2026's 8,060 so far. Recomputing 13,602 rows took 126 ms on a desktop;
+    // a two-year period's 19,684 took 167 ms. The default view, the whole
+    // window, loads every year: 73,916 rows on that data.
     expect(LARGE_DATASET).toBe(15_000);
   });
 

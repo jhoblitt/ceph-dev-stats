@@ -75,8 +75,20 @@ describe('durations on a log axis', () => {
       '1 month',
       '3 months',
       '1 year',
+      '2 years',
     ]);
     expect(durationTicks(1 / 24, 1).map((t) => t.label)).toEqual(['1 hour', '1 day']);
+  });
+
+  it('ticks ages of years, so an axis reaching six years or fifteen is labelled near its top', () => {
+    expect(durationTicks(1 / 24, 6 * 365).map((t) => t.label).slice(-3)).toEqual(['1 year', '2 years', '5 years']);
+    expect(durationTicks(1 / 24, 16 * 365).map((t) => t.label).slice(-4)).toEqual(['1 year', '2 years', '5 years', '10 years']);
+    expect(durationTicks(1 / 24, 5 * 365).at(-1)).toEqual({ days: 5 * 365, label: '5 years' });
+    // Past a year, the top tick is never less than two fifths of the axis's top, up to twenty years.
+    for (let max = 365; max <= 20 * 365; max *= 1.05) {
+      const top = durationTicks(1 / 24, max).at(-1)?.days ?? 0;
+      expect(top, `${max.toFixed(1)} days`).toBeGreaterThanOrEqual(max / 2.5);
+    }
   });
 });
 

@@ -23,7 +23,7 @@ const rows = select(data, filters);
 
 const SHARE = 'Share of PRs opened that disclose LLM use, per week';
 const FAMILIES = 'Share of PRs opened naming each tool, per week';
-const COMPARE = 'Disclosed against not disclosed, PRs opened in the period';
+const COMPARE = 'AI use disclosed against not disclosed, PRs opened in the period';
 
 function section() {
   return within(screen.getByRole('region', { name: 'LLM use' }));
@@ -75,15 +75,15 @@ describe('LlmUse', () => {
     expect(figure.textContent).toContain('too few to say');
     expect(within(figure).getAllByRole('columnheader').map((h) => h.textContent?.trim())).toEqual([
       'Figure',
-      'not disclosed',
-      'disclosed',
+      'AI use not disclosed',
+      'AI use disclosed',
     ]);
   });
 
-  it("says that not disclosed is not no LLM, and links to the methods page's disclosure section", async () => {
+  it("says that AI use not disclosed is not no LLM, and links to the methods page's disclosure section", async () => {
     render(App, (await fixturePage('')).props);
     const region = screen.getByRole('region', { name: 'LLM use' });
-    expect(region.textContent).toContain('“Not disclosed” is not “no LLM”');
+    expect(region.textContent).toContain('“AI use not disclosed” is not “no LLM”');
     expect(region.textContent).toMatch(/kind, size and author/);
     expect(region.textContent).toMatch(/Disclosed PRs are newer on average, so the share merged at a long horizon is about fewer of them,\s+and only their earliest ones, opened when disclosure was rarer\. To compare PRs of like size, use the Size filter\./);
     const link = within(region).getByRole('link', { name: /How disclosure is detected/ });

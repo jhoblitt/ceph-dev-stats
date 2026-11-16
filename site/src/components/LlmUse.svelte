@@ -1,7 +1,7 @@
 <script lang="ts">
   import { bucketTable, withCoverage } from '../lib/charts';
   import { COLOURS } from '../lib/colours';
-  import { dayStart, periodRange } from '../lib/filters';
+  import { DISCLOSED, NOT_DISCLOSED, dayStart, periodRange } from '../lib/filters';
   import { formatShare } from '../lib/format';
   import {
     comparison,
@@ -19,12 +19,15 @@
   import { sectionHash } from '../lib/state';
   import { disclosureCounts, familiesShare, namingAny } from '../lib/stats/measures';
   import { weekly } from '../lib/stats/weekly';
+  import { TimeAxis } from '../lib/timeaxis.svelte';
   import BucketChart from './charts/BucketChart.svelte';
   import ChartFrame from './charts/ChartFrame.svelte';
   import Key from './charts/Key.svelte';
   import ReviewsRecordedNote from './ReviewsRecordedNote.svelte';
 
   const { meta, selection, data, view } = getPage();
+  // The charts below stacked over the period share one time axis, so a bucket is at the same x in each.
+  const timeAxis = new TimeAxis();
 
   const dataset = $derived($view.dataset);
   const filters = $derived($view.filters);
@@ -73,7 +76,7 @@
 
   const shareTitle = $derived(`Share of PRs opened that disclose LLM use, per ${step}`);
   const familyTitle = $derived(`Share of PRs opened naming each tool, per ${step}`);
-  const compareTitle = 'Disclosed against not disclosed, PRs opened in the period';
+  const compareTitle = `${DISCLOSED} against not disclosed, PRs opened in the period`;
 </script>
 
 <section id="llm" aria-labelledby="llm-heading" class:stale={sectionsStale($view, $data)} aria-busy={sectionsBusy($view, $data) ? 'true' : undefined}>
@@ -94,6 +97,7 @@
       height={200}
       {selected}
       onselect={onbucket}
+      {timeAxis}
     />
   </ChartFrame>
 
@@ -113,6 +117,7 @@
       height={Math.max(160, 40 + families.panels.length * 84)}
       {selected}
       onselect={onbucket}
+      {timeAxis}
     />
   </ChartFrame>
 
@@ -127,8 +132,8 @@
         <thead>
           <tr>
             <th scope="col"><span class="visually-hidden">Figure</span></th>
-            <th scope="col"><span class="head"><Key mark="bar" color={COLOURS.notDisclosed} />not disclosed</span></th>
-            <th scope="col"><span class="head"><Key mark="bar" color={COLOURS.disclosed} />disclosed</span></th>
+            <th scope="col"><span class="head"><Key mark="bar" color={COLOURS.notDisclosed} />{NOT_DISCLOSED}</span></th>
+            <th scope="col"><span class="head"><Key mark="bar" color={COLOURS.disclosed} />{DISCLOSED}</span></th>
           </tr>
         </thead>
         <tbody>
@@ -151,7 +156,7 @@
   <ReviewsRecordedNote />
 
   <p class="caveat">
-    “Not disclosed” is not “no LLM”: disclosure is voluntary, and a PR can use an LLM without saying so. The two
+    “{NOT_DISCLOSED}” is not “no LLM”: disclosure is voluntary, and a PR can use an LLM without saying so. The two
     groups also differ in other ways, such as kind, size and author, so a difference between them does not show that
     LLM use caused it. Disclosed PRs are newer on average, so the share merged at a long horizon is about fewer of them,
     and only their earliest ones, opened when disclosure was rarer. To compare PRs of like size, use the Size filter.

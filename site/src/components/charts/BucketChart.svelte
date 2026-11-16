@@ -11,9 +11,13 @@
   the data covers only in part has faded bars, and its line values are hollow
   markers left unconnected, so a short bucket does not read as a fall. A
   value that can no longer be reached is marked in a strip above its panel.
+
+  Given a section's time axis, the chart takes its columns from it, so a
+  bucket sits at the same x as in the section's other charts on that axis.
 -->
 <script lang="ts">
-  import { scaleBand, scaleLinear, scaleLog } from 'd3-scale';
+  import { untrack } from 'svelte';
+  import { scaleLinear, scaleLog } from 'd3-scale';
   import { line } from 'd3-shape';
   import {
     type BarSeries,
@@ -27,6 +31,8 @@
   import { COLOURS } from '../../lib/colours';
   import {
     HOUR,
+    NARROW,
+    PLOT_LEFT as LEFT,
     type Tick,
     barPath,
     bucketTicks,
@@ -35,7 +41,9 @@
     logDays,
     markerPath,
     spaceTicks,
+    timeColumns,
   } from '../../lib/plot';
+  import type { TimeAxis } from '../../lib/timeaxis.svelte';
   import AxisX from './AxisX.svelte';
   import AxisY from './AxisY.svelte';
   import Tooltip from './Tooltip.svelte';
@@ -66,6 +74,8 @@
     sharedScale?: boolean;
     /** The value scale: linear, or log over durations in days, from one hour. */
     scale?: 'linear' | 'logDays';
+    /** The time axis this chart shares with the others its section stacks over the period. */
+    timeAxis?: TimeAxis;
   }
 
   let {
@@ -82,14 +92,11 @@
     panels,
     sharedScale = true,
     scale = 'linear',
+    timeAxis,
   }: Props = $props();
 
   let measured = $state(0);
   const width = $derived(measured > 0 ? measured : 640);
-  // Below this width the plot keeps no margin for end labels, and a panel says its shorter unit.
-  const NARROW = 480;
-
-  const LEFT = 44;
   const TOP = 8;
   const UNIT = 16;
   const STRIP = 14;
@@ -182,19 +189,22 @@
     new Set(layout.flatMap((p) => (p.unit && p.bars.length === 0 && p.lines.length === 1 ? [p.lines[0]?.key] : []))),
   );
   const named = $derived(width >= NARROW ? endLabels(ends.filter((e) => !lone.has(e.key)), 14) : []);
-  const right = $derived(named.length > 0 ? 120 : 8);
 
-  const x = $derived(
-    scaleBand<number>()
-      .domain(Array.from({ length: n }, (_, i) => i))
-      .range([LEFT, width - right])
-      .paddingInner(0.25)
-      .paddingOuter(0.1),
-  );
-  const barWidth = $derived(Math.min(24, x.bandwidth()));
-  const centre = (i: number) => (x(i) as number) + x.bandwidth() / 2;
-  // A bucket's column takes half the gap on each side, so the columns tile the plot.
-  const column = (i: number) => (x(i) as number) - (x.step() - x.bandwidth()) / 2;
+  // The margin for end labels is kept when this chart names a line, or,
+  // on a shared axis, when any chart on it does.
+  const id = Symbol('bucket chart');
+  $effect(() => {
+    if (timeAxis === undefined) return;
+    const wants = named.length > 0;
+    // Writing the claim reads the axis; only this chart's labels rerun it.
+    untrack(() => timeAxis.claim(id, wants));
+    return () => timeAxis.release(id);
+  });
+  const x = $derived(timeColumns(width, n, timeAxis === undefined ? named.length > 0 : timeAxis.endLabels));
+  // A bar takes three quarters of its column, centred in it.
+  const barWidth = $derived(Math.min(24, x.step * 0.75));
+  const centre = (i: number) => x.centre(i);
+  const column = (i: number) => x.start(i);
 
   const selectedIndex = $derived(selected === null ? -1 : model.buckets.indexOf(selected));
   const xTicks: Tick[] = $derived(
@@ -208,7 +218,7 @@
     layout.map((p) => ({
       ...p,
       stacks: model.buckets.map((_, i) => {
-        const left = (x(i) as number) + (x.bandwidth() - barWidth) / 2;
+        const left = centre(i) - barWidth / 2;
         let topmost = -1;
         p.bars.forEach((b, j) => {
           if ((b.values[i] as number) > 0) topmost = j;
@@ -235,7 +245,7 @@
           .defined((_, i) => joined(i))
           .x((_, i) => centre(i))
           .y((v) => p.y(v as number));
-        const all = x.step() >= 12;
+        const all = x.step >= 12;
         const last = ends.find((e) => e.key === l.key)?.last ?? -1;
         // Markers on every point when the buckets are wide enough; otherwise
         // where a point stands alone, ends its line, or is a partial bucket's.
@@ -299,18 +309,18 @@
     <g aria-hidden="true">
       {#each model.buckets as _, i (i)}
         {#if model.shade?.[i]}
-          <rect class="shade" x={column(i)} y={plotTop} width={x.step()} height={base - plotTop} style:fill={COLOURS.notYetKnown} />
+          <rect class="shade" x={column(i)} y={plotTop} width={x.step} height={base - plotTop} style:fill={COLOURS.notYetKnown} />
         {/if}
       {/each}
       {#if selectedIndex >= 0}
-        <rect class="selected" x={column(selectedIndex)} y={plotTop} width={x.step()} height={base - plotTop} />
-        <rect class="selected-rule" x={column(selectedIndex)} y={base - 3} width={x.step()} height={3} />
+        <rect class="selected" x={column(selectedIndex)} y={plotTop} width={x.step} height={base - plotTop} />
+        <rect class="selected-rule" x={column(selectedIndex)} y={base - 3} width={x.step} height={3} />
       {/if}
     </g>
     {#each layout as p, k (k)}
-      <AxisY ticks={p.ticks} x0={LEFT} x1={width - right} unit={p.unit} unitY={p.top - p.reserve + 12} />
+      <AxisY ticks={p.ticks} x0={LEFT} x1={x.right} unit={p.unit} unitY={p.top - p.reserve + 12} />
       {#if k < layout.length - 1}
-        <line class="panel-base" aria-hidden="true" x1={LEFT} x2={width - right} y1={p.bottom} y2={p.bottom} />
+        <line class="panel-base" aria-hidden="true" x1={LEFT} x2={x.right} y1={p.bottom} y2={p.bottom} />
       {/if}
     {/each}
     {#if active !== null}
@@ -343,12 +353,12 @@
     {/each}
     <g aria-hidden="true">
       {#each named as e (e.key)}
-        <line class="leader" x1={centre(e.last) + 6} x2={width - right + 6} y1={e.y} y2={e.y} />
-        <text class="end-label" x={width - right + 10} y={e.y} dy="0.32em">{e.text}</text>
+        <line class="leader" x1={centre(e.last) + 6} x2={x.right + 6} y1={e.y} y2={e.y} />
+        <text class="end-label" x={x.right + 10} y={e.y} dy="0.32em">{e.text}</text>
       {/each}
     </g>
     {#if axis}
-      <AxisX ticks={xTicks} y={base} x0={LEFT} x1={width - right} />
+      <AxisX ticks={xTicks} y={base} x0={LEFT} x1={x.right} />
     {/if}
     <g>
       {#each model.buckets as start, i (start)}
@@ -356,7 +366,7 @@
           class="hit"
           x={column(i)}
           y={plotTop}
-          width={x.step()}
+          width={x.step}
           height={base - plotTop}
           role="button"
           tabindex={i === tabStop ? 0 : -1}

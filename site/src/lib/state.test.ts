@@ -12,6 +12,7 @@ import {
   hashFromState,
   monthsBefore,
   parseHash,
+  recentFilters,
   routeHash,
   sectionHash,
   stateFromHash,
@@ -134,6 +135,10 @@ describe('round trip through the hash', () => {
     const params = new URLSearchParams(hashFromState(withFilters({ from: '2026-06-01' }), meta).split('?')[1]);
     expect(params.get('from')).toBe('2026-06-01');
     expect(params.has('to')).toBe(false);
+  });
+
+  it('writes the start beside an end of its own, even the default start', () => {
+    expect(hashFromState(withFilters({ to: '2026-08-31' }), meta)).toBe('#/?target=main&from=2026-05-15&to=2026-08-31');
   });
 
   it('writes the kind as its id after the component, or unknown', () => {
@@ -282,19 +287,19 @@ describe('monthsBefore', () => {
 });
 
 describe('the default period', () => {
-  it('is the six calendar months before the last fetched day', () => {
-    const m = metaWith('2011-01-01T00:00:00Z', '2026-11-15T06:00:00Z');
-    expect(defaultFilters(m)).toMatchObject({ from: '2026-05-15', to: '2026-11-15' });
+  it('is the whole window, on the development branch, on fifteen years of data', () => {
+    const m = metaWith('2011-03-04T00:00:00Z', '2026-11-16T07:36:00Z');
+    expect(defaultFilters(m)).toEqual({ ...defaults.filters, from: '2011-03-04', to: '2026-11-16', target: 'main' });
   });
 
-  it('never starts before the window does', () => {
-    const m = metaWith('2026-09-01T00:00:00Z', '2026-11-15T06:00:00Z');
-    expect(defaultFilters(m)).toMatchObject({ from: '2026-09-01', to: '2026-11-15' });
+  it('is the whole window on three months of data', () => {
+    const m = metaWith('2026-08-16T00:00:00Z', '2026-11-16T07:36:00Z');
+    expect(defaultFilters(m)).toMatchObject({ from: '2026-08-16', to: '2026-11-16' });
   });
 
-  it("starts a day after the window on today's data, fetched on the 16th", () => {
-    const m = metaWith('2026-05-15T00:00:00Z', '2026-11-16T07:36:00Z');
-    expect(defaultFilters(m)).toMatchObject({ from: '2026-05-16', to: '2026-11-16' });
+  it('is the one day the data covers when the window starts on the day of the last fetch', () => {
+    const m = metaWith('2026-11-16T00:00:00Z', '2026-11-16T07:36:00Z');
+    expect(defaultFilters(m)).toMatchObject({ from: '2026-11-16', to: '2026-11-16' });
   });
 
   it("is the fixture's whole window, as before", () => {
@@ -302,35 +307,85 @@ describe('the default period', () => {
   });
 });
 
-describe('a period reaching back before the default', () => {
+describe('the recent period', () => {
+  it.each([
+    ['2026-11-15T06:00:00Z', '2026-05-15', '2026-11-15'],
+    ['2026-11-16T07:36:00Z', '2026-05-16', '2026-11-16'],
+    // A day the month six back does not have is that month's last.
+    ['2026-08-31T06:00:00Z', '2026-02-28', '2026-08-31'],
+    ['2028-08-31T06:00:00Z', '2028-02-29', '2028-08-31'],
+    ['2028-02-29T06:00:00Z', '2027-08-29', '2028-02-29'],
+    ['2026-12-31T23:00:00Z', '2026-06-30', '2026-12-31'],
+  ])('fetched through %s, is the six calendar months from %s to %s', (fetched, from, to) => {
+    const m = metaWith('2011-03-04T00:00:00Z', fetched);
+    expect(recentFilters(m)).toEqual({ ...defaultFilters(m), from, to });
+  });
+
+  it('never starts before the window does', () => {
+    expect(recentFilters(metaWith('2026-09-01T00:00:00Z', '2026-11-15T06:00:00Z'))).toMatchObject({
+      from: '2026-09-01',
+      to: '2026-11-15',
+    });
+    expect(recentFilters(metaWith('2026-11-16T00:00:00Z', '2026-11-16T07:36:00Z'))).toMatchObject({
+      from: '2026-11-16',
+      to: '2026-11-16',
+    });
+  });
+
+  it("is the fixture's whole window, which is six months long", () => {
+    expect(recentFilters(meta)).toEqual(defaultFilters(meta));
+  });
+});
+
+describe('the address of a period on fifteen years of data', () => {
   const long = metaWith('2011-03-04T00:00:00Z', '2026-11-15T06:00:00Z');
+  const state = (hash: string) => stateFromHash(hash, long);
+  const period = (hash: string) => {
+    const { from, to } = state(hash).filters;
+    return { from, to };
+  };
+  const round = (hash: string) => hashFromState(state(hash), long);
 
   it('bounds the days by the window and the last fetch', () => {
     expect(dataDays(long)).toEqual({ first: '2011-03-04', last: '2026-11-15' });
   });
 
-  it('keeps a start between the window and the default', () => {
-    expect(stateFromHash('#/?from=2015-06-01', long).filters).toMatchObject({ from: '2015-06-01', to: '2026-11-15' });
-    expect(stateFromHash('#/?from=2011-03-04&to=2012-01-31', long).filters).toMatchObject({
-      from: '2011-03-04',
-      to: '2012-01-31',
-    });
+  it('names no period for the whole history, and reads an address naming none as the whole history', () => {
+    expect(period('#/')).toEqual({ from: '2011-03-04', to: '2026-11-15' });
+    expect(hashFromState(defaultState(long), long)).toBe('#/?target=main');
+    expect(round('#/?from=2011-03-04&to=2026-11-15')).toBe('#/?target=main');
   });
 
-  it('defaults a start before the window', () => {
-    expect(stateFromHash('#/?from=2011-03-03', long).filters).toMatchObject({ from: '2026-05-15' });
+  it('keeps an explicit six-month period through a round trip', () => {
+    expect(period('#/?from=2026-05-15&to=2026-11-15')).toEqual({ from: '2026-05-15', to: '2026-11-15' });
+    expect(round('#/?from=2026-05-15&to=2026-11-15')).toBe('#/?target=main&from=2026-05-15');
+    expect(period('#/?target=main&from=2026-05-15')).toEqual({ from: '2026-05-15', to: '2026-11-15' });
+    const recent = { ...defaultState(long), filters: recentFilters(long) };
+    expect(stateFromHash(hashFromState(recent, long), long)).toEqual(recent);
   });
 
-  it('writes a start before the default, and leaves the default out', () => {
-    const d = defaultState(long);
-    const back = { ...d, filters: { ...d.filters, from: '2011-03-04' } };
-    expect(hashFromState(back, long)).toBe('#/?target=main&from=2011-03-04');
-    expect(hashFromState(d, long)).toBe('#/?target=main');
+  it('keeps a start between the window and the last fetch', () => {
+    expect(period('#/?from=2015-06-01')).toEqual({ from: '2015-06-01', to: '2026-11-15' });
+    expect(period('#/?from=2011-03-04&to=2012-01-31')).toEqual({ from: '2011-03-04', to: '2012-01-31' });
+    expect(round('#/?from=2011-03-04&to=2012-01-31')).toBe('#/?target=main&from=2011-03-04&to=2012-01-31');
+  });
+
+  it('reads an end named alone, as the report wrote it when it opened on six months, from the start of the last six months', () => {
+    expect(period('#/?to=2026-08-31')).toEqual({ from: '2026-05-15', to: '2026-08-31' });
+    expect(round('#/?to=2026-08-31')).toBe('#/?target=main&from=2026-05-15&to=2026-08-31');
+    // An end before that start was read as the last six months, and still is.
+    expect(period('#/?to=2020-01-01')).toEqual({ from: '2026-05-15', to: '2026-11-15' });
+  });
+
+  it('defaults a start before the window, and a period that ends before it starts, to the whole history', () => {
+    expect(period('#/?from=2011-03-03')).toEqual({ from: '2011-03-04', to: '2026-11-15' });
+    expect(period('#/?from=2020-01-01&to=2019-01-01')).toEqual({ from: '2011-03-04', to: '2026-11-15' });
   });
 
   it('keeps a month bucket over a fifteen-year period', () => {
-    expect(stateFromHash('#/?from=2011-03-04&week=2011-03-01', long).week).toBe('2011-03-01');
-    expect(stateFromHash('#/?from=2011-03-04&week=2011-02-28', long).week).toBeNull();
+    expect(state('#/?week=2011-03-01').week).toBe('2011-03-01');
+    expect(state('#/?from=2011-03-04&week=2011-03-01').week).toBe('2011-03-01');
+    expect(state('#/?from=2011-03-04&week=2011-02-28').week).toBeNull();
   });
 });
 

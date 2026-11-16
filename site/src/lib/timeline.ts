@@ -6,7 +6,7 @@
 
 import { TIMELINE_COLOURS as C } from './colours';
 import { type Commit, type Dataset, PR_STATE, type TableYear, locateEvent, locateRow } from './data';
-import { DAY, baseNote, isDevelopmentBranch } from './filters';
+import { DAY, DISCLOSED, NOT_DISCLOSED, baseNote, isDevelopmentBranch } from './filters';
 import { formatCount, formatDays } from './format';
 import { type Handle, isBot, personHandle } from './handles';
 import { commitUrl, eventUrl, prUrl } from './links';
@@ -153,7 +153,7 @@ export interface PrTimeline {
   title: string;
   /** How many commits it has, from the PR's columns. */
   commitCount: number;
-  /** Its disclosure class, in words: "not disclosed", "disclosed in a trailer", … */
+  /** Its disclosure class, in words: "AI use not disclosed", "AI use disclosed in a trailer", … */
   disclosure: string;
   repo: string;
   url: string;
@@ -223,10 +223,10 @@ const BY_AUTHOR = ['comment_author', 'command_author', 'review_author'];
 const BY_BOT = ['bot_account', 'bot_review'];
 
 const DISCLOSURE_WORDS: Readonly<Record<string, string>> = {
-  none: 'not disclosed',
-  description: 'disclosed in the description',
-  coauthor: 'disclosed as a co-author',
-  trailer: 'disclosed in a trailer',
+  none: NOT_DISCLOSED,
+  description: `${DISCLOSED} in the description`,
+  coauthor: `${DISCLOSED} as a co-author`,
+  trailer: `${DISCLOSED} in a trailer`,
 };
 
 function commitNote(which: 'first' | 'last', commits: readonly Commit[], created: number): string {
@@ -376,7 +376,7 @@ export function prTimeline(data: Dataset, row: number, table: TableYear): PrTime
     number,
     title: table.titles[index] ?? '',
     commitCount: p.commits[row] as number,
-    disclosure: DISCLOSURE_WORDS[meta.disclosure[p.disclosure[row] as number] ?? ''] ?? 'disclosed',
+    disclosure: DISCLOSURE_WORDS[meta.disclosure[p.disclosure[row] as number] ?? ''] ?? DISCLOSED,
     repo: meta.repo,
     url,
     base,

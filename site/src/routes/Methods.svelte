@@ -22,13 +22,14 @@
   } from '../lib/methods/present';
   import { sections } from '../lib/methods/sections';
   import { getPage } from '../lib/page';
-  import { defaultFilters, sectionHash } from '../lib/state';
+  import { RECENT_MONTHS, recentFilters, sectionHash } from '../lib/state';
 
   const { meta, loader, selection } = getPage();
   const all = sections();
-  // The figures are over the report's default period, and need only the
-  // files of the PRs active in it.
-  const days = defaultFilters(meta);
+  // The figures are over the last six months, not the whole history the
+  // report opens on, so the page needs only the files of the PRs active in
+  // them.
+  const days = recentFilters(meta);
   const years = yearsFor(meta, periodRange(days).start);
 
   let data = $state<Loadable<DataFigures>>({ state: 'loading' });
@@ -125,8 +126,8 @@
     <h1 bind:this={heading} tabindex="-1">Methods</h1>
     <p>
       How each figure on this site is arrived at, and what it cannot show. The figures on this page are computed in
-      your browser from the same data as the report, as of {dayOf(meta.fetched_through)}, over the report's default
-      period, {days.from} to {days.to}.
+      your browser from the same data as the report, as of {dayOf(meta.fetched_through)}, over the last
+      {RECENT_MONTHS} months of it, {days.from} to {days.to}; the report itself opens on the whole window.
     </p>
     {#if failures.length > 0}
       <p class="notice" role="alert">
