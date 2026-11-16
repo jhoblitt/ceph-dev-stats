@@ -1,10 +1,11 @@
 // The figures the methods page gives about the data, computed from what the
 // site loads when the page is shown. Each is over the PRs open at some point
-// in the window, on every branch, split into main and the rest where the two
-// differ in kind; event counts take only the events inside the window.
+// in the period it is given, the report's default period on the page, on
+// every branch, split into main and the rest where the two differ in kind;
+// event counts take only the events inside that period.
 
 import { type Dataset, type Meta, type TableYear, locateEvent, locateRow } from '../data';
-import { DAY, periodRange } from '../filters';
+import { DAY, type Filters } from '../filters';
 import { isBot } from '../handles';
 import { openedIn, select } from '../select';
 import { defaultFilters } from '../state';
@@ -18,14 +19,27 @@ export interface Split {
   other: number;
 }
 
-/** The whole window, as the period filter's default gives it. */
-export function windowPeriod(meta: Meta): Period {
-  return periodRange(defaultFilters(meta));
+/** A period as the filters name it, by its first and last day. */
+export type Days = Pick<Filters, 'from' | 'to'>;
+
+/**
+ * The years whose files hold every PR active from `start` on: a year's file
+ * holds the PRs that finished in it, and the open ones are under the year
+ * the data runs to, so no PR active since `start` is in an earlier year's.
+ */
+export function yearsFrom(meta: Meta, start: number): number[] {
+  const first = new Date(start * 1000).getUTCFullYear();
+  return meta.years.filter((y) => y >= first);
 }
 
-/** The PRs the whole window selects on every branch: those open at some point in it. */
-export function baseRows(data: Dataset): Uint32Array {
-  return select(data, { ...defaultFilters(data.meta), target: 'all' });
+/** The PRs `days` selects on every branch: those open at some point in it. */
+export function baseRows(data: Dataset, days: Days): Uint32Array {
+  return select(data, { ...defaultFilters(data.meta), ...days, target: 'all' });
+}
+
+function openedDuring(data: Dataset, r: number, period: Period): boolean {
+  const created = data.prs.created[r] as number;
+  return created >= period.start && created < period.end;
 }
 
 function split(data: Dataset, rows: Uint32Array, keep: (r: number) => boolean): Split {
@@ -40,27 +54,16 @@ function split(data: Dataset, rows: Uint32Array, keep: (r: number) => boolean): 
 }
 
 export interface Coverage {
-  /** Every PR in the loaded data. */
-  records: number;
-  /** Open at some point in the window: `rows`. */
+  /** Open at some point in the period: `rows`. */
   active: number;
-  /** Of those, opened in the window. */
-  openedInWindow: number;
-  /** In the data but finished before the window started. */
-  closedBeforeWindow: number;
+  /** Of those, opened in the period; the rest were opened before it. */
+  openedInPeriod: number;
 }
 
-export function coverage(data: Dataset, rows: Uint32Array): Coverage {
-  const p = data.prs;
-  const start = windowPeriod(data.meta).start;
-  let openedInWindow = 0;
-  for (const r of rows) if (p.in_window[r] === 1) openedInWindow++;
-  let closedBeforeWindow = 0;
-  for (let r = 0; r < data.size; r++) {
-    const closed = p.closed[r] as number;
-    if (closed >= 0 && closed < start) closedBeforeWindow++;
-  }
-  return { records: data.size, active: rows.length, openedInWindow, closedBeforeWindow };
+export function coverage(data: Dataset, rows: Uint32Array, period: Period): Coverage {
+  let openedInPeriod = 0;
+  for (const r of rows) if (openedDuring(data, r, period)) openedInPeriod++;
+  return { active: rows.length, openedInPeriod };
 }
 
 /** Drafts never made ready, which have no response or approval time. */
@@ -79,14 +82,23 @@ export function noCommits(data: Dataset, rows: Uint32Array): Split {
   return split(data, rows, (r) => data.prs.commits[r] === 0);
 }
 
-export function standingUnknown(data: Dataset, rows: Uint32Array): { unknown: number; openedBefore: number } {
+/**
+ * PRs of unknown standing, and how many of them were opened before
+ * `windowStart`, where the records' count of an author's earlier PRs begins;
+ * the rest are by an author with no baseline.
+ */
+export function standingUnknown(
+  data: Dataset,
+  rows: Uint32Array,
+  windowStart: number,
+): { unknown: number; openedBefore: number } {
   const p = data.prs;
   let unknown = 0;
   let openedBefore = 0;
   for (const r of rows) {
     if ((p.standing[r] as number) >= 0) continue;
     unknown++;
-    if (p.in_window[r] !== 1) openedBefore++;
+    if ((p.created[r] as number) < windowStart) openedBefore++;
   }
   return { unknown, openedBefore };
 }
@@ -115,9 +127,9 @@ export function familyCounts(data: Dataset, rows: Uint32Array): FamilyCount[] {
   }));
 }
 
-/** Calls `fn` with each event of `rows` inside the window. */
-function forWindowEvents(data: Dataset, rows: Uint32Array, fn: (e: number) => void) {
-  const { start, end } = windowPeriod(data.meta);
+/** Calls `fn` with each event of `rows` inside the period. */
+function forPeriodEvents(data: Dataset, rows: Uint32Array, period: Period, fn: (e: number) => void) {
+  const { start, end } = period;
   const keep = new Uint8Array(data.size);
   for (const r of rows) keep[r] = 1;
   const ev = data.events;
@@ -140,12 +152,12 @@ export interface CommentCounts {
   botAccount: number;
 }
 
-export function commentCounts(data: Dataset, rows: Uint32Array): CommentCounts {
+export function commentCounts(data: Dataset, rows: Uint32Array, period: Period): CommentCounts {
   const kinds = data.meta.event_kinds;
   const [, , author, other, bot] = COMMENT_KINDS.map((k) => kinds.indexOf(k));
   const comment = new Set(COMMENT_KINDS.map((k) => kinds.indexOf(k)).filter((k) => k !== -1));
   const out = { comments: 0, commands: 0, commandsByAuthor: 0, botAccount: 0 };
-  forWindowEvents(data, rows, (e) => {
+  forPeriodEvents(data, rows, period, (e) => {
     const k = data.events.kind[e] as number;
     if (!comment.has(k)) return;
     out.comments++;
@@ -190,12 +202,17 @@ export interface EventRefs {
   missing: number;
 }
 
-/** Each kind of event in the window, in meta's order, with how many have no ref; kinds with no event are left out. */
-export function eventRefs(data: Dataset, tables: ReadonlyMap<number, TableYear>, rows: Uint32Array): EventRefs[] {
+/** Each kind of event in the period, in meta's order, with how many have no ref; kinds with no event are left out. */
+export function eventRefs(
+  data: Dataset,
+  tables: ReadonlyMap<number, TableYear>,
+  rows: Uint32Array,
+  period: Period,
+): EventRefs[] {
   const kinds = data.meta.event_kinds;
   const events = new Array<number>(kinds.length).fill(0);
   const missing = new Array<number>(kinds.length).fill(0);
-  forWindowEvents(data, rows, (e) => {
+  forPeriodEvents(data, rows, period, (e) => {
     const k = data.events.kind[e] as number;
     const { year, index } = locateEvent(data, e);
     events[k] = (events[k] as number) + 1;
@@ -204,9 +221,9 @@ export function eventRefs(data: Dataset, tables: ReadonlyMap<number, TableYear>,
   return kinds.flatMap((kind, k) => ((events[k] as number) > 0 ? [{ kind, events: events[k] as number, missing: missing[k] as number }] : []));
 }
 
-/** The report's default view: PRs on main open at some point in the window. */
-export function defaultRows(data: Dataset): Uint32Array {
-  return select(data, defaultFilters(data.meta));
+/** The report's default view over `days`: PRs on main open at some point in it. */
+export function defaultRows(data: Dataset, days: Days): Uint32Array {
+  return select(data, { ...defaultFilters(data.meta), ...days });
 }
 
 export interface PeopleFigures {
@@ -224,9 +241,8 @@ export interface PeopleFigures {
   largestShare: number | null;
 }
 
-/** What the People tables show for `rows` over the whole window, computed as they compute it. */
-export function peopleFigures(data: Dataset, rows: Uint32Array): PeopleFigures {
-  const period = windowPeriod(data.meta);
+/** What the People tables show for `rows` over `period`, computed as they compute it. */
+export function peopleFigures(data: Dataset, rows: Uint32Array, period: Period): PeopleFigures {
   const opened = openedIn(data, rows, period);
   const authors = authorRows(data, opened);
   const reviewers = reviewerRows(data, rows, period);
@@ -255,8 +271,8 @@ export const TOP_AUTHORS = 3;
 
 export interface GroupProfile {
   prs: number;
-  /** The share opened in the window; the rest were opened before it. */
-  openedInWindow: number | null;
+  /** The share opened in the period; the rest were opened before it. */
+  openedInPeriod: number | null;
   /** Lines added plus deleted, a nearest-rank median. */
   medianLines: number | null;
   /** Days from opening to the last fetch, a nearest-rank median. */
@@ -267,18 +283,18 @@ export interface GroupProfile {
   kinds: Record<string, number> | null;
 }
 
-function profile(data: Dataset, rows: Uint32Array): GroupProfile {
+function profile(data: Dataset, rows: Uint32Array, period: Period): GroupProfile {
   const n = rows.length;
-  if (n === 0) return { prs: 0, openedInWindow: null, medianLines: null, medianAgeDays: null, topAuthors: null, kinds: null };
+  if (n === 0) return { prs: 0, openedInPeriod: null, medianLines: null, medianAgeDays: null, topAuthors: null, kinds: null };
   const p = data.prs;
   const meta = data.meta;
-  let inWindow = 0;
+  let inPeriod = 0;
   const lines = new Float64Array(n);
   const ages = new Float64Array(n);
   const byAuthor = new Map<number, number>();
   const kinds: Record<string, number> = Object.fromEntries([...meta.kinds.map((k) => k.id), 'unknown'].map((k) => [k, 0]));
   rows.forEach((r, i) => {
-    if (p.in_window[r] === 1) inWindow++;
+    if (openedDuring(data, r, period)) inPeriod++;
     lines[i] = (p.additions[r] as number) + (p.deletions[r] as number);
     ages[i] = (meta.fetched_through - (p.created[r] as number)) / DAY;
     const author = p.author[r] as number;
@@ -289,7 +305,7 @@ function profile(data: Dataset, rows: Uint32Array): GroupProfile {
   const top = [...byAuthor.values()].sort((a, b) => b - a).slice(0, TOP_AUTHORS);
   return {
     prs: n,
-    openedInWindow: inWindow / n,
+    openedInPeriod: inPeriod / n,
     medianLines: nearestRank(lines.sort(), 0.5),
     medianAgeDays: nearestRank(ages.sort(), 0.5),
     topAuthors: top.reduce((a, b) => a + b, 0) / n,
@@ -298,11 +314,15 @@ function profile(data: Dataset, rows: Uint32Array): GroupProfile {
 }
 
 /** The PRs that do not disclose and those that do, each described by what differs between them besides disclosure. */
-export function disclosureGroups(data: Dataset, rows: Uint32Array): { notDisclosed: GroupProfile; disclosed: GroupProfile } {
+export function disclosureGroups(
+  data: Dataset,
+  rows: Uint32Array,
+  period: Period,
+): { notDisclosed: GroupProfile; disclosed: GroupProfile } {
   const none = data.meta.disclosure.indexOf('none');
   return {
-    notDisclosed: profile(data, rows.filter((r) => data.prs.disclosure[r] === none)),
-    disclosed: profile(data, rows.filter((r) => data.prs.disclosure[r] !== none)),
+    notDisclosed: profile(data, rows.filter((r) => data.prs.disclosure[r] === none), period),
+    disclosed: profile(data, rows.filter((r) => data.prs.disclosure[r] !== none), period),
   };
 }
 

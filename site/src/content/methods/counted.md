@@ -2,7 +2,7 @@
 
 The data holds the pull requests of [ceph/ceph](https://github.com/ceph/ceph) that were open at some point in a window that starts on {{windowStart}} and runs to {{asOf}}, the day the last complete fetch from GitHub began. A pull request opened before the window is in it when it was still open in the window.
 
-On the data as of {{asOf}}, {{prs.active}} pull requests were open at some point in the window: {{prs.openedInWindow}} opened in it and {{prs.openedBeforeWindow}} before it.
+On the data as of {{asOf}}, {{prs.active}} pull requests, on every branch, were open at some point in the report's default period, {{periodStart}} to {{asOf}}: {{prs.openedInPeriod}} opened in it and {{prs.openedBeforePeriod}} before it.
 
 ## How the pull requests are found
 
@@ -10,7 +10,7 @@ Each fetch lists pull requests by the time GitHub last updated them: by default 
 
 This relies on GitHub's last-updated time: that every kind of change to a pull request moves it has not been verified, and a full fetch back to the start of the window is the fallback. The data is refreshed by hand, not on a schedule, so it can be some weeks old; the date above says how old.
 
-The data also holds {{prs.closedBeforeWindow}} pull requests that GitHub updated during the window although they were finished before it started. No period on this site selects them.
+A pull request that finished before {{windowStart}} can be among the records too, when GitHub updated it after that day. No period on this site starts before {{windowStart}}, so none of them is counted.
 
 ## What a filter selects
 

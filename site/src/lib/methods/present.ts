@@ -4,15 +4,17 @@
 // text, never markup.
 
 import type { Dataset, Meta, TableYear } from '../data';
-import { dayOf } from '../filters';
+import { dayOf, periodRange } from '../filters';
 import { formatCount, formatDays, formatShare } from '../format';
 import { HORIZONS, MIN_FOLLOWED } from '../llm';
 import { openedIn } from '../select';
 import { COMPARE_WEEKS } from '../stats/capacity';
 import { MIN_PRS } from '../stats/people';
+import { defaultFilters } from '../state';
 import {
   type CommentCounts,
   type Coverage,
+  type Days,
   type EventRefs,
   type FamilyCount,
   type GroupProfile,
@@ -36,11 +38,12 @@ import {
   neverReady,
   peopleFigures,
   standingUnknown,
-  windowPeriod,
 } from './figures';
 
 /** The figures computed from the PR and event files. */
 export interface DataFigures {
+  /** The period every figure is over. */
+  period: Days;
   coverage: Coverage;
   neverReady: Split;
   firstCommitUnknown: Split;
@@ -54,12 +57,12 @@ export interface DataFigures {
   people: PeopleFigures;
   /**
    * The PRs the LLM-use section compares on the report's default view, those
-   * on main opened in the window, split by disclosure.
+   * on main opened in the period, split by disclosure.
    */
   groups: { notDisclosed: GroupProfile; disclosed: GroupProfile };
   /** How many PRs that comparison holds. */
   compared: number;
-  /** The whole default view split by disclosure, for the share of each group opened in the window. */
+  /** The whole default view split by disclosure, for the share of each group opened in the period. */
   viewGroups: { notDisclosed: GroupProfile; disclosed: GroupProfile };
   /** How many PRs the default view holds. */
   defaultView: number;
@@ -71,31 +74,35 @@ export interface TableFigures {
   eventRefs: EventRefs[];
 }
 
-export function dataFigures(data: Dataset): DataFigures {
-  const rows = baseRows(data);
-  const view = defaultRows(data);
-  const compared = openedIn(data, view, windowPeriod(data.meta));
+/** The figures over `days`, which the page gives as the report's default period. */
+export function dataFigures(data: Dataset, days: Days): DataFigures {
+  const period = periodRange(days);
+  const rows = baseRows(data, days);
+  const view = defaultRows(data, days);
+  const compared = openedIn(data, view, period);
   return {
-    coverage: coverage(data, rows),
+    period: { from: days.from, to: days.to },
+    coverage: coverage(data, rows, period),
     neverReady: neverReady(data, rows),
     firstCommitUnknown: firstCommitUnknown(data, rows),
     noCommits: noCommits(data, rows),
-    standingUnknown: standingUnknown(data, rows),
+    standingUnknown: standingUnknown(data, rows, data.meta.window_start),
     kindUnknown: kindUnknown(data, rows),
     disclosure: disclosureForms(data, rows),
     families: familyCounts(data, rows),
-    comments: commentCounts(data, rows),
-    people: peopleFigures(data, view),
-    groups: disclosureGroups(data, compared),
+    comments: commentCounts(data, rows, period),
+    people: peopleFigures(data, view, period),
+    groups: disclosureGroups(data, compared, period),
     compared: compared.length,
-    viewGroups: disclosureGroups(data, view),
+    viewGroups: disclosureGroups(data, view, period),
     defaultView: view.length,
   };
 }
 
-export function tableFigures(data: Dataset, tables: ReadonlyMap<number, TableYear>): TableFigures {
-  const rows = baseRows(data);
-  return { kindSources: kindSources(data, tables, rows), eventRefs: eventRefs(data, tables, rows) };
+export function tableFigures(data: Dataset, tables: ReadonlyMap<number, TableYear>, days: Days): TableFigures {
+  const period = periodRange(days);
+  const rows = baseRows(data, days);
+  return { kindSources: kindSources(data, tables, rows), eventRefs: eventRefs(data, tables, rows, period) };
 }
 
 /** Something the page loads and computes once it is shown. */
@@ -128,11 +135,10 @@ const listed = (items: readonly string[]) =>
 export const INLINE_FIGURES: Record<string, Figure<string>> = {
   asOf: { needs: 'meta', show: (m) => dayOf(m.fetched_through) },
   windowStart: { needs: 'meta', show: (m) => dayOf(m.window_start) },
-  'prs.records': count((d) => d.coverage.records),
+  periodStart: { needs: 'meta', show: (m) => defaultFilters(m).from },
   'prs.active': count((d) => d.coverage.active),
-  'prs.openedInWindow': count((d) => d.coverage.openedInWindow),
-  'prs.openedBeforeWindow': count((d) => d.coverage.active - d.coverage.openedInWindow),
-  'prs.closedBeforeWindow': count((d) => d.coverage.closedBeforeWindow),
+  'prs.openedInPeriod': count((d) => d.coverage.openedInPeriod),
+  'prs.openedBeforePeriod': count((d) => d.coverage.active - d.coverage.openedInPeriod),
   'prs.neverReady': count((d) => total(d.neverReady)),
   'commits.firstUnknown': count((d) => total(d.firstCommitUnknown)),
   'commits.none': count((d) => total(d.noCommits)),
@@ -162,13 +168,13 @@ export const INLINE_FIGURES: Record<string, Figure<string>> = {
   'const.topAuthors': constant(formatCount(TOP_AUTHORS)),
   'view.prs': count((d) => d.defaultView),
   'view.openedBefore': count((d) => d.defaultView - d.compared),
-  'view.notDisclosedInWindow': {
+  'view.notDisclosedInPeriod': {
     needs: 'data',
-    show: (_m, d) => (d.viewGroups.notDisclosed.openedInWindow === null ? '–' : formatShare(d.viewGroups.notDisclosed.openedInWindow)),
+    show: (_m, d) => (d.viewGroups.notDisclosed.openedInPeriod === null ? '–' : formatShare(d.viewGroups.notDisclosed.openedInPeriod)),
   },
-  'view.disclosedInWindow': {
+  'view.disclosedInPeriod': {
     needs: 'data',
-    show: (_m, d) => (d.viewGroups.disclosed.openedInWindow === null ? '–' : formatShare(d.viewGroups.disclosed.openedInWindow)),
+    show: (_m, d) => (d.viewGroups.disclosed.openedInPeriod === null ? '–' : formatShare(d.viewGroups.disclosed.openedInPeriod)),
   },
   'const.compareWeeks': constant(formatCount(COMPARE_WEEKS)),
   'const.compareNeeded': constant(formatCount(2 * COMPARE_WEEKS)),
@@ -192,8 +198,10 @@ export interface TableModel {
 
 const SPLIT_HEAD = ['main', 'other branches', 'all'];
 const splitCells = (s: Split) => [formatCount(s.main), formatCount(s.other), formatCount(total(s))];
+/** The period the figures are over, as the captions name it. */
+const periodOf = (d: DataFigures) => `the default period, ${d.period.from} to ${d.period.to}`;
 const ofActive = (m: Meta, d: DataFigures, what: string, note?: string) =>
-  `${what}, of the ${formatCount(d.coverage.active)} pull requests open at some point in the window, as of ${dayOf(m.fetched_through)}${note === undefined ? '' : `. ${note}`}`;
+  `${what}, of the ${formatCount(d.coverage.active)} pull requests open at some point in ${periodOf(d)}, as of ${dayOf(m.fetched_through)}${note === undefined ? '' : `. ${note}`}`;
 
 const KIND_SOURCE_LABELS: Record<KindSourceRow, string> = {
   checklist: 'the PR’s checklist',
@@ -270,7 +278,7 @@ export const TABLE_FIGURES: Record<string, Figure<TableModel>> = {
       const pct = (v: number | null | undefined) => (v === null || v === undefined ? '–' : formatShare(v));
       const kinds = [...m.kinds.map((k) => ({ id: k.id, name: k.name })), { id: 'unknown', name: 'Unknown' }];
       return {
-        caption: `The ${formatCount(d.compared)} pull requests on main opened in the window, those the LLM-use section compares on the report's default view, by disclosure, as of ${dayOf(m.fetched_through)}`,
+        caption: `The ${formatCount(d.compared)} pull requests on main opened in ${periodOf(d)}, those the LLM-use section compares on the report's default view, by disclosure, as of ${dayOf(m.fetched_through)}`,
         head: ['', 'not disclosed', 'disclosed'],
         rows: [
           ['pull requests', ...cells((g) => formatCount(g.prs))],
@@ -285,7 +293,7 @@ export const TABLE_FIGURES: Record<string, Figure<TableModel>> = {
   'table.eventRefs': {
     needs: 'tables',
     show: (m, d, t) => ({
-      caption: `Events in the window on the ${formatCount(d.coverage.active)} pull requests open at some point in it, and those with no address of their own, as of ${dayOf(m.fetched_through)}`,
+      caption: `Events in ${periodOf(d)}, on the ${formatCount(d.coverage.active)} pull requests open at some point in it, and those with no address of their own, as of ${dayOf(m.fetched_through)}`,
       head: ['event', 'events', 'no address'],
       rows: t.eventRefs.map((r) => [
         EVENT_LABELS[r.kind] ?? r.kind,

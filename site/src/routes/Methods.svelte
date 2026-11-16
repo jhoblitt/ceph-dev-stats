@@ -22,10 +22,12 @@
   } from '../lib/methods/present';
   import { sections } from '../lib/methods/sections';
   import { getPage } from '../lib/page';
-  import { sectionHash } from '../lib/state';
+  import { defaultFilters, sectionHash } from '../lib/state';
 
   const { meta, loader, selection } = getPage();
   const all = sections();
+  // The figures are over the report's default period.
+  const days = defaultFilters(meta);
 
   let data = $state<Loadable<DataFigures>>({ state: 'loading' });
   let tables = $state<Loadable<TableFigures>>({ state: 'loading' });
@@ -50,10 +52,10 @@
         tables = { state: 'error', message };
         return;
       }
-      data = { state: 'ready', value: dataFigures(loaded.dataset) };
+      data = { state: 'ready', value: dataFigures(loaded.dataset, days) };
       try {
         const years = await Promise.all(meta.years.map((y) => loader.table(y).then((t): [number, TableYear] => [y, t])));
-        if (live) tables = { state: 'ready', value: tableFigures(loaded.dataset, new Map(years)) };
+        if (live) tables = { state: 'ready', value: tableFigures(loaded.dataset, new Map(years), days) };
       } catch (err) {
         if (live) tables = { state: 'error', message: describe(err) };
       }

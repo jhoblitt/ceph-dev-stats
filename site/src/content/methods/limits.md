@@ -10,7 +10,7 @@ There is no period in the data from before LLM tools were common to compare with
 
 An author's standing is how many pull requests they had opened in ceph/ceph before the one counted. It is counted from a baseline, GitHub's own count of the author's pull requests opened before the window started, plus the author's pull requests opened in the window before this one. So it is unknown for a pull request opened before the window, and for an author with no baseline: accounts GitHub types as bots and deleted accounts get none. The standing filter's "unknown" band holds these.
 
-On the data as of {{asOf}}, standing is unknown for {{standing.unknown}} of the {{prs.active}} pull requests open at some point in the window: {{standing.unknownBeforeWindow}} opened before it, and {{standing.unknownInWindow}} opened in it by an author with no baseline.
+On the data as of {{asOf}}, standing is unknown for {{standing.unknown}} of the {{prs.active}} pull requests open at some point in the default period: {{standing.unknownBeforeWindow}} opened before {{windowStart}}, and {{standing.unknownInWindow}} opened since then by an author with no baseline.
 
 ## Small groups and recent weeks
 

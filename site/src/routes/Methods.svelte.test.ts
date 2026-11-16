@@ -157,7 +157,9 @@ describe('the methods page', () => {
     await methods();
     await waitFor(() => expect(screen.queryByRole('status')).toBeNull());
     const text = article().textContent ?? '';
-    expect(text).toContain('On the data as of 2026-11-15, 12 pull requests were open at some point in the window: 9 opened in it and 3 before it.');
+    expect(text).toContain(
+      "On the data as of 2026-11-15, 12 pull requests, on every branch, were open at some point in the report's default period, 2026-05-15 to 2026-11-15: 9 opened in it and 3 before it.",
+    );
     expect(text).toContain('1 of the 12 pull requests open at some point in the window are of unknown kind (8.3%)');
     expect(text).toContain('3 (27%) were bot commands, 2 of them by the pull request');
     expect(text).toContain('0 of the 7 force-pushes in the window (0%) and 0 of the 6 merges in the window have no commit to link to');
@@ -174,7 +176,7 @@ describe('the methods page', () => {
     await methods({ 'table-2026.json': undefined });
     await waitFor(() => expect(screen.getByRole('alert').textContent).toMatch(/table-2026\.json: HTTP 404/));
     const text = article().textContent ?? '';
-    expect(text).toContain('12 pull requests were open at some point in the window');
+    expect(text).toContain('12 pull requests, on every branch, were open at some point in the report');
     expect(text).toContain('(not available) of the (not available) force-pushes');
     expect(text).toContain('This table could not be computed');
     for (const s of sections()) expect(document.getElementById(s.id)).not.toBeNull();
@@ -183,7 +185,7 @@ describe('the methods page', () => {
   it('keeps the prose when a year of data fails', async () => {
     await methods({ 'events-2026.json': undefined });
     await waitFor(() => expect(screen.getByRole('alert').textContent).toMatch(/events-2026\.json: HTTP 404/));
-    expect(article().textContent).toContain('(not available) pull requests were open at some point in the window');
+    expect(article().textContent).toContain('(not available) pull requests, on every branch, were open at some point in the report');
     expect(article().textContent).toContain("Ceph's rule asking for an Assisted-by trailer was a draft on 2026-10-12.");
   });
 });

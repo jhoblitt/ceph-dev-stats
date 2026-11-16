@@ -3,7 +3,7 @@ import events2026 from '../__fixtures__/data/events-2026.json';
 import prs2026 from '../__fixtures__/data/prs-2026.json';
 import table2026 from '../__fixtures__/data/table-2026.json';
 import { parseTable, parseYear } from '../data';
-import { META, fixture } from '../stats/testing';
+import { META, at, dataset, fixture } from '../stats/testing';
 import {
   type DataFigures,
   INLINE_FIGURES,
@@ -17,11 +17,12 @@ import {
 } from './present';
 
 const data = fixture();
+const DAYS = { from: '2026-05-15', to: '2026-11-15' };
 const tables = new Map([
   [2026, parseTable(table2026, 'table-2026.json', parseYear(2026, prs2026, events2026, META), META)],
 ]);
-const d: Loadable<DataFigures> = { state: 'ready', value: dataFigures(data) };
-const t: Loadable<TableFigures> = { state: 'ready', value: tableFigures(data, tables) };
+const d: Loadable<DataFigures> = { state: 'ready', value: dataFigures(data, DAYS) };
+const t: Loadable<TableFigures> = { state: 'ready', value: tableFigures(data, tables, DAYS) };
 const loading = { state: 'loading' } as const;
 const failed = { state: 'error', message: 'prs-2026.json: HTTP 404' } as const;
 
@@ -35,11 +36,11 @@ describe('inline figures on the fixture', () => {
   it.each([
     ['asOf', '2026-11-15'],
     ['windowStart', '2026-05-15'],
-    ['prs.records', '12'],
+    // The default period's first day, which is the window's in the fixture.
+    ['periodStart', '2026-05-15'],
     ['prs.active', '12'],
-    ['prs.openedInWindow', '9'],
-    ['prs.openedBeforeWindow', '3'],
-    ['prs.closedBeforeWindow', '0'],
+    ['prs.openedInPeriod', '9'],
+    ['prs.openedBeforePeriod', '3'],
     ['prs.neverReady', '1'],
     ['commits.firstUnknown', '1'],
     ['commits.none', '0'],
@@ -70,8 +71,8 @@ describe('inline figures on the fixture', () => {
     ['view.prs', '9'],
     // Rows 0 and 2, both not disclosing.
     ['view.openedBefore', '2'],
-    ['view.notDisclosedInWindow', '67%'],
-    ['view.disclosedInWindow', '100%'],
+    ['view.notDisclosedInPeriod', '67%'],
+    ['view.disclosedInPeriod', '100%'],
     ['const.compareWeeks', '4'],
     ['const.compareNeeded', '8'],
     ['people.authors', '6'],
@@ -86,7 +87,54 @@ describe('inline figures on the fixture', () => {
   });
 
   it('has a spec above for every inline figure', () => {
-    expect(Object.keys(INLINE_FIGURES).length).toBe(43);
+    expect(Object.keys(INLINE_FIGURES).length).toBe(42);
+  });
+});
+
+describe('figures over a period shorter than the window', () => {
+  // The window starts two years before the period, as the full history's
+  // does before its default period: #1 was opened in the window but before
+  // the period and is still open, #2 was opened in the period, #3 finished
+  // before the period, and #4, of unknown standing, was opened before the
+  // window.
+  const meta = { window_start: at('2024-05-15T00:00:00Z') };
+  const early = dataset(
+    [
+      { number: 1, created: at('2025-01-01T00:00:00Z'), standing: -1 },
+      { number: 2, created: at('2026-06-01T00:00:00Z'), standing: 3 },
+      { number: 3, created: at('2025-01-01T00:00:00Z'), closed: at('2025-02-01T00:00:00Z'), state: 1 },
+      { number: 4, created: at('2024-01-01T00:00:00Z'), in_window: 0, standing: -1 },
+    ],
+    [],
+    meta,
+  );
+  const f: Loadable<DataFigures> = { state: 'ready', value: dataFigures(early, DAYS) };
+  const show = (name: string) => {
+    const v = inlineView(name, early.meta, f, loading);
+    if (v.state !== 'ready') throw new Error(`${name} is ${v.state}`);
+    return v.value;
+  };
+
+  it.each([
+    ['prs.active', '3'],
+    ['prs.openedInPeriod', '1'],
+    ['prs.openedBeforePeriod', '2'],
+    ['standing.unknown', '2'],
+    ['standing.unknownBeforeWindow', '1'],
+    ['standing.unknownInWindow', '1'],
+    ['view.prs', '3'],
+    ['view.openedBefore', '2'],
+    ['view.notDisclosedInPeriod', '33%'],
+  ])('%s is %s', (name, expected) => {
+    expect(show(name)).toBe(expected);
+  });
+
+  it('names the period it was given in its captions', () => {
+    const v = tableView('table.disclosureForms', early.meta, f, loading);
+    if (v.state !== 'ready') throw new Error(`the table is ${v.state}`);
+    expect(v.value.caption).toBe(
+      'Pull requests by the strongest form of disclosure they make, of the 3 pull requests open at some point in the default period, 2026-05-15 to 2026-11-15, as of 2026-11-15',
+    );
   });
 });
 
@@ -134,7 +182,7 @@ describe('table figures on the fixture', () => {
   it('says where each kind came from, by target', () => {
     expect(model('table.kindSources')).toEqual({
       caption:
-        'Where each pull request’s kind came from, of the 12 pull requests open at some point in the window, as of 2026-11-15',
+        'Where each pull request’s kind came from, of the 12 pull requests open at some point in the default period, 2026-05-15 to 2026-11-15, as of 2026-11-15',
       head: ['decided by', 'main', 'other branches', 'all'],
       rows: [
         ['the PR’s checklist', '4', '0', '4'],
@@ -157,7 +205,7 @@ describe('table figures on the fixture', () => {
 
   it('lists the tool families in meta order', () => {
     expect(model('table.families').caption).toBe(
-      'Pull requests naming each tool family, of the 12 pull requests open at some point in the window, as of 2026-11-15. A pull request naming two families counts under both.',
+      'Pull requests naming each tool family, of the 12 pull requests open at some point in the default period, 2026-05-15 to 2026-11-15, as of 2026-11-15. A pull request naming two families counts under both.',
     );
     expect(model('table.families').rows).toEqual([
       ['Claude', '2', '0', '2'],
@@ -167,10 +215,10 @@ describe('table figures on the fixture', () => {
   });
 
   it('sets side by side the two groups the LLM-use section compares on the default view', () => {
-    // Rows 3, 4, 5, 6, 8, 9 and 10: main, opened in the window.
+    // Rows 3, 4, 5, 6, 8, 9 and 10: main, opened in the period.
     expect(model('table.disclosureGroups')).toEqual({
       caption:
-        "The 7 pull requests on main opened in the window, those the LLM-use section compares on the report's default view, by disclosure, as of 2026-11-15",
+        "The 7 pull requests on main opened in the default period, 2026-05-15 to 2026-11-15, those the LLM-use section compares on the report's default view, by disclosure, as of 2026-11-15",
       head: ['', 'not disclosed', 'disclosed'],
       rows: [
         ['pull requests', '4', '3'],
@@ -188,6 +236,9 @@ describe('table figures on the fixture', () => {
   });
 
   it('counts the events with no address of their own', () => {
+    expect(model('table.eventRefs').caption).toBe(
+      'Events in the default period, 2026-05-15 to 2026-11-15, on the 12 pull requests open at some point in it, and those with no address of their own, as of 2026-11-15',
+    );
     const rows = model('table.eventRefs').rows;
     expect(rows).toContainEqual(['reopened', '1', '1 (100%)']);
     expect(rows).toContainEqual(['a force-push', '7', '0 (0%)']);
