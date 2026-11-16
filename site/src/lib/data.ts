@@ -93,11 +93,46 @@ export interface YearData {
   events: EventColumns;
 }
 
-/** Where a year's rows sit in a dataset. */
+/** Where a year's rows and events sit in a dataset. */
 export interface YearSpan {
   year: number;
   first: number;
   count: number;
+  firstEvent: number;
+  eventCount: number;
+}
+
+/** A year and an index into one of its files: a row of its table, or an entry of its `refs`. */
+export interface YearIndex {
+  year: number;
+  index: number;
+}
+
+function locate(data: Dataset, what: 'row' | 'event', i: number): YearIndex {
+  for (const s of data.years) {
+    const [first, count] = what === 'row' ? [s.first, s.count] : [s.firstEvent, s.eventCount];
+    if (Number.isInteger(i) && i >= first && i < first + count) return { year: s.year, index: i - first };
+  }
+  const total = what === 'row' ? data.size : data.events.pr.length;
+  throw new RangeError(`${what} ${i} is not in the loaded data, which has ${total} ${what}s`);
+}
+
+/**
+ * The year whose table holds a dataset row, and the row's index there:
+ * `table(year).titles[index]`, `.commits[index]` and so on. Throws a
+ * RangeError for a row outside the loaded data.
+ */
+export function locateRow(data: Dataset, row: number): YearIndex {
+  return locate(data, 'row', row);
+}
+
+/**
+ * The year whose table holds a dataset event's ref, and its index there:
+ * `table(year).refs[index]`. Throws a RangeError for an event outside the
+ * loaded data.
+ */
+export function locateEvent(data: Dataset, event: number): YearIndex {
+  return locate(data, 'event', event);
 }
 
 /** The loaded years appended in order, so a row id is global across them. */
@@ -421,9 +456,12 @@ function concat<Spec extends Record<string, ColumnKind>>(spec: Spec, parts: read
 export function combine(meta: Meta, years: readonly YearData[]): Dataset {
   const spans: YearSpan[] = [];
   let size = 0;
+  let eventSize = 0;
   for (const y of years) {
-    spans.push({ year: y.year, first: size, count: y.prs.number.length });
+    const eventCount = y.events.pr.length;
+    spans.push({ year: y.year, first: size, count: y.prs.number.length, firstEvent: eventSize, eventCount });
     size += y.prs.number.length;
+    eventSize += eventCount;
   }
   const events = years.map((y, i) => {
     const first = spans[i]?.first ?? 0;

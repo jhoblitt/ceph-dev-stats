@@ -87,7 +87,7 @@ export function dataset(rows: readonly Row[], events: readonly Event[] = [], met
       sub: Int32Array.from(sorted, (e) => e.sub ?? -1),
       actor: Int32Array.from(sorted, (e) => e.actor ?? -1),
     },
-    years: [{ year: 2026, first: 0, count: rows.length }],
+    years: [{ year: 2026, first: 0, count: rows.length, firstEvent: 0, eventCount: sorted.length }],
   };
 }
 

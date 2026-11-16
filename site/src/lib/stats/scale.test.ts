@@ -74,7 +74,7 @@ function synthetic(): Dataset {
     size: ROWS,
     prs,
     events: { pr, at, kind, sub: new Int32Array(n).fill(-1), actor },
-    years: [{ year: 2026, first: 0, count: ROWS }],
+    years: [{ year: 2026, first: 0, count: ROWS, firstEvent: 0, eventCount: n }],
   };
 }
 

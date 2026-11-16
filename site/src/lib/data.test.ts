@@ -12,6 +12,8 @@ import {
   DataLoader,
   combine,
   loadMeta,
+  locateEvent,
+  locateRow,
   parseEvents,
   parseMeta,
   parsePrs,
@@ -249,8 +251,8 @@ describe('combine', () => {
     expect(data.size).toBe(12);
     expect([...data.prs.number]).toEqual([...prs2025.number, ...prs2026.number]);
     expect(data.years).toEqual([
-      { year: 2025, first: 0, count: 2 },
-      { year: 2026, first: 2, count: 10 },
+      { year: 2025, first: 0, count: 2, firstEvent: 0, eventCount: 7 },
+      { year: 2026, first: 2, count: 10, firstEvent: 7, eventCount: 35 },
     ]);
   });
 
@@ -266,6 +268,61 @@ describe('combine', () => {
     expect(empty.prs.number.length).toBe(0);
     expect(empty.events.pr.length).toBe(0);
     expect(empty.prs.families).toEqual([]);
+  });
+});
+
+describe('locateRow and locateEvent', () => {
+  // 2025 holds rows 0–1 and events 0–6; 2026 rows 2–11 and events 7–41.
+  const y2025 = parseYear(2025, prs2025, events2025, meta);
+  const y2026 = parseYear(2026, prs2026, events2026, meta);
+  const data = combine(meta, [y2025, y2026]);
+
+  it.each([
+    [0, { year: 2025, index: 0 }],
+    [1, { year: 2025, index: 1 }],
+    [2, { year: 2026, index: 0 }],
+    [11, { year: 2026, index: 9 }],
+  ])('puts row %i in its year table', (row, expected) => {
+    expect(locateRow(data, row)).toEqual(expected);
+  });
+
+  it.each([
+    [0, { year: 2025, index: 0 }],
+    [6, { year: 2025, index: 6 }],
+    [7, { year: 2026, index: 0 }],
+    [41, { year: 2026, index: 34 }],
+  ])('puts event %i in its year refs', (event, expected) => {
+    expect(locateEvent(data, event)).toEqual(expected);
+  });
+
+  it('finds the table entries of a row and of an event', () => {
+    const table = parseTable(table2026, 'table-2026.json', y2026, meta);
+    // Row 3 is #66500; event 14 is its merge, the eighth event of 2026.
+    expect(data.prs.number[3]).toBe(66500);
+    expect(table.titles[locateRow(data, 3).index]).toBe('rgw: check the bucket owner before a copy');
+    expect(data.events.pr[14]).toBe(3);
+    expect(meta.event_kinds[data.events.kind[14] as number]).toBe('merged');
+    expect(table.refs[locateEvent(data, 14).index]).toMatch(SHA);
+  });
+
+  it('counts from the first loaded year when an earlier one is missing', () => {
+    const only2026 = combine(meta, [y2026]);
+    expect(locateRow(only2026, 0)).toEqual({ year: 2026, index: 0 });
+    expect(locateEvent(only2026, 34)).toEqual({ year: 2026, index: 34 });
+  });
+
+  it.each([-1, 12, 1.5, Number.NaN])('throws for row %d, outside the loaded data, naming it', (row) => {
+    expect(() => locateRow(data, row)).toThrow(RangeError);
+    expect(() => locateRow(data, row)).toThrow(`row ${row} `);
+  });
+
+  it.each([-1, 42, 2.5])('throws for event %d, outside the loaded data, naming it', (event) => {
+    expect(() => locateEvent(data, event)).toThrow(RangeError);
+    expect(() => locateEvent(data, event)).toThrow(`event ${event} `);
+  });
+
+  it('throws for any row of an empty dataset', () => {
+    expect(() => locateRow(combine(meta, []), 0)).toThrow(/row 0 /);
   });
 });
 
