@@ -24,7 +24,8 @@ records with them.
 
 It fails, listing every problem at once, on a table that does not parse,
 holds an unknown key, an invalid regexp, or a duplicate id; on a
-trailer or label no table accounts for; on a counted disclosure that names
+tools.yaml with no unspecified family; on a trailer or label no table
+accounts for; on a counted disclosure that names
 no tool family; on a ticket type kinds.yaml does not map; and on record
 counts more than 0.5% from GitHub's counts in meta.json. A candidate line
 can name a person, so a problem with one names its trailer key, how many

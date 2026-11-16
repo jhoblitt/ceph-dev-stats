@@ -51,6 +51,10 @@ const SourceOriginal = "original"
 // being listed in tools.yaml.
 const coauthorKey = "co-authored-by"
 
+// unspecifiedFamily is the tools.yaml family of a disclosure that names no
+// tool, such as a bare "AI" or "LLM".
+const unspecifiedFamily = "unspecified"
+
 // PR is one pull request's classification.
 type PR struct {
 	Number int
@@ -66,7 +70,7 @@ type PR struct {
 	// trailers, then description, then commit prose, each in record order.
 	Candidates []Candidate
 	// Families are the ids of the families the counted disclosures name,
-	// in table order.
+	// in table order, leaving out unspecified when another is named.
 	Families []string
 	// Components are the ids of the components the labels name, in table
 	// order.
@@ -180,8 +184,9 @@ func disclosure(t *tables.Tables, d record.Disclosure) (cands []Candidate, class
 			c.Ignored = true
 		case counts != "":
 			c.Class = counts
-			c.Family = t.Tools.Family(text)
-			named[c.Family] = true
+			if c.Family = t.Tools.Family(text); c.Family != "" {
+				named[c.Family] = true
+			}
 			if rank(counts) > rank(class) {
 				class = counts
 			}
@@ -202,6 +207,11 @@ func disclosure(t *tables.Tables, d record.Disclosure) (cands []Candidate, class
 			}
 			add(line, list.from, counts)
 		}
+	}
+	// The site counts a pull request under every family it lists, so a
+	// bare "AI" beside a named tool would count it as unspecified too.
+	if len(named) > 1 {
+		delete(named, unspecifiedFamily)
 	}
 	for _, f := range t.Tools.Families {
 		if named[f.ID] {

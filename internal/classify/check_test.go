@@ -2,6 +2,7 @@ package classify_test
 
 import (
 	"bytes"
+	"strings"
 	"time"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -10,6 +11,7 @@ import (
 	"github.com/jhoblitt/ceph-dev-stats/internal/classify"
 	"github.com/jhoblitt/ceph-dev-stats/internal/fetch"
 	"github.com/jhoblitt/ceph-dev-stats/internal/record"
+	"github.com/jhoblitt/ceph-dev-stats/internal/tables"
 	"github.com/jhoblitt/ceph-dev-stats/internal/tracker"
 )
 
@@ -186,6 +188,14 @@ Base branches: 0
 			in.Meta = meta(200, 197)
 		}, `the records hold 198 pull requests opened in the window, GitHub counted 200`),
 	)
+
+	It("fails when tools.yaml has no unspecified family, which a disclosure naming no tool needs", func() {
+		tools := strings.Replace(specTables[tables.ToolsFile], "  - {id: unspecified, name: Unspecified, patterns: ['\\bllm\\b']}\n", "", 1)
+		Expect(tools).NotTo(Equal(specTables[tables.ToolsFile]), "the spec tables changed")
+		in.Tables = loadTables(map[string]string{tables.ToolsFile: tools})
+		Expect(classify.Check(in, out)).To(MatchError(
+			`tools.yaml: no family has the id "unspecified", which a disclosure that names no tool is counted under`))
+	})
 
 	It("names at most five PRs for one problem", func() {
 		for i := range in.Records {

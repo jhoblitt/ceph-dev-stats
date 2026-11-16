@@ -306,13 +306,13 @@ var _ = Describe("Build", func() {
 			r.Labels = []string{"cephfs", "rgw", "needs-review"}
 			r.Disclosure = record.Disclosure{
 				Trailers:    []string{"Assisted-by: Claude Code"},
-				Description: []string{"Assisted by an LLM"},
+				Description: []string{"Generated with Copilot"},
 				CommitProse: []string{},
 			}
 			o := build(r)
 			Expect(o.meta().Disclosure).To(Equal([]string{"none", "description", "coauthor", "trailer"}))
 			Expect(o.one("disclosure")).To(Equal(int64(3)))
-			Expect(o.lists(2026, "families")).To(Equal([][]int{{0, 2}}))
+			Expect(o.lists(2026, "families")).To(Equal([][]int{{0, 1}}))
 			Expect(o.lists(2026, "components")).To(Equal([][]int{{0, 2}}))
 		})
 

@@ -162,9 +162,28 @@ var _ = Describe("Records", func() {
 			Entry("a trailer over a co-author over a description, families in table order",
 				record.Disclosure{
 					Trailers:    []string{"Assisted-by: Gemini", "Co-authored-by: Claude <noreply@anthropic.com>"},
-					Description: []string{"Generated with an LLM"},
+					Description: []string{"Generated with Cursor"},
 				},
-				classify.DisclosureTrailer, []string{"claude", "gemini", "unspecified"}),
+				classify.DisclosureTrailer, []string{"cursor", "claude", "gemini"}),
+			Entry("unspecified beside a named tool is dropped, whatever names it",
+				record.Disclosure{
+					Trailers:    []string{"Assisted-by: an LLM"},
+					Description: []string{"Generated with Gemini"},
+					CommitProse: []string{"Assisted by an LLM"},
+				},
+				classify.DisclosureTrailer, []string{"gemini"}),
+			Entry("unspecified from several lines that name no tool is kept",
+				record.Disclosure{
+					Description: []string{"Generated with an LLM"},
+					CommitProse: []string{"Assisted by an LLM"},
+				},
+				classify.DisclosureDescription, []string{"unspecified"}),
+			Entry("unspecified beside a counted line that names no family is kept",
+				record.Disclosure{
+					Trailers:    []string{"Assisted-by: Bard"},
+					Description: []string{"Assisted by an LLM"},
+				},
+				classify.DisclosureTrailer, []string{"unspecified"}),
 			Entry("a co-author over a description",
 				record.Disclosure{
 					Trailers:    []string{"Co-authored-by: Claude <noreply@anthropic.com>"},

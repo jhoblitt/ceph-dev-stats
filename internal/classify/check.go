@@ -42,6 +42,8 @@ type CheckInput struct {
 // comments by people that match no command, the accounts not typed bots
 // with the most comments, and the base branches, each most frequent first.
 // Its error lists every problem the tables leave in the data:
+//   - no family in tools.yaml with the id unspecified, which the rule that
+//     drops it beside a named tool depends on;
 //   - a trailer candidate whose key is neither a trailer key nor
 //     Co-authored-by, and that ignore does not list;
 //   - a counted disclosure that matches no family;
@@ -57,6 +59,10 @@ func Check(in CheckInput, out io.Writer) error {
 	prs := Records(t, in.Tickets, in.Records)
 
 	var errs []error
+	if !slices.ContainsFunc(t.Tools.Families, func(f tables.Family) bool { return f.ID == unspecifiedFamily }) {
+		errs = append(errs, fmt.Errorf("%s: no family has the id %q, which a disclosure that names no tool is counted under",
+			tables.ToolsFile, unspecifiedFamily))
+	}
 	unknownKey, noFamily := problems{}, problems{}
 	unmatched := map[string]int{}
 	for i := range prs {
