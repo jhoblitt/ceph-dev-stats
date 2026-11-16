@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/jhoblitt/ceph-dev-stats/internal/ghapi"
+	"github.com/jhoblitt/ceph-dev-stats/internal/record"
 )
 
 // The repository the walk reads.
@@ -111,19 +112,12 @@ func Run(ctx context.Context, client *ghapi.Client, cfg Config) error {
 // slipped past that walk are picked up, or the window start when there is
 // no meta yet.
 func DefaultSince(dataDir string) (time.Time, error) {
-	path := filepath.Join(dataDir, "meta.json")
-	var meta struct {
-		FetchedThrough time.Time `json:"fetched_through"`
-	}
-	err := readJSON(path, &meta)
+	meta, err := record.ReadMeta(dataDir)
 	if errors.Is(err, fs.ErrNotExist) {
 		return WindowStart, nil
 	}
 	if err != nil {
 		return time.Time{}, err
-	}
-	if meta.FetchedThrough.IsZero() {
-		return time.Time{}, fmt.Errorf("%s has no fetched_through", path)
 	}
 	return meta.FetchedThrough.UTC().Add(-24 * time.Hour), nil
 }
