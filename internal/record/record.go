@@ -76,6 +76,11 @@ type Record struct {
 type Actor struct {
 	Login string `json:"login"`
 	Bot   bool   `json:"bot"`
+	// Name is set only on the author of a pull request opened by an account
+	// since deleted, whose Login is GitHub's placeholder ghost: the name its
+	// commits credit, by fetch's CommitNames.Name. It is empty when they
+	// give none or were not read, and for every other account.
+	Name string `json:"name,omitzero"`
 }
 
 // Commits summarizes a pull request's commits. The times are nil when it

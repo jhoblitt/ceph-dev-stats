@@ -116,6 +116,19 @@ var _ = Describe("records", func() {
 				`"disclosure":{"trailers":["Assisted-by: Claude"],"description":[],"commit_prose":[]}}` + "\n"))
 	})
 
+	It("writes a deleted account's name after its login, and no name key for an author without one", func() {
+		named, plain := minimal(1, "2026-05-20T08:00:00Z"), minimal(2, "2026-05-21T08:00:00Z")
+		named.Author = record.Actor{Login: "ghost", Name: "Ana Example"}
+		plain.Author = record.Actor{Login: "ghost"}
+		Expect(record.WriteRecords(dataDir, []record.Record{named, plain})).Error().NotTo(HaveOccurred())
+
+		Expect(readFile(monthFile("2026-05"))).To(MatchRegexp(
+			`^\{"number":1,[^\n]*"author":\{"login":"ghost","bot":false,"name":"Ana Example"\},[^\n]*\n` +
+				`\{"number":2,[^\n]*"author":\{"login":"ghost","bot":false\},[^\n]*\n$`))
+		Expect(record.ReadRecords(dataDir)).To(HaveExactElements(
+			HaveField("Author", named.Author), HaveField("Author", plain.Author)))
+	})
+
 	It("writes null for a PR with no commits and no prior-PR count", func() {
 		Expect(record.WriteRecords(dataDir, []record.Record{minimal(1, "2026-05-20T08:00:00Z")})).Error().NotTo(HaveOccurred())
 

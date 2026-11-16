@@ -594,6 +594,49 @@ var _ = Describe("Build", func() {
 			Expect(m.People).To(Equal([]string{"dependabot", "ci-runner", "alice", "bob"}))
 			Expect(m.PeopleBots).To(Equal([]int{0, 1}))
 		})
+
+		It("indexes a named deleted account's pull request under ghost: and its name, lists it as deleted, and keeps the pooled ghost for every other", func() {
+			ivy := record.Actor{Login: fetch.GhostLogin, Name: "Ivy Example"}
+			a, b, c, d, e := pr(1), pr(2), pr(3), pr(4), pr(5)
+			a.Author = ivy
+			a.Comments = []record.Comment{{At: h(1), By: fetch.GhostLogin}}
+			a.Reviews = []record.Review{{At: h(2), By: fetch.GhostLogin, State: record.ReviewApproved}}
+			b.Author = record.Actor{Login: fetch.GhostLogin}
+			c.Author = ivy
+			d.Author = record.Actor{Login: fetch.GhostLogin, Name: "Kim Example"}
+			e.Author = record.Actor{Login: "alice", Name: "Not Kept"}
+			e.Comments = []record.Comment{{At: h(1), By: fetch.GhostLogin}}
+			o := build(e, d, c, b, a)
+			m := o.meta()
+			Expect(m.People).To(Equal([]string{"ghost:Ivy Example", "ghost", "ghost:Kim Example", "alice"}))
+			Expect(m.PeopleDeleted).To(Equal([]int{0, 2}))
+			Expect(m.PeopleBots).To(BeEmpty())
+			Expect(o.col(2026, "author")).To(Equal([]int64{0, 1, 0, 2, 3}))
+			Expect(o.evs(2026)).To(Equal([]ev{
+				{PR: 1, At: h(1), Kind: "comment_other", Actor: "ghost"},
+				{PR: 1, At: h(2), Kind: "review_approved", Actor: "ghost"},
+				{PR: 5, At: h(1), Kind: "comment_other", Actor: "ghost"},
+			}), "a deleted account's comment and review on its own pull request are the pooled ghost's")
+			Expect(o.table(2026).Authors).To(Equal([]string{"ghost", "ghost", "ghost", "ghost", "alice"}))
+		})
+
+		It("never lists a deleted account's entry among the bots", func() {
+			a, b := pr(1), pr(2)
+			a.Author = record.Actor{Login: fetch.GhostLogin, Bot: true, Name: "Ivy Example"}
+			b.Author = record.Actor{Login: "dependabot", Bot: true}
+			m := build(a, b).meta()
+			Expect(m.People).To(Equal([]string{"ghost:Ivy Example", "dependabot"}))
+			Expect(m.PeopleBots).To(Equal([]int{1}))
+			Expect(m.PeopleDeleted).To(Equal([]int{0}))
+		})
+
+		It("writes an empty people_deleted when no deleted account is named", func() {
+			r := pr(1)
+			r.Author = record.Actor{Login: fetch.GhostLogin}
+			o := build(r)
+			Expect(o.meta().People).To(Equal([]string{"ghost"}))
+			Expect(string(o["meta.json"])).To(HaveSuffix(`"people":["ghost"],"people_bots":[],"people_deleted":[]}`))
+		})
 	})
 
 	Describe("meta.json", func() {
@@ -627,7 +670,7 @@ var _ = Describe("Build", func() {
 			Expect(m.Years).To(BeEmpty())
 			Expect(string(o["meta.json"])).To(ContainSubstring(`"years":[]`))
 			Expect(string(o["meta.json"])).To(ContainSubstring(`"bases":[]`))
-			Expect(string(o["meta.json"])).To(ContainSubstring(`"people":[],"people_bots":[]`))
+			Expect(string(o["meta.json"])).To(ContainSubstring(`"people":[],"people_bots":[],"people_deleted":[]`))
 		})
 
 		It("falls back to the window start and the latest update without meta.json", func() {

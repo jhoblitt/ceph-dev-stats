@@ -112,7 +112,7 @@ func (b *builder) add(r *record.Record, p *classify.PR) error {
 	b.index.Numbers = append(b.index.Numbers, r.Number)
 	b.index.Years = append(b.index.Years, fy)
 
-	author := b.person(r.Author.Login, !p.AuthorHuman)
+	author := b.author(r, p.AuthorHuman)
 	for _, e := range events {
 		actor := -1
 		if e.actor != "" {

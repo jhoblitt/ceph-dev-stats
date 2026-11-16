@@ -86,12 +86,22 @@ type metaFile struct {
 	Disclosure     []string `json:"disclosure"`
 	EventKinds     []string `json:"event_kinds"`
 	// People are the logins an author or actor index names, in order of
-	// first appearance over the records by number.
+	// first appearance over the records by number. The author of a pull
+	// request opened by a deleted account that its commits name is
+	// deletedPrefix and that name instead, which no login can collide with
+	// since a login has no colon; every other deleted account is the one
+	// login ghost.
 	People []string `json:"people"`
 	// PeopleBots are the indexes into People of the accounts that are not
 	// human, ascending.
 	PeopleBots []int `json:"people_bots"`
+	// PeopleDeleted are the indexes into People of the deleted accounts'
+	// names, ascending.
+	PeopleDeleted []int `json:"people_deleted"`
 }
+
+// deletedPrefix begins a deleted account's name in meta.json's people.
+const deletedPrefix = fetch.GhostLogin + ":"
 
 // indexFile is index.json: Years[i] is the year whose files hold the pull
 // request numbered Numbers[i], and Numbers ascends. The site reads it only
@@ -131,17 +141,19 @@ type builder struct {
 	eventKinds  map[string]int
 	people      map[string]int
 	bots        map[int]bool
+	deleted     map[int]bool
 	years       map[int]*year
 }
 
 func newBuilder(in Input, recs []record.Record) *builder {
 	m := metaFile{
-		Repo:       fetch.Owner + "/" + fetch.Name,
-		Years:      []int{},
-		Disclosure: classify.DisclosureClasses(),
-		EventKinds: eventKinds,
-		People:     []string{},
-		PeopleBots: []int{},
+		Repo:          fetch.Owner + "/" + fetch.Name,
+		Years:         []int{},
+		Disclosure:    classify.DisclosureClasses(),
+		EventKinds:    eventKinds,
+		People:        []string{},
+		PeopleBots:    []int{},
+		PeopleDeleted: []int{},
 	}
 	windowStart := fetch.WindowStart
 	switch {
@@ -204,6 +216,7 @@ func newBuilder(in Input, recs []record.Record) *builder {
 		eventKinds:  indexOf(m.EventKinds, func(s string) string { return s }),
 		people:      map[string]int{},
 		bots:        map[int]bool{},
+		deleted:     map[int]bool{},
 		years:       map[int]*year{},
 	}
 }
@@ -233,6 +246,18 @@ func (b *builder) person(login string, bot bool) int {
 	return i
 }
 
+// author is the index into meta.json's people of r's author: its
+// deletedPrefix entry for a deleted account its commits name, which is never
+// a bot's, and otherwise its login's.
+func (b *builder) author(r *record.Record, human bool) int {
+	if r.Author.Login != fetch.GhostLogin || r.Author.Name == "" {
+		return b.person(r.Author.Login, !human)
+	}
+	i := b.person(deletedPrefix+r.Author.Name, false)
+	b.deleted[i] = true
+	return i
+}
+
 func (b *builder) files() ([]File, error) {
 	b.meta.Years = slices.Sorted(maps.Keys(b.years))
 	if b.meta.Years == nil {
@@ -241,6 +266,10 @@ func (b *builder) files() ([]File, error) {
 	b.meta.PeopleBots = slices.Sorted(maps.Keys(b.bots))
 	if b.meta.PeopleBots == nil {
 		b.meta.PeopleBots = []int{}
+	}
+	b.meta.PeopleDeleted = slices.Sorted(maps.Keys(b.deleted))
+	if b.meta.PeopleDeleted == nil {
+		b.meta.PeopleDeleted = []int{}
 	}
 	files := make([]File, 0, 2+3*len(b.years))
 	add := func(name string, v any) error {

@@ -97,10 +97,17 @@ describe('the rollup output for the hand-made dataset', () => {
     expect(y2026.prs.human_reviews[row]).toBe(2);
   });
 
-  it("resolves a PR's author through people", () => {
+  it("resolves a PR's author through people, a deleted account its commits name to its ghost: entry", () => {
     const row = years[1]!.prs.number.indexOf(66400);
-    expect(meta.people[years[1]!.prs.author[row]!]).toBe('ghost');
+    expect(meta.people[years[1]!.prs.author[row]!]).toBe('ghost:Ivy Example');
     expect(tables[1]!.authors[row]).toBe('ghost');
+  });
+
+  it('lists the deleted accounts named by their commits in people_deleted, beside the pooled ghost', () => {
+    const raw = file('meta.json') as { people_deleted?: unknown };
+    expect(Array.isArray(raw.people_deleted)).toBe(true);
+    expect((raw.people_deleted as number[]).map((d) => meta.people[d])).toEqual(['ghost:Ivy Example']);
+    expect(meta.people).toContain('ghost');
   });
 
   it('names the bot accounts among the people', () => {

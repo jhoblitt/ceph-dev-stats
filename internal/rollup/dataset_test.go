@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -79,6 +80,8 @@ var _ = Describe("the hand-made dataset", func() {
 		Expect(classes).To(HaveLen(len(m.Disclosure)), "every disclosure class")
 		Expect(sources).To(HaveLen(5), "every kind source and none")
 		Expect(m.PeopleBots).NotTo(BeEmpty())
+		Expect(m.PeopleDeleted).NotTo(BeEmpty(), "a deleted account named by its commits")
+		Expect(m.People).To(ContainElement("ghost"), "the pooled deleted accounts beside it")
 		Expect(o.col(2025, "in_window")).To(ContainElement(int64(0)))
 	})
 
@@ -222,6 +225,16 @@ var _ = Describe("the hand-made dataset", func() {
 		Expect(slices.Compact(slices.Clone(m.PeopleBots))).To(HaveLen(len(m.PeopleBots)))
 		for _, b := range m.PeopleBots {
 			Expect(b).To(And(BeNumerically(">=", 0), BeNumerically("<", len(m.People))))
+		}
+		var deleted []int
+		for i, p := range m.People {
+			if strings.HasPrefix(p, "ghost:") {
+				deleted = append(deleted, i)
+			}
+		}
+		Expect(m.PeopleDeleted).To(Equal(deleted), "people_deleted is exactly the ghost: entries, ascending")
+		for _, d := range m.PeopleDeleted {
+			Expect(m.PeopleBots).NotTo(ContainElement(d))
 		}
 		named := map[int]bool{}
 		for _, y := range m.Years {

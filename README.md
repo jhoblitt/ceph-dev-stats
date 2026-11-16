@@ -63,7 +63,9 @@ environment variable.
   GitHub's, naming which of GitHub's counts it compared with. A candidate
   line can name a person, so the failure names a trailer or disclosure
   problem only by its trailer key, how many lines and which pull
-  requests. `--report` also prints those lines, neighboring
+  requests. `--report` also prints those lines, how many pull requests
+  deleted accounts opened and how many of them carry a name (and how many
+  names, never the names themselves), neighboring
   candidate lines that match a disclosure phrase only when joined, and
   what the tables do not match yet.
 - `rollup` classifies the records in `data/` with the hand-edited tables
@@ -73,7 +75,14 @@ environment variable.
   open under the year of `fetched_through`, each with all of its events
   and its table row; and `index.json`, the year each pull request is filed
   under, by number, which the site reads to find a pull request outside
-  the years it has loaded. They go to `site/public/data/`, or the
+  the years it has loaded. `meta.json`'s `people` lists the logins the
+  files index into; a pull request whose record carries its deleted
+  author's name is indexed to the entry `ghost:` followed by that name
+  instead of to `ghost`, and `people_deleted` lists those entries'
+  indexes. Such an entry stands for a name, not an account: deleted
+  accounts whose commits give the same name are one entry, and one account
+  can appear under several, by its own spellings or by another committer
+  who pushed its commits. They go to `site/public/data/`, or the
   directory `--out` names, and are not committed (see [Site](#site)). Only
   the files whose content changes are rewritten, and a year's files are
   removed once it no longer holds a pull request. It does not run `check`.
@@ -85,7 +94,7 @@ are derived from it by `cephstats rollup` and are not committed.
 
 | File | What it holds | Written by |
 |---|---|---|
-| `prs/YYYY-MM.jsonl` | one record per pull request, in the file of the month it was opened: its times, state, size, labels, commits, lifecycle events, reviews and comments, and the lines that might disclose LLM use or say what kind of change it is | `extract` |
+| `prs/YYYY-MM.jsonl` | one record per pull request, in the file of the month it was opened: its author, times, state, size, labels, commits, lifecycle events, reviews and comments, and the lines that might disclose LLM use or say what kind of change it is. The author of a pull request opened by an account since deleted is the login `ghost` and, when its commits give one, a `name` | `extract` |
 | `authors.json` | for each author, how many pull requests they opened before `meta.json`'s `window_start`: the baseline their `prior_prs` starts from, and 0 for everyone once that is 2011-09-01. `extract` adds the cache's baselines to it while `meta.json` is of the window `extract` derives for, and otherwise replaces it with them | `extract` |
 | `meta.json` | the window start, when the last walk began, and GitHub's counts at its end: the pull requests opened since the window start, and those open. The open ones are the total of the repository's pull-request listing. So are those opened since the window start when it is no later than the repository's creation, since every pull request is then in the window; for a later window they are the count of a search, which has been seen to omit pull requests the listing returns. `opened_in_window_source` says which, `listing` or `search`; a `meta.json` without it is from the search | `extract` |
 | `tickets.json` | the type of each tracker ticket a record references, and the ticket a Backport ticket was copied from | `tickets` |
@@ -95,7 +104,26 @@ are derived from it by `cephstats rollup` and are not committed.
 | `labels.yaml` | which labels are components, process states, or neither | by hand |
 | `kinds.yaml` | what makes a pull request a bug fix, a feature, a cleanup or documentation | by hand |
 
-A record names people by login. It keeps a comment's text only when the
+A record names people by login. GitHub gives every deleted account the
+one placeholder login `ghost` and keeps nothing else about it, so the
+comments and reviews of deleted accounts cannot be told apart and are all
+`ghost`'s. For a pull request a deleted account opened, the names on its
+commits survive in git: `fetch` reads them for those pull requests only,
+and the record's author carries one `name`, the committer name most
+common on its commits, leaving out the `GitHub` that GitHub records as
+the committer of a commit made through its web interface (only when every
+commit's committer is that web committer, the most common author name
+instead; on a tie, the name on the earlier commit). The committer rather
+than the author, since a backport keeps the authors of the commits it
+copies. In the request for these names `fetch` asks GitHub for no e-mail
+address. git's name is free text, though, so before a name is cached its control and format
+characters are removed and its whitespace collapsed, and a name that
+holds an `@`, which may be an address, is dropped: it is not cached as a
+name, is never a candidate, and is never published. A committer whose name was
+dropped, or cleaned to nothing, still rules the authors out: when no
+other committer is named, the pull request gets no name and stays
+`ghost`'s, rather than take the name of an author whose commits it
+copied. A record keeps a comment's text only when the
 comment is one line of at most 80 characters with no `@`, which is what a
 bot command looks like and what a mention or an e-mail address never is,
 and it never keeps a commit trailer that names a person (`Signed-off-by:`,

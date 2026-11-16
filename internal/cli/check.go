@@ -31,7 +31,9 @@ counts more than 0.5% from GitHub's counts in meta.json. A candidate line
 can name a person, so a problem with one names its trailer key, how many
 lines and which pull requests, and never quotes the line.
 
-With --report it also prints, without failing, the candidate lines behind
+With --report it also prints, without failing, how many pull requests
+deleted accounts opened, how many of them are named from their commits and
+by how many names (never a name), the candidate lines behind
 those problems, neighboring candidates that match a disclosure phrase only
 when joined (never counted; a real one needs a phrase of its own), and
 what the tables do not yet match, most frequent first, for whoever edits
