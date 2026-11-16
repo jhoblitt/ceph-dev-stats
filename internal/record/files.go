@@ -116,8 +116,9 @@ func WriteMeta(dataDir string, m Meta) (bool, error) {
 }
 
 // ReadAuthors reads dataDir/authors.json: each author's count of pull
-// requests opened before the window start. A missing file is an error that
-// matches fs.ErrNotExist.
+// requests opened before dataDir/meta.json's window_start, which the file
+// does not record itself. A missing file is an error that matches
+// fs.ErrNotExist.
 func ReadAuthors(dataDir string) (map[string]int, error) {
 	authors := map[string]int{}
 	if err := readJSON(filepath.Join(dataDir, AuthorsFile), &authors); err != nil {

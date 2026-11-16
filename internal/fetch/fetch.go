@@ -164,8 +164,9 @@ func reachStale(ctx context.Context, cfg *Config) error {
 
 // DefaultSince is where a walk starts when no --since is given: a day
 // before the last walk recorded in dataDir/meta.json, so updates that
-// slipped past that walk are picked up, or the window start when there is
-// no meta yet.
+// slipped past that walk are picked up. It is the window start when there
+// is no meta yet, or when the meta's window starts later, since walks of
+// that window never listed a closed pull request last updated before it.
 func DefaultSince(dataDir string) (time.Time, error) {
 	meta, err := record.ReadMeta(dataDir)
 	if errors.Is(err, fs.ErrNotExist) {
@@ -173,6 +174,9 @@ func DefaultSince(dataDir string) (time.Time, error) {
 	}
 	if err != nil {
 		return time.Time{}, err
+	}
+	if meta.WindowStart.After(WindowStart) {
+		return WindowStart, nil
 	}
 	return meta.FetchedThrough.UTC().Add(-24 * time.Hour), nil
 }
@@ -419,12 +423,27 @@ func orGhost(a *Actor) *Actor {
 
 // baselines records, for each human author in the cache not yet in
 // authors.json, how many pull requests they opened before the window.
+// Baselines asked for another window, or for none the file records, are
+// asked again, every one, and authors.json is rewritten for this window
+// after the first batch, or at the end when there is none to ask, so that
+// it never holds counts of two windows.
 func (w *walker) baselines(ctx context.Context) error {
 	path := filepath.Join(w.cfg.CacheDir, AuthorsFile)
-	known := map[string]int{}
-	if err := ReadJSON(path, &known); err != nil && !errors.Is(err, fs.ErrNotExist) {
+	cached, err := ReadBaselines(w.cfg.CacheDir)
+	switch {
+	case errors.Is(err, fs.ErrNotExist):
+		cached = Baselines{WindowStart: w.cfg.WindowStart, Authors: map[string]int{}}
+	case err != nil:
 		return err
+	case !cached.WindowStart.Equal(w.cfg.WindowStart):
+		w.log.WarnContext(ctx, "asking every author's prior pull requests again",
+			slog.String("reason", staleReason(cached.WindowStart)),
+			slog.Time("window_start", w.cfg.WindowStart),
+			slog.Int("authors", len(cached.Authors)),
+			slog.String("path", path))
+		cached = Baselines{WindowStart: w.cfg.WindowStart, Authors: map[string]int{}}
 	}
+	known := cached.Authors
 	paths, err := cachedEntries(w.cfg.CacheDir)
 	if err != nil {
 		return err
@@ -467,14 +486,23 @@ func (w *walker) baselines(ctx context.Context) error {
 			}
 			known[login] = *r.IssueCount
 		}
-		if err := writeJSON(path, known); err != nil {
+		if err := writeJSON(path, cached); err != nil {
 			return err
 		}
 	}
 	if len(todo) == 0 {
-		return writeJSON(path, known)
+		return writeJSON(path, cached)
 	}
 	return nil
+}
+
+// staleReason says why baselines recorded for window are not for the
+// window in force.
+func staleReason(window time.Time) string {
+	if window.IsZero() {
+		return "the file does not record the window they were asked for"
+	}
+	return "they were asked for the window from " + window.Format(time.DateOnly)
 }
 
 // counts asks GitHub how many pull requests were opened in the window and
@@ -498,6 +526,7 @@ func (w *walker) counts(ctx context.Context) (Meta, error) {
 		return Meta{}, fmt.Errorf("counting pull requests: %w", err)
 	}
 	return Meta{
+		WindowStart:    w.cfg.WindowStart,
 		WalkStarted:    w.started,
 		OpenedInWindow: resp.Search.IssueCount,
 		Open:           resp.Repository.PullRequests.TotalCount,

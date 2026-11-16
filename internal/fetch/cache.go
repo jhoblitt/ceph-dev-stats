@@ -114,17 +114,66 @@ type Entry struct {
 
 // Meta is .cache/meta.json, written at the end of a complete walk.
 type Meta struct {
+	// WindowStart is the window OpenedInWindow was counted from. It is
+	// zero in a meta.json written before meta.json recorded it.
+	WindowStart    time.Time `json:"window_start"`
 	WalkStarted    time.Time `json:"walk_started"`
 	OpenedInWindow int       `json:"opened_in_window"`
 	Open           int       `json:"open"`
+}
+
+// Baselines is .cache/authors.json: each author's count of pull requests
+// opened before WindowStart. The window is written in the same file as the
+// counts so that the two can never disagree: a count asked for one window
+// is wrong for any other.
+type Baselines struct {
+	// WindowStart is zero in an authors.json written before authors.json
+	// recorded it, which was a bare map of login to count.
+	WindowStart time.Time      `json:"window_start"`
+	Authors     map[string]int `json:"authors"`
+}
+
+// ReadBaselines reads cacheDir/authors.json. A missing file is an error
+// that matches fs.ErrNotExist.
+func ReadBaselines(cacheDir string) (Baselines, error) {
+	path := filepath.Join(cacheDir, AuthorsFile)
+	var fields map[string]json.RawMessage
+	if err := ReadJSON(path, &fields); err != nil {
+		return Baselines{}, err
+	}
+	b := Baselines{Authors: map[string]int{}}
+	// window_start cannot be a login, since GitHub logins have no
+	// underscore, so only the current format has it.
+	window, ok := fields["window_start"]
+	if !ok {
+		for login, raw := range fields {
+			var n int
+			if err := json.Unmarshal(raw, &n); err != nil {
+				return Baselines{}, fmt.Errorf("decoding %s: %s: %w", path, login, err)
+			}
+			b.Authors[login] = n
+		}
+		return b, nil
+	}
+	if err := json.Unmarshal(window, &b.WindowStart); err != nil {
+		return Baselines{}, fmt.Errorf("decoding %s: window_start: %w", path, err)
+	}
+	if authors, ok := fields["authors"]; ok {
+		if err := json.Unmarshal(authors, &b.Authors); err != nil {
+			return Baselines{}, fmt.Errorf("decoding %s: authors: %w", path, err)
+		}
+	}
+	if b.Authors == nil {
+		b.Authors = map[string]int{}
+	}
+	return b, nil
 }
 
 // Names under a cache directory.
 const (
 	// RawDir holds the entries.
 	RawDir = "raw"
-	// AuthorsFile maps each author to their pull requests opened before
-	// the window start.
+	// AuthorsFile holds Baselines.
 	AuthorsFile = "authors.json"
 	// MetaFile holds Meta.
 	MetaFile = "meta.json"

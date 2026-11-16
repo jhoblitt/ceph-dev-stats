@@ -30,6 +30,10 @@ type file struct {
 // some PRs before it and some after.
 var specWindow = time.Date(2026, 5, 15, 0, 0, 0, 0, time.UTC)
 
+// otherWindow is a window baselines and counts were asked for that is not
+// specWindow.
+var otherWindow = time.Date(2026, 7, 1, 0, 0, 0, 0, time.UTC)
+
 var _ = Describe("Run", func() {
 	var (
 		cacheDir, dataDir string
@@ -58,9 +62,38 @@ var _ = Describe("Run", func() {
 		}
 	}
 
+	// windowInForce is the window run extracts for.
+	windowInForce := func() time.Time {
+		if window.IsZero() {
+			return fetch.WindowStart
+		}
+		return window
+	}
+
+	// baselines writes the cache's authors.json as fetch does, asked for
+	// the window in force.
+	baselines := func(authors map[string]int) {
+		GinkgoHelper()
+		writeJSON(filepath.Join(cacheDir, fetch.AuthorsFile), map[string]any{"window_start": windowInForce(), "authors": authors})
+	}
+
+	// counts writes the cache's meta.json as fetch does, counted for the
+	// window in force.
+	counts := func(walkStarted time.Time, openedInWindow, open int) {
+		GinkgoHelper()
+		writeJSON(filepath.Join(cacheDir, fetch.MetaFile), map[string]any{
+			"window_start": windowInForce(), "walk_started": walkStarted,
+			"opened_in_window": openedInWindow, "open": open,
+		})
+	}
+
+	extractErr := func() error {
+		return extract.Run(context.Background(), extract.Config{CacheDir: cacheDir, DataDir: dataDir, WindowStart: window, Logger: quiet()})
+	}
+
 	run := func() {
 		GinkgoHelper()
-		Expect(extract.Run(context.Background(), extract.Config{CacheDir: cacheDir, DataDir: dataDir, WindowStart: window, Logger: quiet()})).To(Succeed())
+		Expect(extractErr()).To(Succeed())
 	}
 
 	files := func() map[string]file {
@@ -114,10 +147,8 @@ var _ = Describe("Run", func() {
 
 	It("records every cached PR by month, and copies the cache's authors and meta", func() {
 		cache(fixture("backport"), fixture("draft-ready"), fixture("ghost"), fixture("reopened"))
-		writeJSON(filepath.Join(cacheDir, "authors.json"), map[string]int{"erin-example": 0, "alice-example": 12})
-		writeJSON(filepath.Join(cacheDir, "meta.json"), fetch.Meta{
-			WalkStarted: time.Date(2026, 11, 15, 12, 0, 0, 123_000_000, time.UTC), OpenedInWindow: 4985, Open: 2019,
-		})
+		baselines(map[string]int{"erin-example": 0, "alice-example": 12})
+		counts(time.Date(2026, 11, 15, 12, 0, 0, 123_000_000, time.UTC), 4985, 2019)
 
 		run()
 
@@ -147,8 +178,8 @@ var _ = Describe("Run", func() {
 
 	It("changes no file with an empty cache over existing data", func() {
 		cache(fixture("backport"), fixture("draft-ready"))
-		writeJSON(filepath.Join(cacheDir, "authors.json"), map[string]int{"alice-example": 12})
-		writeJSON(filepath.Join(cacheDir, "meta.json"), fetch.Meta{WalkStarted: day(11, 15)})
+		baselines(map[string]int{"alice-example": 12})
+		counts(day(11, 15), 0, 0)
 		run()
 		before := files()
 
@@ -161,8 +192,8 @@ var _ = Describe("Run", func() {
 
 	It("writes identical bytes and touches no file on a second run", func() {
 		cache(fixture("backport"), fixture("draft-ready"), fixture("reopened"), fixture("force-pushed"), fixture("late-commits"), fixture("ghost"))
-		writeJSON(filepath.Join(cacheDir, "authors.json"), map[string]int{"alice-example": 12})
-		writeJSON(filepath.Join(cacheDir, "meta.json"), fetch.Meta{WalkStarted: day(11, 15)})
+		baselines(map[string]int{"alice-example": 12})
+		counts(day(11, 15), 0, 0)
 		run()
 		before := files()
 
@@ -244,7 +275,7 @@ var _ = Describe("Run", func() {
 			entry(30, "kim", day(7, 1)),
 			entry(40, "kim", day(8, 1)),
 		)
-		writeJSON(filepath.Join(cacheDir, "authors.json"), map[string]int{"kim": 4, "lee": 0})
+		baselines(map[string]int{"kim": 4, "lee": 0})
 
 		run()
 
@@ -258,7 +289,7 @@ var _ = Describe("Run", func() {
 
 	It("counts a PR opened exactly at the window start as in the window", func() {
 		cache(entry(1, "kim", window))
-		writeJSON(filepath.Join(cacheDir, "authors.json"), map[string]int{"kim": 4})
+		baselines(map[string]int{"kim": 4})
 
 		run()
 
@@ -267,7 +298,8 @@ var _ = Describe("Run", func() {
 
 	It("recomputes prior_prs over every record when a backfill adds an earlier PR", func() {
 		cache(entry(30, "kim", day(7, 1)))
-		writeJSON(filepath.Join(cacheDir, "authors.json"), map[string]int{"kim": 4})
+		baselines(map[string]int{"kim": 4})
+		counts(day(11, 15), 1, 1)
 		run()
 		Expect(records()[30].PriorPRs).To(HaveValue(Equal(4)))
 		before := files()
@@ -287,7 +319,7 @@ var _ = Describe("Run", func() {
 		ghost := entry(1, "ghost", day(6, 1))
 		ghost.Author = nil
 		cache(ghost, entry(2, "dependabot", day(6, 2)))
-		writeJSON(filepath.Join(cacheDir, "authors.json"), map[string]int{"kim": 4})
+		baselines(map[string]int{"kim": 4})
 
 		run()
 
@@ -306,8 +338,8 @@ var _ = Describe("Run", func() {
 				entry(1, "kim", time.Date(2011, 8, 31, 23, 59, 59, 0, time.UTC)),
 				entry(2, "kim", time.Date(2011, 9, 1, 0, 0, 0, 0, time.UTC)),
 			)
-			writeJSON(filepath.Join(cacheDir, "authors.json"), map[string]int{"kim": 0})
-			writeJSON(filepath.Join(cacheDir, "meta.json"), fetch.Meta{WalkStarted: day(11, 15)})
+			baselines(map[string]int{"kim": 0})
+			counts(day(11, 15), 0, 0)
 
 			run()
 
@@ -330,7 +362,7 @@ var _ = Describe("Run", func() {
 				entry(4, "kim", day(4, 1)),
 				entry(7, "kim", day(8, 1)),
 			)
-			writeJSON(filepath.Join(cacheDir, "authors.json"), map[string]int{"kim": 0, "lee": 0})
+			baselines(map[string]int{"kim": 0, "lee": 0})
 
 			run()
 
@@ -346,13 +378,85 @@ var _ = Describe("Run", func() {
 		})
 	})
 
-	It("adds the cache's baselines to the committed ones", func() {
+	It("adds the cache's baselines to the committed ones of the same window", func() {
+		Expect(record.WriteMeta(dataDir, record.Meta{Repo: "ceph/ceph", WindowStart: window, FetchedThrough: day(11, 1)})).To(BeTrue())
 		Expect(record.WriteAuthors(dataDir, map[string]int{"kim": 4, "lee": 1})).To(BeTrue())
-		writeJSON(filepath.Join(cacheDir, "authors.json"), map[string]int{"lee": 2, "max": 7})
+		baselines(map[string]int{"lee": 2, "max": 7})
 
 		run()
 
 		Expect(record.ReadAuthors(dataDir)).To(Equal(map[string]int{"kim": 4, "lee": 2, "max": 7}))
+	})
+
+	Describe("baselines and counts of another window", func() {
+		BeforeEach(func() {
+			cache(entry(10, "kim", day(8, 1)), entry(20, "kim", day(9, 1)), entry(30, "lee", day(9, 2)))
+		})
+
+		DescribeTable("refuses the cache's, naming the file, its window and the fetch that replaces it, and writes nothing",
+			func(file string, content any, want string) {
+				baselines(map[string]int{"kim": 0, "lee": 0})
+				counts(day(11, 15), 3, 3)
+				writeJSON(filepath.Join(cacheDir, file), content)
+
+				err := extractErr()
+
+				Expect(err).To(MatchError(And(
+					ContainSubstring(filepath.Join(cacheDir, file)),
+					ContainSubstring(want),
+					ContainSubstring("not for the window from 2026-05-15"),
+					ContainSubstring("run `cephstats fetch`"),
+				)))
+				Expect(files()).To(BeEmpty())
+			},
+			Entry("baselines in a bare map, as written before they recorded their window",
+				fetch.AuthorsFile, map[string]int{"kim": 4, "lee": 9}, "baselines are for no recorded window"),
+			Entry("baselines asked for another window",
+				fetch.AuthorsFile, map[string]any{"window_start": otherWindow, "authors": map[string]int{"kim": 4}}, "baselines are for the window from 2026-07-01"),
+			Entry("counts with no window, as written before they recorded it",
+				fetch.MetaFile, map[string]any{"walk_started": day(11, 15), "opened_in_window": 3, "open": 3}, "counts are for no recorded window"),
+			Entry("counts of another window",
+				fetch.MetaFile, map[string]any{"window_start": otherWindow, "walk_started": day(11, 15), "opened_in_window": 3, "open": 3}, "counts are for the window from 2026-07-01"),
+		)
+
+		Context("in the committed data", func() {
+			BeforeEach(func() {
+				Expect(record.WriteMeta(dataDir, record.Meta{Repo: "ceph/ceph", WindowStart: otherWindow, FetchedThrough: day(10, 1)})).To(BeTrue())
+				Expect(record.WriteAuthors(dataDir, map[string]int{"kim": 40, "lee": 9})).To(BeTrue())
+			})
+
+			It("replaces data/authors.json with the cache's baselines rather than carrying it into the records", func() {
+				baselines(map[string]int{"kim": 1})
+				counts(day(11, 15), 3, 3)
+
+				run()
+
+				got := records()
+				Expect(got[10].PriorPRs).To(HaveValue(Equal(1)), "kim's first PR: the cache's baseline")
+				Expect(got[20].PriorPRs).To(HaveValue(Equal(2)), "kim's second PR")
+				Expect(got[30].PriorPRs).To(BeNil(), "lee has a baseline only for the committed window")
+				Expect(record.ReadAuthors(dataDir)).To(Equal(map[string]int{"kim": 1}))
+				Expect(record.ReadMeta(dataDir)).To(HaveField("WindowStart", specWindow))
+			})
+
+			DescribeTable("refuses it when the cache cannot replace it, and writes nothing",
+				func(cacheFile, want string) {
+					before := files()
+					if cacheFile == fetch.AuthorsFile {
+						baselines(map[string]int{"kim": 1})
+					} else {
+						counts(day(11, 15), 3, 3)
+					}
+
+					err := extractErr()
+
+					Expect(err).To(MatchError(And(ContainSubstring(want), ContainSubstring("run `cephstats fetch`"))))
+					Expect(rewritten(before, files())).To(BeEmpty())
+				},
+				Entry("no meta.json in the cache", fetch.AuthorsFile, "meta.json is for the window from 2026-07-01, not for the window from 2026-05-15"),
+				Entry("no authors.json in the cache", fetch.MetaFile, "authors.json is for the window from 2026-07-01, not for the window from 2026-05-15"),
+			)
+		})
 	})
 
 	It("leaves the committed meta alone when the cache has none", func() {

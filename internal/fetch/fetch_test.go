@@ -694,7 +694,7 @@ var _ = Describe("Run", func() {
 
 		Expect(err).To(MatchError(isRateLimit, "a *ghapi.RateLimitError resetting at 2026-11-15T13:00:00Z"))
 		Expect(server.Operations(ghapi.AuthorBaselines(0).Name)).To(HaveLen(2))
-		authors := readJSON(filepath.Join(cacheDir, fetch.AuthorsFile))
+		authors := readJSON(filepath.Join(cacheDir, fetch.AuthorsFile))["authors"]
 		Expect(authors).To(HaveLen(25), "the first batch is kept")
 		Expect(authors).To(HaveKey("dev00"))
 		Expect(authors).NotTo(HaveKey("dev26"))
@@ -741,7 +741,8 @@ var _ = Describe("Run", func() {
 		bob.Author = user("bob")
 		serve(pr(1, 1, "CLOSED"), pr(6, 6, "MERGED"), bot, ghost, known, bob)
 		server.SetCounts(42, map[string]int{"alice": 3, "bob": 0, "carol": 99})
-		Expect(os.WriteFile(filepath.Join(cacheDir, "authors.json"), []byte(`{"carol": 7}`), 0o600)).To(Succeed())
+		Expect(os.WriteFile(filepath.Join(cacheDir, "authors.json"),
+			[]byte(`{"window_start": "2026-05-15T00:00:00Z", "authors": {"carol": 7}}`), 0o600)).To(Succeed())
 
 		Expect(run(fetch.WindowStart)).To(Succeed())
 
@@ -752,17 +753,90 @@ var _ = Describe("Run", func() {
 			"q1": "repo:ceph/ceph is:pr author:bob created:<2026-05-15",
 		}))
 		Expect(readJSON(filepath.Join(cacheDir, "authors.json"))).To(Equal(map[string]any{
-			"alice": 3.0, "bob": 0.0, "carol": 7.0,
+			"window_start": "2026-05-15T00:00:00Z",
+			"authors":      map[string]any{"alice": 3.0, "bob": 0.0, "carol": 7.0},
 		}))
+		Expect(logged("asking every author's prior pull requests again")).To(BeEmpty())
 
 		counts := server.Operations(ghapi.Counts.Name)
 		Expect(counts).To(HaveLen(1))
 		Expect(counts[0].Variables).To(HaveKeyWithValue("search", "repo:ceph/ceph is:pr created:>=2026-05-15"))
 		Expect(readJSON(filepath.Join(cacheDir, "meta.json"))).To(Equal(map[string]any{
+			"window_start":     "2026-05-15T00:00:00Z",
 			"walk_started":     "2026-11-15T12:00:00Z",
 			"opened_in_window": 42.0,
 			"open":             2.0,
 		}))
+	})
+
+	DescribeTable("asks every author again, rewriting authors.json for the window, and warns once why, when the cached baselines are",
+		func(cached, reason string) {
+			known := pr(2, 2, "OPEN")
+			known.Author = user("carol")
+			serve(pr(1, 1, "CLOSED"), known)
+			server.SetCounts(2, map[string]int{"alice": 3, "carol": 99})
+			Expect(os.WriteFile(filepath.Join(cacheDir, "authors.json"), []byte(cached), 0o600)).To(Succeed())
+
+			Expect(run(fetch.WindowStart)).To(Succeed())
+
+			baselines := server.Operations(ghapi.AuthorBaselines(0).Name)
+			Expect(baselines).To(HaveLen(1))
+			Expect(baselines[0].Variables).To(Equal(map[string]any{
+				"q0": "repo:ceph/ceph is:pr author:alice created:<2026-05-15",
+				"q1": "repo:ceph/ceph is:pr author:carol created:<2026-05-15",
+			}))
+			Expect(readJSON(filepath.Join(cacheDir, "authors.json"))).To(Equal(map[string]any{
+				"window_start": "2026-05-15T00:00:00Z",
+				"authors":      map[string]any{"alice": 3.0, "carol": 99.0},
+			}))
+			Expect(logged("asking every author's prior pull requests again")).To(HaveExactElements(And(
+				HaveKeyWithValue("level", "WARN"),
+				HaveKeyWithValue("reason", reason),
+				HaveKeyWithValue("window_start", "2026-05-15T00:00:00Z"),
+				HaveKeyWithValue("authors", 2.0),
+			)), "log:\n%s", logs.String())
+		},
+		Entry("a bare map, as written before authors.json recorded its window",
+			`{"carol": 7, "erin": 1}`, "the file does not record the window they were asked for"),
+		Entry("asked for another window",
+			`{"window_start": "2026-07-01T00:00:00Z", "authors": {"carol": 7, "erin": 1}}`, "they were asked for the window from 2026-07-01"),
+	)
+
+	It("leaves nothing a later run trusts when it stops between batches of baselines asked again", func() {
+		var prs []fetch.Entry
+		stale := map[string]int{}
+		for n := range 27 {
+			p := pr(n+1, n+1, "CLOSED")
+			login := fmt.Sprintf("dev%02d", n)
+			p.Author = user(login)
+			prs = append(prs, p)
+			stale[login] = 99
+		}
+		serve(prs...)
+		b, err := json.Marshal(stale)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(os.WriteFile(filepath.Join(cacheDir, "authors.json"), b, 0o600)).To(Succeed())
+		server.Intercept(func(_ int, r fetchtest.Request) *fetchtest.Reply {
+			if r.Operation == ghapi.AuthorBaselines(0).Name && len(server.Operations(r.Operation)) == 2 {
+				return rateLimited()
+			}
+			return nil
+		})
+
+		Expect(run(fetch.WindowStart)).To(MatchError(isRateLimit, "a *ghapi.RateLimitError"))
+
+		after := readJSON(filepath.Join(cacheDir, "authors.json"))
+		Expect(after).To(HaveKeyWithValue("window_start", "2026-05-15T00:00:00Z"))
+		Expect(after["authors"]).To(HaveLen(25), "only the first batch, asked again")
+		Expect(after["authors"]).To(HaveEach(0.0), "none of the stale counts")
+		Expect(filepath.Join(cacheDir, "meta.json")).NotTo(BeAnExistingFile())
+
+		server.Intercept(nil)
+		Expect(run(fetch.WindowStart)).To(Succeed())
+
+		last := server.Operations(ghapi.AuthorBaselines(0).Name)
+		Expect(last[len(last)-1].Variables).To(HaveLen(2), "the second run asks only the two left")
+		Expect(readJSON(filepath.Join(cacheDir, "authors.json"))["authors"]).To(And(HaveLen(27), HaveEach(0.0)))
 	})
 
 	It("asks for at most 25 authors in one request", func() {
@@ -781,7 +855,7 @@ var _ = Describe("Run", func() {
 			sizes = append(sizes, len(r.Variables))
 		}
 		Expect(sizes).To(Equal([]int{25, 2}))
-		Expect(readJSON(filepath.Join(cacheDir, "authors.json"))).To(HaveLen(27))
+		Expect(readJSON(filepath.Join(cacheDir, "authors.json"))).To(HaveKeyWithValue("authors", HaveLen(27)))
 	})
 
 	It("asks for the baselines and counts from ceph/ceph's creation by default", func() {
@@ -818,6 +892,19 @@ var _ = Describe("DefaultSince", func() {
 
 		Expect(fetch.DefaultSince(dataDir)).To(Equal(time.Date(2026, 11, 9, 6, 0, 0, 0, time.UTC)))
 	})
+
+	DescribeTable("by the window the meta records",
+		func(window string, want time.Time) {
+			Expect(os.WriteFile(filepath.Join(dataDir, "meta.json"),
+				[]byte(`{"repo":"ceph/ceph","window_start":"`+window+`","fetched_through":"2026-11-10T06:00:00Z"}`), 0o600)).To(Succeed())
+
+			Expect(fetch.DefaultSince(dataDir)).To(Equal(want))
+		},
+		Entry("the window start, when the data's window starts later, so the walk reaches what the data never covered",
+			"2026-07-01T00:00:00Z", fetch.WindowStart),
+		Entry("a day before the last fetch, when the data's window is the window in force",
+			fetch.WindowStart.Format(time.RFC3339), time.Date(2026, 11, 9, 6, 0, 0, 0, time.UTC)),
+	)
 
 	It("is an error naming the file when the meta cannot be read", func() {
 		path := filepath.Join(dataDir, "meta.json")
