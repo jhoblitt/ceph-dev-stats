@@ -607,6 +607,7 @@
   "70869": {"type":"Bug"},
   "70876": {"type":"Feature"},
   "70908": {"type":"Bug"},
+  "70910": {"type":"Tasks"},
   "70919": {"type":"Bug"},
   "70927": {"type":"Bug"},
   "70934": {"type":"Bug"},
@@ -5125,5 +5126,8 @@
   "83194": {"type":"Backport","parent":79444},
   "83195": {"type":"Backport","parent":79444},
   "83196": {"type":"Backport","parent":79444},
-  "83198": {"type":"Bug"}
+  "83198": {"type":"Bug"},
+  "83199": {"type":"Bug"},
+  "83200": {"type":"Bug"},
+  "83201": {"type":"Bug"}
 }
