@@ -24,7 +24,7 @@ var _ = Describe("Run", func() {
 
 	It("lists every subcommand in its help", func() {
 		Expect(run("--help")).To(Succeed())
-		for _, name := range []string{"fetch", "extract", "check", "rollup"} {
+		for _, name := range []string{"fetch", "extract", "tickets", "check", "rollup"} {
 			Expect(stdout.String()).To(MatchRegexp(`(?m)^  %s\s`, name), "subcommand %q", name)
 		}
 	})
