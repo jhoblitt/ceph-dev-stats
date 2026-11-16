@@ -78,3 +78,38 @@ test: ## Run every suite with the race detector
 
 .PHONY: check
 check: generate-check fmt-check vet lint fix-check tidy-check test ## The local gate
+
+# The statistics site under site/ (Vite, Svelte, TypeScript). Outside the
+# go-conventions contract above. The site fetches its data at run time from
+# site/public/data/, which `cephstats rollup` writes and git ignores.
+SITE_DIR := site
+SITE_DATA := $(SITE_DIR)/public/data
+SITE_FIXTURE := $(SITE_DIR)/src/lib/__fixtures__/data
+# npm ci writes this file, so it stands for node_modules installed from the
+# current lockfile.
+SITE_DEPS := $(SITE_DIR)/node_modules/.package-lock.json
+
+$(SITE_DEPS): $(SITE_DIR)/package-lock.json
+	cd $(SITE_DIR) && npm ci --ignore-scripts
+
+.PHONY: site-install
+site-install: ## Install the site's npm dependencies from the lockfile
+	cd $(SITE_DIR) && npm ci --ignore-scripts
+
+.PHONY: site-data
+site-data: ## Roll the records up into the site's data files
+	go run ./cmd/cephstats rollup --out $(SITE_DATA)
+
+.PHONY: site-dev-data
+site-dev-data: ## Use the test fixture as the site's data (no Go side needed)
+	rm -rf $(SITE_DATA)
+	mkdir -p $(SITE_DATA)
+	cp $(SITE_FIXTURE)/*.json $(SITE_DATA)/
+
+.PHONY: site-build
+site-build: $(SITE_DEPS) site-data ## Build the site into site/dist from freshly rolled-up data
+	cd $(SITE_DIR) && npm run build
+
+.PHONY: site-test
+site-test: $(SITE_DEPS) ## Typecheck and unit-test the site
+	cd $(SITE_DIR) && npm run typecheck && npm test
