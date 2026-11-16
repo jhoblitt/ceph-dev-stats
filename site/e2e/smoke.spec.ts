@@ -84,6 +84,16 @@ async function open(page: Page, hash = ''): Promise<void> {
   await expect(countsChart(page)).toBeVisible({ timeout: FIRST_FIGURES });
 }
 
+/** The bar the period controls are pinned to the top of the viewport in, while they are. */
+function banner(page: Page): Locator {
+  return page.locator('.period-banner');
+}
+
+/** How far down the viewport the pinned period controls reach: 0 while they are in their place. */
+async function bannerBottom(page: Page): Promise<number> {
+  return banner(page).evaluate((el) => (getComputedStyle(el).position === 'fixed' ? el.getBoundingClientRect().bottom : 0));
+}
+
 test('the page loads whole, with every section', async ({ page }) => {
   await open(page);
   await expect(page.getByRole('heading', { level: 1, name: 'Ceph pull requests' })).toBeAttached();
@@ -104,8 +114,11 @@ test('an address naming a section opens there once the page settles, and each se
   await page.waitForLoadState('networkidle');
   const heading = page.getByRole('heading', { level: 2, name: 'People', exact: true });
   const top = (await heading.boundingBox())?.y ?? -1;
-  expect(top, 'the People heading, from the top of the viewport').toBeGreaterThanOrEqual(0);
-  expect(top, 'the People heading, from the top of the viewport').toBeLessThan(100);
+  // Below the period controls pinned to the top of the viewport, and not far below them.
+  const below = await bannerBottom(page);
+  expect(below, 'the pinned period controls').toBeGreaterThan(0);
+  expect(top, 'the People heading, from the top of the viewport').toBeGreaterThanOrEqual(below);
+  expect(top, 'the People heading, from the top of the viewport').toBeLessThan(below + 100);
   await expect(page.locator('#people')).toBeFocused();
 
   for (const name of ['Velocity', 'Review', 'AI use', 'Each PR', 'Timelines', 'Pull requests', 'People']) {
@@ -431,7 +444,8 @@ test('the filter bar lines its fields up, row by row, on a wide screen and a pho
       type Field = { name: string; label: DOMRect | null; controls: DOMRect[] };
       const fields: Field[] = [];
       // A group's controls on its legend's line are its field; those it wraps onto later lines stand alone.
-      for (const fs of el.querySelectorAll(':scope > fieldset')) {
+      // The Period's group sits in the place it is pinned from.
+      for (const fs of el.querySelectorAll(':scope > fieldset, :scope > .period-slot fieldset')) {
         const name = fs.querySelector('legend')?.textContent?.trim() ?? '';
         const controls = [...fs.querySelectorAll('input[type="date"], .presets button, .segmented')].map(box);
         const line = Math.min(...controls.map((c) => c.bottom));
@@ -482,6 +496,110 @@ test('the filter bar lines its fields up, row by row, on a wide screen and a pho
     expect(bar.slack, `${width}px, the Target control's empty slack`).toBeLessThanOrEqual(1);
     expect(bar.sideways, `${width}px, sideways scroll`).toBe(false);
   }
+});
+
+/** Scrolls the People section, the last of the report, to the top of the viewport. */
+async function toPeople(page: Page): Promise<void> {
+  await page.getByRole('region', { name: 'People', exact: true }).evaluate((el) => el.scrollIntoView({ block: 'start' }));
+}
+
+/**
+ * Checks, with the People section scrolled to the top, that the period
+ * controls and the way back to the filters are pinned within the top
+ * `tallest` pixels of the viewport, one of each, every one a whole control
+ * tall, and that nothing scrolls sideways.
+ */
+async function pinnedInView(page: Page, label: string, tallest: number): Promise<void> {
+  await toPeople(page);
+  const back = page.getByRole('button', { name: 'Filters', exact: true });
+  await expect(back).toBeVisible();
+  const height = (await banner(page).boundingBox())?.height ?? Infinity;
+  expect(height, `${label}, the pinned period controls' height`).toBeLessThanOrEqual(tallest);
+
+  const controls = {
+    From: page.getByLabel('From', { exact: true }),
+    To: page.getByLabel('To', { exact: true }),
+    'Last 6 months': page.getByRole('button', { name: 'Last 6 months', exact: true }),
+    'All, from': page.getByRole('button', { name: /^All, from / }),
+    Filters: back,
+  };
+  for (const [name, c] of Object.entries(controls)) {
+    await expect(c, `${label}, ${name}`).toHaveCount(1);
+    await expect(c, `${label}, ${name}`).toBeVisible();
+    const box = (await c.boundingBox())!;
+    expect(box.y, `${label}, ${name}'s top`).toBeGreaterThanOrEqual(0);
+    expect(box.y + box.height, `${label}, ${name}'s bottom`).toBeLessThanOrEqual(height);
+    expect(box.height, `${label}, ${name}'s height`).toBeGreaterThanOrEqual(38);
+  }
+  await expect(page.getByRole('group', { name: 'Period' }).getByLabel('From', { exact: true })).toHaveCount(1);
+  expect(await page.evaluate(() => document.scrollingElement!.scrollWidth > window.innerWidth), `${label}, sideways scroll`).toBe(false);
+}
+
+for (const { width, tallest } of [
+  { width: 1280, tallest: 52 },
+  { width: 390, tallest: 96 },
+]) {
+  test(`at ${width}px the period controls stay at the top of the viewport down to the People section, one set of them`, async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width, height: 900 });
+    await open(page);
+    await pinnedInView(page, `${width}px`, tallest);
+
+    // Changed there, the period changes the address and the figures.
+    const to = page.getByLabel('To', { exact: true });
+    const before = await headline(page);
+    const day = `${Number(((await to.getAttribute('max')) ?? '').slice(0, 4)) - 1}-06-30`;
+    await to.fill(day);
+    await expect(page).toHaveURL(new RegExp(`[#&?]to=${day}(&|$)`));
+    await expect(countsChart(page)).not.toHaveAccessibleDescription(before);
+    await expect(to).toHaveValue(day);
+    await expect(to).toBeInViewport();
+  });
+}
+
+// The machine's own sans-serif is not the only one a reader's phone may have:
+// a wider face must not wrap the pinned controls onto more lines.
+test('at 390px in a wide typeface the pinned period controls keep to their two lines', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 900 });
+  await open(page);
+  await page.addStyleTag({ content: '* { font-family: "DejaVu Sans", Verdana, sans-serif !important; }' });
+  await pinnedInView(page, '390px, a wide typeface', 96);
+});
+
+test('the page below holds still as the period controls pin and unpin', async ({ page }) => {
+  for (const width of [1280, 390]) {
+    await page.setViewportSize({ width, height: 900 });
+    await open(page);
+    await page.waitForLoadState('networkidle');
+    const period = page.getByRole('group', { name: 'Period' });
+    const top = await period.evaluate((el) => el.getBoundingClientRect().top + window.scrollY);
+    // Where the People section is on the page, not in the viewport.
+    const people = () =>
+      page.getByRole('region', { name: 'People', exact: true }).evaluate((el) => el.getBoundingClientRect().top + window.scrollY);
+    const scroll = (y: number) => page.evaluate((to) => window.scrollTo(0, to), y);
+
+    await scroll(top - 1);
+    await expect.poll(() => bannerBottom(page), `${width}px, in place`).toBe(0);
+    const placed = await people();
+    await scroll(top + 1);
+    await expect.poll(() => bannerBottom(page), `${width}px, pinned`).toBeGreaterThan(0);
+    expect(await people(), `${width}px, the People section once pinned`).toBe(placed);
+    await scroll(top - 1);
+    await expect.poll(() => bannerBottom(page), `${width}px, in place again`).toBe(0);
+    expect(await people(), `${width}px, the People section once back in place`).toBe(placed);
+  }
+});
+
+test('Filters, on the pinned period controls, brings the filter bar back into view and focuses it', async ({ page }) => {
+  await open(page);
+  await toPeople(page);
+  const back = page.getByRole('button', { name: 'Filters', exact: true });
+  await back.click();
+  const bar = page.getByRole('region', { name: 'Filters', exact: true });
+  await expect(bar).toBeFocused();
+  await expect(bar).toBeInViewport();
+  await expect(back).toHaveCount(0);
 });
 
 test('the footer shows a version and the repository link', async ({ page }) => {
