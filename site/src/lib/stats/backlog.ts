@@ -2,7 +2,7 @@
 
 import type { Dataset } from '../data';
 import { AGE_BANDS, type AgeBand, DAY } from '../filters';
-import { type Period, type Step, bucketEnd, buckets } from './buckets';
+import { type Period, type Step, bucketEnd, buckets, stepFor } from './buckets';
 
 /** Each band's ages in days since opening, the lower bound inclusive. */
 const AGE_DAYS: Record<AgeBand, readonly [number, number]> = {
@@ -32,26 +32,62 @@ function lowerBound(sorted: ArrayLike<number>, x: number): number {
   return lo;
 }
 
+/** A stretch of time a row was open: the instants t with from < t <= to. */
+type Stretch = (r: number, from: number, to: number) => void;
+
 /**
- * The rows open at each bucket's end, or at `fetched_through` when that
- * comes first: opened before then and not inside a closed stretch. A
- * reopened row's closed stretches run from each `closed` event to the
- * `reopened` event after it; its last stretch ends at the final disposition.
+ * Walks a row's open stretches. A reopened row's closed stretches run from
+ * each `closed` event to the `reopened` event after it; its last open
+ * stretch ends at the final disposition.
+ */
+function openStretches(data: Dataset): (r: number, fn: Stretch) => void {
+  const p = data.prs;
+  const ev = data.events;
+  const closedKind = data.meta.event_kinds.indexOf('closed');
+  const reopenedKind = data.meta.event_kinds.indexOf('reopened');
+  return (r, fn) => {
+    const end = (p.closed[r] as number) < 0 ? Infinity : (p.closed[r] as number);
+    let from = p.created[r] as number;
+    let open = true;
+    if ((p.reopened[r] as number) > 0) {
+      for (let e = lowerBound(ev.pr, r); e < ev.pr.length && ev.pr[e] === r; e++) {
+        const kind = ev.kind[e];
+        if (open && kind === closedKind) {
+          fn(r, from, ev.at[e] as number);
+          open = false;
+        } else if (!open && kind === reopenedKind) {
+          from = ev.at[e] as number;
+          open = true;
+        }
+      }
+    }
+    if (open) fn(r, from, end);
+  };
+}
+
+/**
+ * The instant the backlog of the period's bucket starting at `bucket` is
+ * measured: the bucket's end, or the period's end or `fetched_through` when
+ * either comes first.
+ */
+export function backlogMoment(data: Dataset, period: Period, bucket: number): number {
+  return Math.min(bucketEnd(bucket, stepFor(period)), period.end, data.meta.fetched_through);
+}
+
+/**
+ * The rows open at each bucket's `backlogMoment`: opened before then and not
+ * inside a closed stretch.
  */
 export function backlog(data: Dataset, rows: Uint32Array, period: Period): Backlog {
   const b = buckets(period);
   if (rows.length === 0) return { week: [], step: b.step, bands: { lt7: [], '7-30': [], '30-90': [], gt90: [] } };
   const p = data.prs;
-  const ev = data.events;
-  const closedKind = data.meta.event_kinds.indexOf('closed');
-  const reopenedKind = data.meta.event_kinds.indexOf('reopened');
-  const now = data.meta.fetched_through;
-  const moments = Float64Array.from(b.starts, (s) => Math.min(bucketEnd(s, b.step), period.end, now));
+  const moments = Float64Array.from(b.starts, (s) => backlogMoment(data, period, s));
   // Per band, +1 where a row starts counting and -1 where it stops.
   const diff = AGE_BANDS.map(() => new Int32Array(moments.length + 1));
 
-  // Counts row `r` at each moment t with from < t <= to, in the band of its age at t.
-  const openBetween = (r: number, from: number, to: number) => {
+  // Counts row `r` at each moment in the stretch, in the band of its age then.
+  const count: Stretch = (r, from, to) => {
     const created = p.created[r] as number;
     AGE_BANDS.forEach((band, k) => {
       const [young, old] = AGE_DAYS[band.id];
@@ -66,25 +102,8 @@ export function backlog(data: Dataset, rows: Uint32Array, period: Period): Backl
     });
   };
 
-  for (let i = 0; i < rows.length; i++) {
-    const r = rows[i] as number;
-    const end = (p.closed[r] as number) < 0 ? Infinity : (p.closed[r] as number);
-    let from = p.created[r] as number;
-    let open = true;
-    if ((p.reopened[r] as number) > 0) {
-      for (let e = lowerBound(ev.pr, r); e < ev.pr.length && ev.pr[e] === r; e++) {
-        const kind = ev.kind[e];
-        if (open && kind === closedKind) {
-          openBetween(r, from, ev.at[e] as number);
-          open = false;
-        } else if (!open && kind === reopenedKind) {
-          from = ev.at[e] as number;
-          open = true;
-        }
-      }
-    }
-    if (open) openBetween(r, from, end);
-  }
+  const walk = openStretches(data);
+  for (let i = 0; i < rows.length; i++) walk(rows[i] as number, count);
 
   const bands = {} as Backlog['bands'];
   AGE_BANDS.forEach((band, k) => {
@@ -93,4 +112,30 @@ export function backlog(data: Dataset, rows: Uint32Array, period: Period): Backl
     bands[band.id] = b.starts.map((_, w) => (running += d[w] as number));
   });
   return { week: b.starts, step: b.step, bands };
+}
+
+/**
+ * The rows open at instant `at` whose age then falls in `band`. With `at`
+ * the `backlogMoment` of a bucket, these are the PRs behind that band of the
+ * bucket's bar.
+ */
+export function backlogRows(data: Dataset, rows: Uint32Array, band: AgeBand, at: number): Uint32Array {
+  const p = data.prs;
+  const [young, old] = AGE_DAYS[band];
+  const walk = openStretches(data);
+  let open = false;
+  const openAt: Stretch = (_r, from, to) => {
+    if (from < at && at <= to) open = true;
+  };
+  const out = new Uint32Array(rows.length);
+  let n = 0;
+  for (let i = 0; i < rows.length; i++) {
+    const r = rows[i] as number;
+    const created = p.created[r] as number;
+    if (!(created + young * DAY <= at && at < created + old * DAY)) continue;
+    open = false;
+    walk(r, openAt);
+    if (open) out[n++] = r;
+  }
+  return out.slice(0, n);
 }
