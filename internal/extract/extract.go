@@ -35,18 +35,25 @@ var eventKinds = map[string]string{
 // FromEntry turns one cached pull request into its record. PriorPRs is
 // left nil: it depends on the other records.
 func FromEntry(e fetch.Entry) (record.Record, error) {
+	r, _, err := fromEntry(e)
+	return r, err
+}
+
+// fromEntry is FromEntry, also returning what Candidates withheld.
+func fromEntry(e fetch.Entry) (r record.Record, withheld map[string]int, err error) {
 	state, ok := states[e.State]
 	if !ok {
-		return record.Record{}, fmt.Errorf("pull request %d: unknown state %q", e.Number, e.State)
+		return record.Record{}, nil, fmt.Errorf("pull request %d: unknown state %q", e.Number, e.State)
 	}
 	events, err := lifecycle(e.TimelineItems)
 	if err != nil {
-		return record.Record{}, fmt.Errorf("pull request %d: %w", e.Number, err)
+		return record.Record{}, nil, fmt.Errorf("pull request %d: %w", e.Number, err)
 	}
 	messages := make([]string, len(e.Commits))
 	for i, c := range e.Commits {
 		messages[i] = c.Message
 	}
+	disclosure, withheld := Candidates(messages, e.Body)
 	return record.Record{
 		Number:      e.Number,
 		Updated:     utc(e.UpdatedAt),
@@ -65,9 +72,9 @@ func FromEntry(e fetch.Entry) (record.Record, error) {
 		Events:      events,
 		Reviews:     reviews(e.Reviews),
 		Comments:    comments(e.Comments),
-		Disclosure:  Candidates(messages, e.Body),
+		Disclosure:  disclosure,
 		KindHints:   Hints(messages, e.Body),
-	}, nil
+	}, withheld, nil
 }
 
 // utc is t as the records hold every time: UTC, to the second.

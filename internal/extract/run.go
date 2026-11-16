@@ -55,21 +55,21 @@ func Run(ctx context.Context, cfg Config) error {
 	if err != nil {
 		return err
 	}
-	byNumber, replaced, odd, err := upsert(cfg, numbers)
+	u, err := upsert(cfg, numbers)
 	if err != nil {
 		return err
 	}
-	if len(odd) > 0 {
+	if len(u.odd) > 0 {
 		log.WarnContext(ctx, "event addresses without an event id",
-			slog.Int("events", len(odd)),
-			slog.String("example", odd[0]))
+			slog.Int("events", len(u.odd)),
+			slog.String("example", u.odd[0]))
 	}
 
 	authors, cacheHasAuthors, err := mergeAuthors(cfg)
 	if err != nil {
 		return err
 	}
-	recs := slices.SortedFunc(maps.Values(byNumber), func(a, b record.Record) int { return cmp.Compare(a.Number, b.Number) })
+	recs := slices.SortedFunc(maps.Values(u.byNumber), func(a, b record.Record) int { return cmp.Compare(a.Number, b.Number) })
 	setPriorPRs(recs, authors)
 
 	written, err := record.WriteRecords(cfg.DataDir, recs)
@@ -84,43 +84,66 @@ func Run(ctx context.Context, cfg Config) error {
 	if err := copyMeta(cfg); err != nil {
 		return err
 	}
+	// withheld_by_domain's keys are only a plain domain, "other" or "no
+	// address", never the withheld text: the lines may name a person.
 	log.InfoContext(ctx, "extract finished",
 		slog.Int("cached", len(numbers)),
-		slog.Int("replaced", replaced),
+		slog.Int("replaced", u.replaced),
 		slog.Int("records", len(recs)),
-		slog.Int("months_written", len(written)))
+		slog.Int("months_written", len(written)),
+		slog.Any("withheld_by_domain", u.withheld))
 	return nil
 }
 
+// upserted is what upsert did.
+type upserted struct {
+	// byNumber is every record, by pull request number.
+	byNumber map[int]record.Record
+	// replaced counts the records derived from the cache.
+	replaced int
+	// odd is the event addresses of the derived records that held no
+	// event id.
+	odd []string
+	// withheld counts the disclosure lines the derived records did not
+	// keep, by the key Candidates gives each: what may be an address that
+	// is not a tool's, or a Co-authored-by that names more than a tool.
+	withheld map[string]int
+}
+
 // upsert reads the committed records and replaces each with its cached
-// pull request's by the rule Run states. It returns the records by number, how many it replaced, and the
-// event addresses of the replacements that held no event id.
-func upsert(cfg Config, numbers []int) (byNumber map[int]record.Record, replaced int, odd []string, err error) {
+// pull request's by the rule Run states.
+func upsert(cfg Config, numbers []int) (upserted, error) {
 	existing, err := record.ReadRecords(cfg.DataDir)
 	if err != nil {
-		return nil, 0, nil, err
+		return upserted{}, err
 	}
-	byNumber = make(map[int]record.Record, len(existing)+len(numbers))
+	u := upserted{
+		byNumber: make(map[int]record.Record, len(existing)+len(numbers)),
+		withheld: map[string]int{},
+	}
 	for i := range existing {
-		byNumber[existing[i].Number] = existing[i]
+		u.byNumber[existing[i].Number] = existing[i]
 	}
 	for _, n := range numbers {
 		e, err := fetch.ReadEntry(cfg.CacheDir, n)
 		if err != nil {
-			return nil, 0, nil, err
+			return upserted{}, err
 		}
-		if old, ok := byNumber[n]; ok && !cfg.All && !replaces(e, old) {
+		if old, ok := u.byNumber[n]; ok && !cfg.All && !replaces(e, old) {
 			continue
 		}
-		r, err := FromEntry(e)
+		r, withheld, err := fromEntry(e)
 		if err != nil {
-			return nil, 0, nil, err
+			return upserted{}, err
 		}
-		byNumber[n] = r
-		replaced++
-		odd = append(odd, oddAddresses(e)...)
+		u.byNumber[n] = r
+		u.replaced++
+		u.odd = append(u.odd, oddAddresses(e)...)
+		for domain, count := range withheld {
+			u.withheld[domain] += count
+		}
 	}
-	return byNumber, replaced, odd, nil
+	return u, nil
 }
 
 // replaces reports whether entry e is newer than record old, or as new and

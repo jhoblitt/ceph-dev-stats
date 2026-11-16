@@ -1,9 +1,11 @@
 package extract_test
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"io/fs"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -297,6 +299,34 @@ var _ = Describe("Run", func() {
 		run(false)
 
 		Expect(records()).To(HaveLen(1))
+	})
+
+	It("gives the count of withheld lines by a well-formed domain, other or no address in its closing log line, and no address or name", func() {
+		e := entry(1, "alice", day(6, 1))
+		e.Commits = []fetch.Commit{{
+			AuthoredDate: day(6, 1), CommittedDate: day(6, 1),
+			Message: "rgw: fix\n\nCo-authored-by: Claude Dupont <claude.dupont@example.com>\nCo-authored-by: Claude <noreply@anthropic.com>\nCo-authored-by: Claude Martin\n",
+		}}
+		e.Body = "Original-Author: Claude X <x@y>\nCo-authored-by: Ana Smith <ana.smith@Example.com>, Claude\nGenerated with Claude, ask jo@exa_mple.com\n"
+		cache(e)
+		var logs bytes.Buffer
+		logger := slog.New(slog.NewJSONHandler(&logs, nil))
+
+		Expect(extract.Run(context.Background(), extract.Config{CacheDir: cacheDir, DataDir: dataDir, Logger: logger})).To(Succeed())
+
+		var finished []map[string]any
+		for line := range bytes.Lines(logs.Bytes()) {
+			var m map[string]any
+			Expect(json.Unmarshal(line, &m)).To(Succeed(), "log line %s", line)
+			if m["msg"] == "extract finished" {
+				finished = append(finished, m)
+			}
+		}
+		Expect(finished).To(HaveExactElements(HaveKeyWithValue("withheld_by_domain", map[string]any{"example.com": 2.0, "y": 1.0, "other": 1.0, "no address": 1.0})), "log:\n%s", logs.String())
+		for _, s := range []string{"@", "claude.dupont", "Dupont", "Ana", "Smith", "Martin", "exa_mple"} {
+			Expect(logs.String()).NotTo(ContainSubstring(s), "log:\n%s", logs.String())
+		}
+		Expect(records()[1].Disclosure.Trailers).To(Equal([]string{"Co-authored-by: Claude <noreply@anthropic.com>"}))
 	})
 
 	It("is an error naming the entry when one cannot be read", func() {
