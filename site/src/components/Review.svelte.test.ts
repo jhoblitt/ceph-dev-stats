@@ -98,6 +98,37 @@ function sharesAt(curve: Curve, day: number): number[] {
   return names.map((n, k) => (i === -1 ? (k === names.length - 1 && names.length === 3 ? 1 : 0) : (curve.shares[n] as number[])[i] as number));
 }
 
+describe('the note on reviews before GitHub recorded them', () => {
+  // The fixture with a window from 2014, so a period can start before reviews were recorded.
+  const early = { 'meta.json': { ...rawMeta, window_start: Date.UTC(2014, 0, 1) / 1000 } };
+  const NOTE = /^GitHub recorded no reviews of pull requests before 14 Sep 2016, and this period starts earlier/;
+  const notes = () => screen.queryAllByRole('note').filter((n) => NOTE.test(n.textContent ?? ''));
+
+  it('is absent over the default period', async () => {
+    render(App, (await fixturePage('', early)).props);
+    expect(notes()).toEqual([]);
+  });
+
+  it('shows over the review and bot-review figures and both People tables for a period from 2014, linking to the methods section', async () => {
+    render(App, (await fixturePage('#/?target=main&from=2014-01-01', early)).props);
+    const shown = notes();
+    expect(shown.map((n) => n.closest('section')?.id)).toEqual(['review', 'llm', 'people']);
+    // At the top of People, above the Authors table and its median to first response.
+    const people = screen.getByRole('region', { name: 'People' });
+    const authors = within(people).getByRole('heading', { name: 'Authors' });
+    expect(shown[2]?.compareDocumentPosition(authors)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+    // At the top of Review, above its first chart.
+    const firstChart = section().getAllByRole('figure')[0] as HTMLElement;
+    expect(shown[0]?.compareDocumentPosition(firstChart)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+    expect(shown[0]?.textContent).toContain('its first responses count only comments then, not reviews');
+    for (const n of shown) {
+      expect(within(n).getByRole('link').getAttribute('href')).toBe(
+        '#/methods?target=main&from=2014-01-01&section=limits-reviews-before-github-recorded-them',
+      );
+    }
+  });
+});
+
 describe('Review', () => {
   it('draws every chart, in order', async () => {
     render(App, (await fixturePage('')).props);

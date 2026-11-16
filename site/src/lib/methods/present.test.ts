@@ -73,6 +73,7 @@ describe('inline figures on the fixture', () => {
     ['view.openedBefore', '2'],
     ['view.notDisclosedInPeriod', '67%'],
     ['view.disclosedInPeriod', '100%'],
+    ['const.reviewsRecordedFrom', '2016-09-14'],
     ['const.compareWeeks', '4'],
     ['const.compareNeeded', '8'],
     ['people.authors', '6'],
@@ -87,7 +88,7 @@ describe('inline figures on the fixture', () => {
   });
 
   it('has a spec above for every inline figure', () => {
-    expect(Object.keys(INLINE_FIGURES).length).toBe(42);
+    expect(Object.keys(INLINE_FIGURES).length).toBe(43);
   });
 });
 

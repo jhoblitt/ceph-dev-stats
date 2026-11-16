@@ -17,6 +17,8 @@ import {
   curveQuantiles,
   reviewerShareText,
   reviewsModel,
+  reviewsRecordedNote,
+  REVIEWS_RECORDED_FROM,
   BUSIEST_COMMANDS,
   spanNote,
   spanTitle,
@@ -383,6 +385,24 @@ describe('waitsNothing', () => {
   it('says no PR was opened when none was', () => {
     const none = waitsModel(weekly(data, new Uint32Array(0), period, waitingSeries('merge')), opened, 'merge');
     expect(waitsNothing(none, 'merge', 0)).toBe('no PR was opened in this period');
+  });
+});
+
+describe('reviewsRecordedNote', () => {
+  it('says nothing over the default period', () => {
+    expect(reviewsRecordedNote(defaultFilters(META))).toBeNull();
+  });
+
+  it('says that the figures understate review before reviews were recorded, and what first responses count then, for a period from 2014', () => {
+    expect(reviewsRecordedNote({ from: '2014-01-01', to: '2026-11-15' })).toBe(
+      'GitHub recorded no reviews of pull requests before 14 Sep 2016, and this period starts earlier. Its figures about reviews, approvals and reviewers understate review before that day, and its first responses count only comments then, not reviews.',
+    );
+  });
+
+  it('starts saying it on the first day before reviews were recorded', () => {
+    expect(at('2016-09-14T00:00:00Z')).toBe(REVIEWS_RECORDED_FROM);
+    expect(reviewsRecordedNote({ from: '2016-09-14', to: '2017-12-31' })).toBeNull();
+    expect(reviewsRecordedNote({ from: '2016-09-13', to: '2017-12-31' })).not.toBeNull();
   });
 });
 

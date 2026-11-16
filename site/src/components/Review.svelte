@@ -47,6 +47,7 @@
   import BucketChart from './charts/BucketChart.svelte';
   import ChartFrame from './charts/ChartFrame.svelte';
   import StepCurve from './charts/StepCurve.svelte';
+  import ReviewsRecordedNote from './ReviewsRecordedNote.svelte';
 
   const { selection, data, view } = getPage();
 
@@ -183,6 +184,7 @@
 
 <section id="review" aria-labelledby="review-heading" class:stale={sectionsStale($view, $data)} aria-busy={sectionsBusy($view, $data) ? 'true' : undefined}>
   <h2 id="review-heading">Review</h2>
+  <ReviewsRecordedNote />
 
   <ChartFrame
     title="Review capacity against arrivals, per {step}"

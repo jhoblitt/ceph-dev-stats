@@ -16,6 +16,7 @@
   import { type AuthorColumn, type ReviewerColumn, type Sort, nextSort, sameSort } from '../lib/sort';
   import { authorRows, reviewerRows } from '../lib/stats/people';
   import PeopleTable from './PeopleTable.svelte';
+  import ReviewsRecordedNote from './ReviewsRecordedNote.svelte';
 
   const { selection, data, view } = getPage();
   const uid = $props.id();
@@ -62,6 +63,8 @@
   {#if empty}
     <p class="muted">no PRs match</p>
   {:else}
+    <!-- Over both tables: the Authors table's median to first response reads reviews too. -->
+    <ReviewsRecordedNote />
     <div class="part">
       <h3 id="{uid}-authors">Authors</h3>
       <p role="status">
