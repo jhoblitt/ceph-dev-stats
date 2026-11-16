@@ -557,6 +557,17 @@ test('every chart over the period has the same plot edges, down the whole page',
   }
 });
 
+test('the tools’ shares are one plot, with a legend entry for each tool its table lists', async ({ page }) => {
+  await open(page);
+  const figure = page.getByRole('figure', { name: /^Share of PRs opened naming each tool, per / });
+  await expect(figure.locator('svg[role="group"]')).toHaveCount(1);
+  const families = (await figure.locator('table thead th').allTextContents()).slice(1);
+  expect(families.length).toBeGreaterThan(1);
+  const legend = await figure.getByRole('list', { name: 'Legend' }).getByRole('listitem').allTextContents();
+  expect(legend.filter((l) => !/^partial /.test(l))).toEqual(families);
+  await expect(figure.locator('.plot-panel .line')).toHaveCount(families.length);
+});
+
 test('the filter bar lines its fields up, row by row, on a wide screen and a phone', async ({ page }) => {
   for (const width of [1280, 390]) {
     await page.setViewportSize({ width, height: 900 });

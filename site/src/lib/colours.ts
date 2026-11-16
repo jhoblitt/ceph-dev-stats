@@ -1,22 +1,23 @@
 // What every colour on the page stands for. A colour keeps one meaning
 // across all the charts, so a reader who learns "orange is disclosed" is
 // never told otherwise; a chart takes its colours from here and nowhere else.
+// The one exception is the tool families' lines (`FAMILY_LINES`), which
+// borrow series hues and so also carry a marker and a dash of their own.
 //
 // Validated with the dataviz skill's palette checks, in both themes, for
 // every pair that touches in a chart:
 // - the outcomes, all pairs (they meet as lines in one curve);
 // - the review kinds, adjacent (they stack);
 // - disclosure, adjacent (it stacks).
-// The PRs naming a tool family all disclose, so the family panels are drawn
-// in the disclosed colour, each named by its panel.
 // No outcome or review-kind hue clears the floors against both disclosure
 // hues, so no line is drawn over the disclosure bars: a chart that sets them
 // against each other stacks them in panels on one time axis.
 
+import type { Shape } from './charts';
 import type { AGE_BANDS } from './filters';
 
 export const COLOURS = {
-  /** PRs by disclosure, and the tool families named by the disclosing. Nothing else uses these two. */
+  /** PRs by disclosure. Nothing else uses these two. */
   notDisclosed: 'var(--series-1)',
   disclosed: 'var(--series-2)',
 
@@ -43,6 +44,36 @@ export const COLOURS = {
   /** The key of a bucket the period or the fetch cuts short; its marks are drawn faded. */
   partial: 'var(--text-faint)',
 } as const;
+
+/** How one tool family's line is drawn: its colour, and a marker and a dash that tell it apart without colour. */
+export interface FamilyLine {
+  color: string;
+  shape: Shape;
+  dashed: boolean;
+}
+
+/**
+ * The tool families' lines, by family id, all in one plot. Every PR naming a
+ * family discloses, so no family takes a disclosure hue: the six tools take
+ * the other six series hues, and "unspecified", which names no tool, the
+ * neutral ink. A family keeps its line whichever families the selection names.
+ *
+ * Lines cross, so every pair meets, and no six of these hues clear the floors
+ * for all pairs in both themes. The three families named most, Claude, IBM
+ * Bob and OpenAI, take three that do. Every pair that fails a floor differs
+ * in marker, and where it fails the normal-vision floor, in dash as well:
+ * Cursor and Copilot (both themes), OpenAI and Gemini, IBM Bob and Copilot
+ * (dark).
+ */
+export const FAMILY_LINES: Readonly<Record<string, FamilyLine>> = {
+  claude: { color: 'var(--series-7)', shape: 'circle', dashed: false },
+  'ibm-bob': { color: 'var(--series-4)', shape: 'circle', dashed: true },
+  openai: { color: 'var(--series-3)', shape: 'diamond', dashed: true },
+  cursor: { color: 'var(--series-5)', shape: 'square', dashed: true },
+  gemini: { color: 'var(--series-6)', shape: 'square', dashed: false },
+  copilot: { color: 'var(--series-8)', shape: 'triangle', dashed: false },
+  unspecified: { color: COLOURS.statistic, shape: 'diamond', dashed: false },
+};
 
 /**
  * The timelines of PRs. Colour says who acted, in the review hues' meaning

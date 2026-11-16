@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { render, screen, within } from '@testing-library/svelte';
+import { fireEvent, render, screen, within } from '@testing-library/svelte';
 import { beforeAll, describe, expect, it } from 'vitest';
 import App from '../App.svelte';
 import { fixturePage, meta } from '../lib/__fixtures__/page';
@@ -44,20 +44,43 @@ describe('LlmUse', () => {
     expect(cells(figure)).toEqual(shares.map((v) => [v === null ? 'no PRs opened' : formatShare(v)]));
   });
 
-  it('gives each tool family used its own panel, named with its count', async () => {
+  it('draws each tool family used as a line of one plot, on one scale, named in the legend above it', async () => {
     render(App, (await fixturePage('')).props);
     const figure = section().getByRole('figure', { name: FAMILIES });
-    expect(figure.querySelectorAll('.plot-panel')).toHaveLength(2);
-    expect(figure.textContent).toContain('Claude: 2 PRs, 29% of those opened');
-    expect(figure.textContent).toContain('GitHub Copilot: 1 PR, 14% of those opened');
-    expect(figure.textContent).toContain('do not add up to the share disclosing');
-    // One scale: both panels' top ticks agree.
-    const tops = [...figure.querySelectorAll('.axis-y')].map((a) => [...a.querySelectorAll('text:not(.unit)')].at(-1)?.textContent);
-    expect(tops).toHaveLength(2);
-    expect(tops[0]).toBe(tops[1]);
+    expect(figure.querySelectorAll('svg[role="group"]')).toHaveLength(1);
+    expect(figure.querySelectorAll('.plot-panel')).toHaveLength(1);
+    expect(figure.querySelectorAll('.axis-y')).toHaveLength(1);
     expect(figure.querySelectorAll('.plot-panel .line')).toHaveLength(2);
+    expect(figure.textContent).toContain('do not add up to the share disclosing');
+    const legend = within(figure).getByRole('list', { name: 'Legend' });
+    const entries = within(legend).getAllByRole('listitem').map((li) => li.textContent?.trim());
+    expect(entries.slice(0, 2)).toEqual(['Claude', 'GitHub Copilot']);
+    expect(legend.compareDocumentPosition(figure.querySelector('svg[role="group"]') as Element) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     const claude = weekly(data, rows, period, 'disclosureShare').values['claude'] ?? [];
     expect(cells(figure).map((c) => c[0])).toEqual(claude.map((v) => (v === null ? 'no PRs opened' : formatShare(v))));
+  });
+
+  it('draws the tools’ chart as tall as the share chart above it, whatever the number of families', async () => {
+    render(App, (await fixturePage('')).props);
+    const height = (name: string) => section().getByRole('figure', { name }).querySelector('svg[role="group"]')?.getAttribute('height');
+    expect(height(FAMILIES)).toBe(height(SHARE));
+  });
+
+  it('reads out every family’s share in a bucket, on hover and in its name', async () => {
+    render(App, (await fixturePage('')).props);
+    const figure = section().getByRole('figure', { name: FAMILIES });
+    const shares = weekly(data, rows, period, 'disclosureShare').values;
+    const buttons = within(figure).getAllByRole('button');
+    const i = (shares['claude'] ?? []).findIndex((v) => v !== null);
+    const bucket = buttons[i] as HTMLElement;
+    const value = (id: string) => {
+      const v = shares[id]?.[i] ?? null;
+      return v === null ? 'no PRs opened' : formatShare(v);
+    };
+    expect(bucket.getAttribute('aria-label')).toContain(`Claude ${value('claude')}, GitHub Copilot ${value('copilot')}`);
+    await fireEvent.pointerEnter(bucket);
+    const tip = figure.querySelector('.tip') as HTMLElement;
+    expect([...tip.querySelectorAll('tr')].map((r) => r.querySelector('.label')?.textContent)).toEqual(['Claude', 'GitHub Copilot']);
   });
 
   it('sets the two groups side by side with the library’s figures and what each rests on', async () => {
