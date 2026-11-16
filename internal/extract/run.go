@@ -24,8 +24,9 @@ type Config struct {
 	CacheDir string
 	// DataDir holds the committed prs/, authors.json and meta.json.
 	DataDir string
-	// All re-derives the record of every cached pull request, not only of
-	// those updated since their record was written.
+	// All re-derives the record of every cached pull request, including
+	// those whose cache entry is older than their record, or as old and of
+	// an older format.
 	All bool
 	// Logger receives progress; slog.Default() when nil.
 	Logger *slog.Logger
@@ -37,7 +38,10 @@ var entryName = regexp.MustCompile(`^(\d+)\.json$`)
 
 // Run upserts the records in cfg.DataDir from the cache in cfg.CacheDir.
 // A cached pull request replaces its record when it was updated after the
-// record was, or always with cfg.All. Every record's prior_prs is then
+// record, when it was updated at the same time and is in the current
+// FormatVersion, or always with cfg.All. So an entry fetched again in a
+// newer format re-derives its record, and an entry of an older format
+// never strips what a newer one added. Every record's prior_prs is then
 // recomputed, since a newly added pull request can come before others by
 // the same author, and only the monthly files whose bytes change are
 // rewritten. The cache's baselines are added to data/authors.json, and its
@@ -51,9 +55,14 @@ func Run(ctx context.Context, cfg Config) error {
 	if err != nil {
 		return err
 	}
-	byNumber, replaced, err := upsert(cfg, numbers)
+	byNumber, replaced, odd, err := upsert(cfg, numbers)
 	if err != nil {
 		return err
+	}
+	if len(odd) > 0 {
+		log.WarnContext(ctx, "event addresses without an event id",
+			slog.Int("events", len(odd)),
+			slog.String("example", odd[0]))
 	}
 
 	authors, cacheHasAuthors, err := mergeAuthors(cfg)
@@ -84,12 +93,12 @@ func Run(ctx context.Context, cfg Config) error {
 }
 
 // upsert reads the committed records and replaces each with its cached
-// pull request's when the cache holds a later update, or always with
-// cfg.All. It returns the records by number and how many it replaced.
-func upsert(cfg Config, numbers []int) (byNumber map[int]record.Record, replaced int, err error) {
+// pull request's by the rule Run states. It returns the records by number, how many it replaced, and the
+// event addresses of the replacements that held no event id.
+func upsert(cfg Config, numbers []int) (byNumber map[int]record.Record, replaced int, odd []string, err error) {
 	existing, err := record.ReadRecords(cfg.DataDir)
 	if err != nil {
-		return nil, 0, err
+		return nil, 0, nil, err
 	}
 	byNumber = make(map[int]record.Record, len(existing)+len(numbers))
 	for i := range existing {
@@ -98,19 +107,33 @@ func upsert(cfg Config, numbers []int) (byNumber map[int]record.Record, replaced
 	for _, n := range numbers {
 		e, err := fetch.ReadEntry(cfg.CacheDir, n)
 		if err != nil {
-			return nil, 0, err
+			return nil, 0, nil, err
 		}
-		if old, ok := byNumber[n]; ok && !cfg.All && !utc(e.UpdatedAt).After(old.Updated) {
+		if old, ok := byNumber[n]; ok && !cfg.All && !replaces(e, old) {
 			continue
 		}
 		r, err := FromEntry(e)
 		if err != nil {
-			return nil, 0, err
+			return nil, 0, nil, err
 		}
 		byNumber[n] = r
 		replaced++
+		odd = append(odd, oddAddresses(e)...)
 	}
-	return byNumber, replaced, nil
+	return byNumber, replaced, odd, nil
+}
+
+// replaces reports whether entry e is newer than record old, or as new and
+// in the current format.
+func replaces(e fetch.Entry, old record.Record) bool {
+	switch utc(e.UpdatedAt).Compare(old.Updated) {
+	case 1:
+		return true
+	case 0:
+		return e.FormatVersion >= fetch.FormatVersion
+	default:
+		return false
+	}
 }
 
 // cachedNumbers lists the pull requests in the cache, in order.

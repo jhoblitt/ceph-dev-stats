@@ -12,7 +12,10 @@
   "deletions": 35,
   "files": 9,
   "labels": ["dashboard"],
-  "commits": {"count": 2, "first_authored": "2026-08-30T08:00:00Z", "last_committed": "2026-09-08T16:00:01Z"},
+  "commits": {"count": 2, "first_authored": "2026-08-30T08:00:00Z", "last_committed": "2026-09-08T16:00:01Z", "list": [
+    {"authored": "2026-08-30T08:00:00Z", "committed": "2026-09-08T16:00:00Z"},
+    {"authored": "2026-09-03T08:00:00Z", "committed": "2026-09-08T16:00:01Z"}
+  ]},
   "prior_prs": null,
   "events": [
     {"at": "2026-09-02T08:00:00Z", "kind": "force_push"},

@@ -57,7 +57,7 @@ var _ = Describe("records", func() {
 		return filepath.Join(dataDir, record.PRsDir, month+".jsonl")
 	}
 
-	It("writes a record as one line with Seam 2's keys in order and no HTML escaping", func() {
+	It("writes a record as one line with Seam 2's keys in order, no HTML escaping, and no link field that has nothing to hold", func() {
 		r := record.Record{
 			Number:      71234,
 			Updated:     at("2026-06-02T10:00:00Z"),
@@ -75,14 +75,21 @@ var _ = Describe("records", func() {
 				Count:         2,
 				FirstAuthored: new(at("2026-05-19T07:00:00Z")),
 				LastCommitted: new(at("2026-05-21T09:00:00Z")),
+				List: []record.Commit{
+					{SHA: "9f1c", Authored: at("2026-05-20T07:00:00Z"), Committed: at("2026-05-21T09:00:00Z")},
+					{Authored: at("2026-05-19T07:00:00Z"), Committed: at("2026-05-20T09:00:00Z")},
+				},
 			},
 			PriorPRs: new(5),
-			Events:   []record.Event{{At: at("2026-06-01T00:00:00Z"), Kind: record.KindMerged}},
+			Events: []record.Event{
+				{At: at("2026-05-31T00:00:00Z"), Kind: record.KindReopened},
+				{At: at("2026-06-01T00:00:00Z"), Kind: record.KindMerged, ID: 28644873432, SHA: "c0ff"},
+			},
 			Reviews: []record.Review{
-				{At: at("2026-05-30T00:00:00Z"), By: "bob", State: record.ReviewApproved},
+				{At: at("2026-05-30T00:00:00Z"), ID: 3412345678, By: "bob", State: record.ReviewApproved},
 			},
 			Comments: []record.Comment{
-				{At: at("2026-05-21T00:00:00Z"), By: "carol", Text: "jenkins test make check"},
+				{At: at("2026-05-21T00:00:00Z"), ID: 4854682435, By: "carol", Text: "jenkins test make check"},
 				{At: at("2026-05-22T00:00:00Z"), By: "github-actions", Bot: true},
 			},
 			Disclosure: record.Disclosure{
@@ -97,11 +104,14 @@ var _ = Describe("records", func() {
 				`"author":{"login":"alice","bot":false},"association":"member","base":"main",` +
 				`"created":"2026-05-20T08:00:00Z","state":"merged","draft":false,` +
 				`"additions":10,"deletions":2,"files":3,"labels":["core","rgw"],` +
-				`"commits":{"count":2,"first_authored":"2026-05-19T07:00:00Z","last_committed":"2026-05-21T09:00:00Z"},` +
+				`"commits":{"count":2,"first_authored":"2026-05-19T07:00:00Z","last_committed":"2026-05-21T09:00:00Z",` +
+				`"list":[{"sha":"9f1c","authored":"2026-05-20T07:00:00Z","committed":"2026-05-21T09:00:00Z"},` +
+				`{"authored":"2026-05-19T07:00:00Z","committed":"2026-05-20T09:00:00Z"}]},` +
 				`"prior_prs":5,` +
-				`"events":[{"at":"2026-06-01T00:00:00Z","kind":"merged"}],` +
-				`"reviews":[{"at":"2026-05-30T00:00:00Z","by":"bob","bot":false,"state":"approved"}],` +
-				`"comments":[{"at":"2026-05-21T00:00:00Z","by":"carol","bot":false,"text":"jenkins test make check"},` +
+				`"events":[{"at":"2026-05-31T00:00:00Z","kind":"reopened"},` +
+				`{"at":"2026-06-01T00:00:00Z","kind":"merged","id":28644873432,"sha":"c0ff"}],` +
+				`"reviews":[{"at":"2026-05-30T00:00:00Z","id":3412345678,"by":"bob","bot":false,"state":"approved"}],` +
+				`"comments":[{"at":"2026-05-21T00:00:00Z","id":4854682435,"by":"carol","bot":false,"text":"jenkins test make check"},` +
 				`{"at":"2026-05-22T00:00:00Z","by":"github-actions","bot":true}],` +
 				`"disclosure":{"trailers":["Assisted-by: Claude"],"description":[],"commit_prose":[]}}` + "\n"))
 	})
@@ -181,7 +191,7 @@ var _ = Describe("records", func() {
 	It("reads a record carrying fields it does not know, or lacking some", func() {
 		Expect(os.MkdirAll(filepath.Join(dataDir, record.PRsDir), 0o750)).To(Succeed())
 		Expect(os.WriteFile(monthFile("2026-05"), []byte(
-			`{"number":1,"created":"2026-05-20T00:00:00Z","comments":[{"at":"2026-05-21T00:00:00Z","by":"bob","bot":false,"id":"IC_x"}],"later":{"list":[]}}`+"\n"+
+			`{"number":1,"created":"2026-05-20T00:00:00Z","comments":[{"at":"2026-05-21T00:00:00Z","by":"bob","bot":false,"node_id":"IC_x"}],"later":{"list":[]}}`+"\n"+
 				`{"number":2}`+"\n"), 0o600)).To(Succeed())
 
 		got, err := record.ReadRecords(dataDir)
@@ -189,6 +199,30 @@ var _ = Describe("records", func() {
 		Expect(err).NotTo(HaveOccurred())
 		Expect(got).To(HaveLen(2))
 		Expect(got[0].Comments).To(ConsistOf(HaveField("By", "bob")))
+	})
+
+	It("reads a record written before records carried links, and writes it back byte for byte", func() {
+		line := `{"number":70001,"updated":"2026-06-20T17:30:00Z","title":"squid: rgw: fix a <leak> & a race",` +
+			`"author":{"login":"alice-example","bot":false},"association":"member","base":"squid",` +
+			`"created":"2026-06-02T08:00:00Z","state":"merged","draft":false,"additions":40,"deletions":12,"files":3,` +
+			`"labels":["rgw","squid"],` +
+			`"commits":{"count":2,"first_authored":"2026-02-10T08:00:00Z","last_committed":"2026-06-01T12:05:00Z"},` +
+			`"prior_prs":3,` +
+			`"events":[{"at":"2026-06-20T17:00:00Z","kind":"merged"},{"at":"2026-06-20T17:00:00Z","kind":"closed"}],` +
+			`"reviews":[{"at":"2026-06-10T15:00:00Z","by":"bob-example","bot":false,"state":"approved"}],` +
+			`"comments":[{"at":"2026-06-03T09:00:00Z","by":"alice-example","bot":false,"text":"jenkins test make check"}],` +
+			`"disclosure":{"trailers":["Assisted-by: Claude Code"],"description":[],"commit_prose":[]}}` + "\n"
+		Expect(os.MkdirAll(filepath.Join(dataDir, record.PRsDir), 0o750)).To(Succeed())
+		Expect(os.WriteFile(monthFile("2026-06"), []byte(line), 0o600)).To(Succeed())
+
+		got, err := record.ReadRecords(dataDir)
+
+		Expect(err).NotTo(HaveOccurred())
+		Expect(got).To(HaveLen(1))
+		Expect(got[0].Commits.List).To(BeNil())
+		Expect(got[0].Events).To(HaveEach(And(HaveField("ID", BeZero()), HaveField("SHA", BeEmpty()))))
+		Expect(record.WriteRecords(dataDir, got)).To(BeEmpty(), "rewriting the record changed its bytes")
+		Expect(readFile(monthFile("2026-06"))).To(Equal(line))
 	})
 
 	It("is an error when a pull request is recorded twice", func() {

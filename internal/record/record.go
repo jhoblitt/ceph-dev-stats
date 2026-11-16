@@ -81,27 +81,47 @@ type Commits struct {
 	FirstAuthored *time.Time `json:"first_authored"`
 	// LastCommitted is the latest committer date.
 	LastCommitted *time.Time `json:"last_committed"`
+	// List is every commit, in the order GitHub gives them. It is nil in a
+	// record written before records carried it.
+	List []Commit `json:"list,omitzero"`
 }
 
-// Event is a lifecycle event; Kind is one of the Kind constants.
+// Commit is one commit of a pull request. SHA is empty when the cache did
+// not have it.
+type Commit struct {
+	SHA       string    `json:"sha,omitzero"`
+	Authored  time.Time `json:"authored"`
+	Committed time.Time `json:"committed"`
+}
+
+// Event is a lifecycle event; Kind is one of the Kind constants. ID is the
+// number in the event's GitHub address, #event-<id>, which a reopening
+// does not have. SHA is the merge commit of a merge and the pushed commit
+// of a force-push. Either is zero when there is nothing to hold.
 type Event struct {
 	At   time.Time `json:"at"`
 	Kind string    `json:"kind"`
+	ID   int64     `json:"id,omitzero"`
+	SHA  string    `json:"sha,omitzero"`
 }
 
-// Review is a submitted review; State is one of the Review constants.
+// Review is a submitted review; State is one of the Review constants. ID
+// is GitHub's database id, zero when the cache did not have it.
 type Review struct {
 	At    time.Time `json:"at"`
+	ID    int64     `json:"id,omitzero"`
 	By    string    `json:"by"`
 	Bot   bool      `json:"bot"`
 	State string    `json:"state"`
 }
 
-// Comment is a conversation comment. Text is kept only for a comment that
-// is a single line of at most 80 characters after trimming, and is empty
+// Comment is a conversation comment. ID is GitHub's database id, zero when
+// the cache did not have it. Text is kept only for a comment that is a
+// single line of at most 80 characters after trimming, and is empty
 // otherwise.
 type Comment struct {
 	At   time.Time `json:"at"`
+	ID   int64     `json:"id,omitzero"`
 	By   string    `json:"by"`
 	Bot  bool      `json:"bot"`
 	Text string    `json:"text,omitempty"`

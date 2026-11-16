@@ -182,18 +182,32 @@ var _ = Describe("Run", func() {
 		Expect(records()[changed.Number].State).To(Equal(record.StateMerged))
 	})
 
-	It("keeps a record whose cache entry is no newer, unless asked for all", func() {
+	It("re-derives a record from a current-format cache entry at the same updatedAt", func() {
 		e := fixture("force-pushed")
+		e.FormatVersion = fetch.FormatVersion
 		cache(e)
 		run(false)
 
 		e.Title = "a title changed without moving updatedAt"
 		cache(e)
 		run(false)
+
+		Expect(records()[e.Number].Title).To(Equal("a title changed without moving updatedAt"))
+	})
+
+	It("keeps a record whose cache entry is older, unless asked for all", func() {
+		e := fixture("force-pushed")
+		cache(e)
+		run(false)
+
+		e.UpdatedAt = e.UpdatedAt.Add(-time.Hour)
+		e.Title = "a title from an older entry"
+		cache(e)
+		run(false)
 		Expect(records()[e.Number].Title).To(Equal("mgr/dashboard: page the host list"))
 
 		run(true)
-		Expect(records()[e.Number].Title).To(Equal("a title changed without moving updatedAt"))
+		Expect(records()[e.Number].Title).To(Equal("a title from an older entry"))
 	})
 
 	It("counts an author's earlier PRs in the window on top of their baseline", func() {
