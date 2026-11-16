@@ -40,7 +40,12 @@ behaviour and records the ruling in the PR description.
 - No test calls the live API. Fetch is tested against `httptest` servers and
   recorded responses.
 - Raw API responses live in `.cache/` and are gitignored. Committed:
-  `data/prs/*.jsonl`, `data/authors.json`, `data/meta.json`, `data/*.yaml`.
+  `data/prs/*.jsonl`, `data/authors.json`, `data/meta.json`,
+  `data/tickets.json`, `data/*.yaml`.
+- Requests to tracker.ceph.com are anonymous, sequential, batched, at most
+  one a second, and send a User-Agent naming the tool and its version and
+  nothing about its user. A ticket already in `data/tickets.json` is not
+  asked for again.
   Everything under `site/public/data/` is build output and gitignored. No
   derived statistic is committed.
 - All times are UTC. A week is an ISO week, Monday 00:00 UTC.
@@ -101,10 +106,13 @@ internal/extract/           raw PR → record
 internal/tables/            the hand-edited YAML tables: load and validate
 internal/classify/          record + tables → kinds, disclosure, components
 internal/rollup/            classified records → site data files
+internal/tracker/           tracker.ceph.com: ticket types, batched and polite
 data/tools.yaml             what counts as a disclosure, and tool families
 data/bots.yaml              bot accounts GitHub types as users
 data/commands.yaml          bot commands
 data/labels.yaml            label → component, process state, or other
+data/kinds.yaml             what makes a PR a bug fix, a feature, …
+data/tickets.json           type of each tracker ticket a record references
 data/prs/YYYY-MM.jsonl      committed records, by month opened
 data/authors.json           prior-PR baselines at the window start
 data/meta.json              window start, fetch high-water mark, counts
@@ -167,7 +175,8 @@ same bytes.
   "events":   [ {"at", "kind": "ready|draft|force_push|closed|reopened|merged", "id", "sha"} ],
   "reviews":  [ {"at", "id", "by", "bot", "state": "approved|changes_requested|commented|dismissed"} ],
   "comments": [ {"at", "id", "by", "bot", "text"} ],
-  "disclosure": {"trailers": [], "description": [], "commit_prose": []} }
+  "disclosure": {"trailers": [], "description": [], "commit_prose": []},
+  "kind_hints": {"checklist": [], "tickets": [], "backport_of": n} }
 ```
 
 - Times are RFC 3339 UTC to the second. Lists are in time order.
@@ -184,9 +193,14 @@ same bytes.
   most 80 characters after trimming. That is what the bot-command table and
   the "looks like a command" report need; longer comments are not stored.
 - `disclosure` holds candidates, not verdicts, de-duplicated:
-  - `trailers`: a commit trailer line whose key or value matches the broad
-    word list, except that a `Co-authored-by:` line is kept only when its
-    value matches. This keeps people's names and addresses out of the data.
+  - `trailers`: a commit-message line of the form `Key: value`, anywhere
+    in the message, whose key matches the broad word list, or whose key ends
+    in `-by` and whose value matches it. So a `Co-authored-by:` naming a
+    person is dropped. Lines with these keys are never kept, in a commit or
+    in a description: `Signed-off-by`, `Reviewed-by`, `Tested-by`,
+    `Acked-by`, `Reported-by`, `Suggested-by`, `Cc`, `Fixes`, `Resolves`,
+    `See-also`, `Backport`, `Change-Id`, `Conflicts`, `Link`, `URL`. This
+    keeps people's names and addresses out of the data.
   - `description` and `commit_prose`: lines of the PR description, and of
     commit messages outside trailers, that match the broad word list, each
     cut at 200 characters.
@@ -194,7 +208,23 @@ same bytes.
     keep every form listed in the spec's Measurements.
 - `prior_prs` is the author's baseline from `data/authors.json` plus the
   number of that author's records opened at or after the window start and
-  before this PR. It is `null` for a PR opened before the window start.
+  before this PR. It is `null` for a PR opened before the window start,
+  and for an author with no baseline (a bot, a deleted account).
+- `kind_hints` holds what a kind can be decided from, not the decision:
+  - `checklist`: the ticked boxes of the PR template's Tracker section, as
+    `references_ticket`, `very_recent_bug`, `new_feature`, `doc_update`,
+    `code_cleanup`, in that order;
+  - `tickets`: the tracker.ceph.com issue numbers the PR references, first
+    from its commits' `Fixes:` trailers in commit order, then from its
+    description, de-duplicated;
+  - `backport_of`: the PR number a description's "backport of" names.
+  An empty hint is left out, and so is `kind_hints` when all three are.
+
+`data/tickets.json`: an object, ticket number → `{"type", "parent"}`,
+keys in numeric order. `type` is the tracker's name for the ticket's type,
+empty when the tracker would not show the ticket. `parent` is the ticket a
+Backport ticket was copied from, left out otherwise; a parent is itself an
+entry.
 
 `data/meta.json`: `repo`, `window_start`, `fetched_through` (when the last
 walk began), and GitHub's counts from that walk.
@@ -215,6 +245,12 @@ labels.yaml
   components: [ {id, name, labels: [name or glob, …]} ]
   process: [name or glob, …]
   other: [name or glob, …]
+kinds.yaml
+  kinds: [ {id, name} ]               # bugfix, feature, cleanup, docs, other
+  checklist: { new_feature: feature, … }      # a box → a kind
+  tracker: { Bug: bugfix, Backport: parent, … }   # a ticket type → a kind
+  labels: { bug-fix: bugfix, … }
+  order: [checklist, tracker, labels]
 ```
 
 ### Seam 4 — site data (Task 6 → Tasks 7–12)
@@ -223,8 +259,8 @@ Under `site/public/data/`, fetched at run time, never bundled.
 
 - `meta.json`: `repo`, `fetched_through`, `window_start`, `years`, and the
   dictionaries every index below refers to: `bases`, `components`,
-  `families`, `commands`, `disclosure` (`none`, `description`, `coauthor`,
-  `trailer`), `event_kinds`.
+  `families`, `commands`, `kinds`, `disclosure` (`none`, `description`,
+  `coauthor`, `trailer`), `event_kinds`.
 - `prs-<year>.json`, the year the PR opened; arrays of equal length, rows
   sorted by number. Times are epoch seconds; `-1` means none or unknown.
 
@@ -234,8 +270,10 @@ Under `site/public/data/`, fetched at run time, never bundled.
   additions deletions files commits
   first_commit last_commit first_response first_approval
   human_reviews bot_reviews bot_commands
-  disclosure families[][] components[][] standing
+  disclosure families[][] components[][] standing kind
   ```
+
+  `kind` indexes `kinds`, a list of `{id, name}`; `-1` is unknown.
 
 - `events-<year>.json`: arrays `pr` (row in that year's file), `at`, `kind`,
   `sub`, `actor`; sorted by `pr`, then `at`. Kinds: `comment_other`,
@@ -250,7 +288,10 @@ Under `site/public/data/`, fetched at run time, never bundled.
   committed]`, and `refs`, one string per event of that year's events file
   in the same order: the comment, review or event id, or the SHA for
   `merged` and `force_push`, or the empty string. The site builds every
-  GitHub address from these and the PR number.
+  GitHub address from these and the PR number. It carries too, per PR
+  row, `tickets` (the referenced ticket numbers), `backport_of` (the PR
+  number, or `0`) and `kind_source` (`checklist`, `tracker`, `labels`,
+  `original` or the empty string).
 - Rulings made while building, part of this seam: `window_start` and
   `fetched_through` in `meta.json` are epoch seconds; `components`,
   `families` and `commands` are lists of `{id, name}`, and `bases`,
@@ -399,6 +440,52 @@ the build.
 
 - [ ] Tests first, implement, pass. `make check`.
 
+### Task 15: What kind of change a PR is
+
+Runs after Task 3, beside Task 14. The owner asked for it during the build
+and chose to read ticket types from tracker.ceph.com.
+
+**Files:** `internal/extract/*`, `internal/record/*`, `internal/tracker/*`,
+`internal/cli/tickets.go`, `internal/cli/root.go`, their tests and fixtures.
+
+**Behaviour:**
+- `extract` fills `kind_hints` as Seam 2 says. A box is ticked when its
+  line reads `[x]` or `[X]`. A ticket is any
+  `tracker.ceph.com/issues/<digits>`. "backport of" is followed by a
+  ceph/ceph pull-request URL or `#<digits>`, in any case.
+- `cephstats tickets [--data data] [--tracker-url https://tracker.ceph.com]`
+  collects the ticket numbers of every record, drops those already in
+  `data/tickets.json`, and asks the tracker for the rest, 100 to a request,
+  through its issue list filtered by id with every status and with
+  relations included. For a Backport ticket it records the ticket it was
+  copied from as `parent` and asks for that one too. A ticket the tracker
+  does not return is recorded with an empty type, so it is not asked for
+  again. The file is rewritten sorted, through a temporary file and a
+  rename, after each batch.
+- The requests follow the Global Constraints. A failed request is retried
+  with backoff three times; then the run stops with what it has saved.
+- `cephstats tickets --refresh` asks again for the tickets whose type is
+  empty.
+
+**Tests** (an `httptest` server; no test reaches the tracker):
+- ticks, tickets and "backport of" in each form above give the expected
+  hints, in the stated order; a box not ticked, a ticket URL of another
+  host and a "backport of" with no number give none; a record with no
+  hints has no `kind_hints` key;
+- 250 unknown tickets take three requests of at most 100 ids, a second run
+  takes none, and the request carries the User-Agent and no credentials;
+- a Backport ticket's parent is recorded and fetched; a ticket the tracker
+  omits gets an empty type, is skipped on the next run, and is asked for
+  again with `--refresh`;
+- two requests are at least the configured interval apart (the clock is
+  injected);
+- a server that fails four times ends the run with the earlier batches
+  saved.
+
+- [ ] Tests first, implement, pass. `make check`.
+- [ ] The controller confirms once against the live tracker that the
+  filtered list returns types and relations as the code expects.
+
 ### Task 4: Tables, classification and `cephstats check`
 
 **Files:** `internal/tables/*`, `internal/classify/*`,
@@ -417,6 +504,13 @@ Measurements, CI's `data-check` job, `make data-check`.
 - **Families**: every family whose pattern matches a counted disclosure's
   text.
 - **Components**: the components whose labels the PR carries.
+- **Kind**, by `kinds.yaml`'s `order`: `checklist` gives a kind when the
+  ticked boxes that name one all name the same one; `tracker` gives the
+  kind of the first ticket in `kind_hints.tickets` whose type maps to one,
+  a type mapped to `parent` standing for its parent ticket; `labels` gives
+  the kind of a kind label when all such labels agree. A PR with
+  `backport_of` takes that PR's kind first, when it is in the records and
+  has one, and its source is `original`. No source gives unknown.
 
 **Behaviour — `cephstats check`** fails, listing every problem, on:
 - a table that does not parse, an invalid regexp, a duplicate id;
@@ -424,6 +518,8 @@ Measurements, CI's `data-check` job, `make data-check`.
   `Co-authored-by`, nor covered by `ignore`;
 - a counted disclosure whose text matches no family;
 - a label carried by 5 or more PRs that no table entry classifies;
+- a ticket type in `data/tickets.json` that `kinds.yaml` does not map, or a
+  kind it names that is not in `kinds`;
 - records whose counts disagree with `data/meta.json`'s GitHub counts by
   more than 0.5%, which allows for PRs opened or closed during the walk.
 
@@ -446,9 +542,10 @@ not typed bots; and the base branches seen, with their counts.
 
 This is the analysis the page rests on.
 
-- [ ] `make data-refresh`: `cephstats fetch`, then `extract`, then `check`,
-  taking the token from `gh auth token` when the environment has none. Run
-  it for the first time with `fetch --full` (unsandboxed).
+- [ ] `make data-refresh`: `cephstats fetch`, then `extract`, then
+  `tickets`, then `check`, taking the token from `gh auth token` when the
+  environment has none. Run it for the first time with `fetch --full`
+  (unsandboxed).
 - [ ] Work `cephstats check` to a clean pass by filling the tables:
   - `labels.yaml`: every label carried by 5 or more PRs, as a component, a
     process state or other.
@@ -457,6 +554,9 @@ This is the analysis the page rests on.
   - `bots.yaml`: user-typed accounts whose comments are automated.
   - `tools.yaml`: trailer keys, phrases, families. `LLM` and `AI` alone map
     to a family named "unspecified".
+  - `kinds.yaml`: every ticket type the tracker returned, the four
+    checklist boxes, and the kind labels. Record in the PR description how
+    many PRs each source decided and how many stay unknown.
 - [ ] Spot-check 30 PRs by hand against GitHub: 10 disclosed, 10 not, 5
   backports, 5 with bot commands. Record each disagreement and its fix.
 - [ ] Record in the PR description: the counts beside GitHub's, the API
@@ -492,6 +592,8 @@ the records and tables. Per PR:
   `created`. `last_commit`: `commits.last_committed`.
 - `standing`: `prior_prs`, or `-1`. `in_window`: `created` at or after the
   window start.
+- `kind`: the classification's kind as an index into `kinds`, or `-1`. The
+  table file carries each row's `tickets`, `backport_of` and `kind_source`.
 - `actor` indexes are assigned in order of first appearance over the whole
   dataset, so they are stable for a given set of records.
 - `table-<year>.json` carries `commits` and `refs` as Seam 4 says: `refs`
@@ -605,6 +707,28 @@ reviewerShare(data, rows, top: number): number
 - Property: for random rows, shares are monotone, within [0, 1], and sum
   with `S` to one.
 
+### Task 16: Kind in the site
+
+Runs after Task 8 and before Task 9.
+
+**Files:** `site/src/lib/{data,filters,state,select}.ts`,
+`site/src/components/FilterBar.svelte`, the fixture, their tests.
+
+**Behaviour:**
+- `data.ts` reads `meta.kinds` and the `kind` column, and checks every
+  value is `-1` or inside the dictionary.
+- The filter bar gains Kind: all, each kind in `meta.kinds`, and unknown.
+  It is kept in the URL like the others; an unknown value falls back to
+  all.
+- `select` applies it.
+- The hand-made fixture gains `kinds` and a `kind` column covering every
+  kind and unknown.
+
+**Tests:** the filter round-trips through the hash and an unknown value
+yields all; each kind alone selects the rows a hand count of the fixture
+gives; a year file with a `kind` outside the dictionary is rejected by
+name.
+
 ### Task 9: Velocity and Review views
 
 **Files:** `site/src/components/{charts/*,Velocity,Review}.svelte`, tests.
@@ -649,10 +773,13 @@ empty selection.
   coloured by disclosure; an open PR is a hollow dot at its age. Hover
   shows the PR's number; click selects it.
 - PR table: the PRs of the current selection, virtualised; columns number,
-  title, author, opened, state, waits, size, disclosure, reopened; sortable;
-  each number links to the PR on GitHub, and a selected PR shows an "Open
-  on GitHub" link. It loads `table-<year>.json` when
-  first shown.
+  title, author, opened, state, kind, waits, size, disclosure, reopened;
+  sortable; each number links to the PR on GitHub. It loads
+  `table-<year>.json` when first shown.
+- A selected PR shows an "Open on GitHub" link, its kind and what decided
+  it, a link to each tracker ticket it references
+  (`https://tracker.ceph.com/issues/<n>`), and, for a backport, a link to
+  the PR it backports. These come from the table file.
 
 **Tests:** the side-by-side figures equal the statistics library's for the
 two selections; the table shows exactly the selected rows and sorts; a
@@ -698,6 +825,10 @@ such PR"; lanes cap at 200 and say so.
 - [ ] What six months cannot show: no pre-LLM baseline, and unknown author
   standing for PRs opened before the window.
 - [ ] The hand-edited tables, linked to their files in the repository.
+- [ ] How a PR's kind is decided, how many PRs each source decided and how
+  many are unknown, computed from the data; that a ticket's type is the
+  tracker's and may be wrong; and that the tracker lists the motion on the
+  trailer rule as defeated.
 - [ ] How to check a number: the PR table and the links to GitHub. What
   links where, and that a reopening has no address of its own.
 - [ ] Every claim about the code's behaviour is checked against the code
@@ -730,14 +861,17 @@ such PR"; lanes cap at 200 and say so.
 ## Order
 
 ```
-1 ─┬─ 2 ─ 3 ─ 14 ─ 4 ─ 5 ─ 6 ─────────┐
-   └─ 7 ─ 8 ─ 9 ─┬─ 10 ─┐             ├─ 13
-                 └─ 11 ─┴─ 12 ────────┘
+1 ─┬─ 2 ─ 3 ─┬─ 14 ─┬─ 4 ─ 5 ─ 6 ─────────┐
+   │         └─ 15 ─┘                     ├─ 13
+   └─ 7 ─ 8 ─ 16 ─ 9 ─┬─ 10 ─┐            │
+                      └─ 11 ─┴─ 12 ───────┘
 ```
 
-The Go line (2–6, with 14 after 3) and the site line (7–11) run side by
-side. Task 10 needs Task 9's shared chart parts; Tasks 10 and 11 are
-independent of each other. Task 13 needs all of them.
+The Go line (2–6, with 14 and 15 after 3) and the site line (7–11, with 16
+after 8) run side by side. Tasks 14 and 15 both extend the record and
+`extract`, in different fields; the second to merge rebases. Task 10 needs
+Task 9's shared chart parts; Tasks 10 and 11 are independent of each other.
+Task 13 needs all of them.
 
 ## Self-review notes
 
@@ -753,6 +887,10 @@ independent of each other. Task 13 needs all of them.
 - The spec leaves author standing's source to the builder; this plan takes
   a per-author baseline at the window start (Tasks 2, 3) and marks older
   PRs unknown. The full history removes the baseline.
+- The kind of change was added by the owner during the build, with the
+  tracker as a source: Task 15 gathers the hints and the ticket types,
+  Task 4 decides, Task 6 ships the column, Task 16 filters on it, Task 10
+  shows it and Task 12 explains it.
 - Links back to GitHub were added by the owner during the build: Task 14
   carries the identifiers through fetch and extract, Task 6 ships them,
   Tasks 10 and 11 draw the links, Tasks 12 and 13 document and test them.

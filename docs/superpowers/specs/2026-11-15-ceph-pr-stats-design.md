@@ -35,6 +35,8 @@ GitHub Pages publishes it.
 - Links from everything on the page back to GitHub: the PR, each comment,
   each review, each commit, and each lifecycle event GitHub gives an
   address.
+- Each PR's kind, where it can be told: bug fix, feature, cleanup or
+  documentation.
 - Drill-down: filters that recompute everything, and a table of the PRs
   behind the current selection, each linking to GitHub.
 - Easy to update: one command refreshes the data.
@@ -49,7 +51,8 @@ GitHub Pages publishes it.
 - A stage for QA runs taken from label history. Time after approval is
   reported as one stage in the first version.
 - A scheduled, automatic refresh.
-- Repositories other than `ceph/ceph`, and tracker.ceph.com data.
+- Repositories other than `ceph/ceph`. From tracker.ceph.com only a
+  ticket's type is read, and nothing else.
 - The full history, and the pre-LLM baseline it would give. Six months shows
   the current state and its trend only.
 
@@ -87,6 +90,10 @@ GitHub Pages publishes it.
   opening, comments and bot commands, and the time of the final disposition.
 - **Closed and reopened**: the page says whether a PR was closed and then
   reopened. The owner asked for this as a bonus.
+- **Feature or bug fix** (added 2026-11-15, during the build): besides
+  marking backports, the page tries to say whether a PR is a feature or a
+  bug fix. The owner chose to read ticket types from tracker.ceph.com for
+  it, which this design had ruled out.
 - **Links back to GitHub** (added 2026-11-15, during the build): the corpus
   includes what links a PR, its comments, its commits and the rest to their
   GitHub pages, so a reader can drill all the way down to the GitHub UI.
@@ -138,6 +145,14 @@ GitHub Pages publishes it.
 - **Reopened PRs**: the final disposition is the last close or merge, and
   time to merge or close runs from the opening to it. A PR is not in the
   backlog while it was closed. "Was reopened" is a filter and a column.
+- **A PR's kind comes from three sources, in an order a table sets.** The
+  PR's own checklist counts when its ticks agree on one kind; then the type
+  of the first tracker ticket it references; then a kind label. A backport
+  takes the kind of the PR it names when that PR is in the data, else its
+  ticket's. The record keeps the hints, not the verdict, and the mapping
+  and the order are a hand-edited table, so either can change without a new
+  pull. A PR none of the three says anything about is "unknown", and the
+  page shows how many are.
 - **Identifiers are stored, not addresses.** A record keeps each comment's
   and review's GitHub id, each commit's SHA and each lifecycle event's id,
   and the page builds the address from them. A stored address would add
@@ -267,6 +282,19 @@ commit `…/pull/N/commits/<sha>`, and a marked-ready or closed event
 field. A force-push carries the commits before and after it. A reopening
 carries no address.
 
+Kind, counted on 2026-11-15 over the 3,477 PRs to `main` opened in the
+window: 1,255 state a kind themselves, by a checklist box other than
+"References tracker ticket" or by a kind label; 2,198 reference a tracker
+ticket; 3,089 do one or the other, and 388 neither. Of 1,503 PRs to other
+branches, 1,378 name the PR they backport or a ticket. The PRs reference
+4,008 distinct tickets. The tracker answers `…/issues/<id>.json`
+anonymously with the ticket's type, one of: Bug, Enhancement, Feature,
+Support, Cleanup, Tasks, Documentation, Subtask, Backport, QA Run, QA
+Review, Motion, Election, Assignment, Working Group, Ceph Release.
+
+The tracker lists the Steering Committee motion on the trailer rule (issue
+79745) as "Defeated", as read on 2026-11-15.
+
 ## Constraints
 
 - GitHub Pages serves static files only: data is produced before the build,
@@ -283,6 +311,9 @@ carries no address.
   (comments, reviews, pushes, labels, closing) must be confirmed before the
   refresh is relied on, and a full re-pull must stay cheap as the fallback.
 - Workflows follow the github-conventions canon.
+- Requests to tracker.ceph.com are anonymous, sequential and batched, name
+  the tool and nothing about its user, and ask for each ticket once: a
+  ticket's type is kept and not asked for again.
 
 ## Approaches
 
@@ -362,6 +393,14 @@ such event; none while the PR is open.
 **Backlog at a moment.** PRs open at that moment: opened at or before it,
 and not inside a closed stretch.
 
+**Kind.** Bug fix, feature, cleanup, documentation, other, or unknown. The
+checklist boxes "New feature", "Very recent bug", "Doc update" and "Code
+cleanup" each name one. A ticket's type names one: Bug is a bug fix,
+Feature and Enhancement a feature, Cleanup a cleanup, Documentation
+documentation, and the rest other; a Backport ticket stands for the ticket
+it was copied from. The labels `bug-fix`, `feature` and `cleanup` each name
+one. Which source wins is the table's order.
+
 ## Statistics
 
 - **Outcome curves.** For PRs opened in a period: by day N, the share
@@ -387,6 +426,7 @@ and not inside a closed stretch.
 │ Ceph pull requests              data as of 2026-11-15         │
 │ Period ▾  [main|backports|all]  Component ▾  Size ▾           │
 │ Author standing ▾   Disclosure ▾   Drafts ▾   Reopened ▾      │
+│ Kind ▾                                                        │
 ├───────────────────────────────────────────────────────────────┤
 │ Velocity                                                      │
 │   PRs per week: opened (disclosed / not) · merged · closed    │
@@ -418,6 +458,8 @@ and not inside a closed stretch.
   links to the PR on GitHub.
 - Every PR, comment, review, commit and addressable lifecycle event shown
   links to its page on GitHub.
+- A PR shows its kind and what decided it, links to the tracker tickets it
+  references, and, for a backport, links to the PR it backports.
 - Filters and the selection live in the URL, so a view can be linked.
 - The central chart for the thesis sets PRs arriving, split by disclosure,
   against human reviews done and the people doing them.
@@ -456,17 +498,19 @@ against the calendar or against days since opening.
    text matched. Records are committed as text, one PR per line,
    grouped by the month the PR opened, so a refresh rewrites only the months
    that changed.
-3. **Check.** Validate the hand-edited tables against the records, and
+3. **Tickets.** Read from tracker.ceph.com the type of every ticket the
+   records reference and do not yet know, and commit the result.
+4. **Check.** Validate the hand-edited tables against the records, and
    report unmapped disclosure spellings, labels no table classifies,
    frequent commenters that look like bots, and frequent short comments
    that look like commands.
-4. **Roll up.** At site build, apply the tables and write the site's data:
+5. **Roll up.** At site build, apply the tables and write the site's data:
    columns per year, the events of each PR (about 19 per PR in the May
    batch), and titles apart. This is build output
    and is not committed.
 
 Hand-edited tables: tool families, bot accounts, bot commands, label
-classes.
+classes, and what makes a PR which kind.
 
 ## Repository, release and deploy
 
