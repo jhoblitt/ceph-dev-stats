@@ -373,6 +373,20 @@ var _ = Describe("Build", func() {
 			Expect(t.Tickets).To(Equal([][]int{{}, {90002, 90001}}))
 			Expect(t.BackportOf).To(Equal([]int{0, 1}))
 		})
+
+		DescribeTable("backport_link: whether the description links the pull request it backports",
+			func(hints *record.KindHints, want int64) {
+				r := pr(2)
+				r.Base = "squid"
+				r.KindHints = hints
+				Expect(build(r).one("backport_link")).To(Equal(want))
+			},
+			Entry("a link to one in the data", &record.KindHints{BackportOf: 1}, int64(1)),
+			Entry("a link to one not in the data", &record.KindHints{BackportOf: 99999}, int64(1)),
+			Entry("hints with no link", &record.KindHints{Tickets: []int{90002}}, int64(0)),
+			Entry("no hints", nil, int64(0)),
+			Entry("a link that is not a pull request number", &record.KindHints{BackportOf: -1}, int64(0)),
+		)
 	})
 
 	Describe("events", func() {

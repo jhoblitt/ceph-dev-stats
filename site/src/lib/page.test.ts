@@ -744,7 +744,7 @@ describe('the years a period loads hold its whole selection', () => {
     const files = years.map((year) => {
       const { rows, events } = byYear.get(year) as { rows: Row[]; events: Event[] };
       const d = dataset(rows, events, window);
-      return { year, prs: d.prs, events: d.events };
+      return { year, prs: d.prs, events: d.events, linksRecorded: true };
     });
     return { meta: { ...dataset([], [], window).meta, years }, years: files };
   }

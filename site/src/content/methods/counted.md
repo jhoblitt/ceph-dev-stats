@@ -18,6 +18,8 @@ A pull request that finished before {{windowStart}} can be among the records too
 
 - **Period**: every pull request open at some point in the period, that is, opened before the period ends and not finished before it starts. Counts by calendar week, such as merges, reviews, bot commands and the backlog, count what happened in each week of the period to those pull requests; over a period longer than 53 weeks they count by calendar month instead. Counts of pull requests opened, the outcome curves and the figures by week opened take only those opened during the period.
 - **Target**: `main`, the development branch under either of its names, `main` or `master`; or every other branch together as "backports and other branches"; or all. See [Target, component and kind](#kind).
+- **Branch**: keeps the pull requests on one base branch, as GitHub reports it at the last fetch, chosen from the branches the target holds, each offered with how many pull requests on it were open at some point in the period whatever the other filters; a change of target to one that does not hold the chosen branch sets the filter back to any branch.
+- **Backport link**: "links its original" keeps the pull requests whose description says "backport of" followed by a link to a ceph/ceph pull request or its number, as [Target, component and kind](#kind) describes, and "no link" keeps the rest, which can still be backports, since the older releases' backports seldom carry that line.
 - **Component** and **kind**: see [Target, component and kind](#kind). A pull request with two components is in both.
 - **Size**: lines added plus lines deleted.
 - **Author standing**: see [What the data cannot show](#limits).

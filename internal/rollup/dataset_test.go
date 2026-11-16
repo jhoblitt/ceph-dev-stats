@@ -83,6 +83,7 @@ var _ = Describe("the hand-made dataset", func() {
 		Expect(m.PeopleDeleted).NotTo(BeEmpty(), "a deleted account named by its commits")
 		Expect(m.People).To(ContainElement("ghost"), "the pooled deleted accounts beside it")
 		Expect(o.col(2025, "in_window")).To(ContainElement(int64(0)))
+		Expect(o.col(2026, "backport_link")).To(ContainElements(int64(0), int64(1)), "a backport that links its original and PRs that do not")
 	})
 
 	It("files a pull request under the year it finished in, not the year it opened in", func() {

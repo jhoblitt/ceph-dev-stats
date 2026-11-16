@@ -28,6 +28,8 @@ const defaults: AppState = {
     from: '2026-05-15',
     to: '2026-11-15',
     target: 'main',
+    base: null,
+    backportLink: null,
     component: null,
     size: null,
     standing: null,
@@ -69,6 +71,8 @@ describe('round trip through the hash', () => {
       from: '2026-06-01',
       to: '2026-09-30',
       target: 'backports',
+      base: 'squid',
+      backportLink: 'unlinked',
       component: 'rgw',
       size: '101-1000',
       standing: 'unknown',
@@ -98,6 +102,11 @@ describe('round trip through the hash', () => {
     ['period', { filters: { ...defaults.filters, from: '2026-07-01', to: '2026-07-31' } }],
     ['target all', { filters: { ...defaults.filters, target: 'all' } }],
     ['target backports', { filters: { ...defaults.filters, target: 'backports' } }],
+    ['branch under main', { filters: { ...defaults.filters, base: 'main' } }],
+    ['branch under backports', { filters: { ...defaults.filters, target: 'backports', base: 'reef' } }],
+    ['branch under all', { filters: { ...defaults.filters, target: 'all', base: 'tentacle' } }],
+    ['backport link', { filters: { ...defaults.filters, backportLink: 'linked' } }],
+    ['no backport link', { filters: { ...defaults.filters, backportLink: 'unlinked' } }],
     ['component', { filters: { ...defaults.filters, component: 'cephfs' } }],
     ['size band', { filters: { ...defaults.filters, size: 'le10' } }],
     ['standing band', { filters: { ...defaults.filters, standing: 'first' } }],
@@ -149,6 +158,13 @@ describe('round trip through the hash', () => {
     expect(hashFromState(withFilters({ kind: 'unknown' }), meta)).toBe('#/?target=main&kind=unknown');
   });
 
+  it('writes the branch and the backport link right after the target', () => {
+    expect(
+      hashFromState(withFilters({ target: 'backports', base: 'reef', backportLink: 'unlinked', component: 'rgw' }), meta),
+    ).toBe('#/?target=backports&base=reef&backport=unlinked&component=rgw');
+    expect(hashFromState(withFilters({ backportLink: 'linked' }), meta)).toBe('#/?target=main&backport=linked');
+  });
+
   it('writes the author and the reviewer as logins, after the other filters', () => {
     expect(hashFromState(withFilters({ reopenedOnly: true, author: 'fixture-author-a', reviewer: 'fixture-author-e' }), meta)).toBe(
       '#/?target=main&reopened=only&author=fixture-author-a&reviewer=fixture-author-e',
@@ -193,6 +209,12 @@ describe('unknown values fall back to their defaults', () => {
   it.each([
     ['route', '#/nowhere'],
     ['target', '#/?target=feature-branches'],
+    ['branch the data does not name', '#/?base=no-such-branch'],
+    ['branch named in another case', '#/?base=MAIN'],
+    ['branch that is empty', '#/?base='],
+    ['branch named like a prototype key', '#/?base=__proto__'],
+    ['branch outside the target', '#/?target=main&base=reef'],
+    ['backport link', '#/?backport=maybe'],
     ['component', '#/?component=no-such-component'],
     ['component named like a prototype key', '#/?component=__proto__'],
     ['size band', '#/?size=huge'],
@@ -280,6 +302,29 @@ describe('the author filter in the address, with deleted accounts', () => {
 
   it('takes a name the data does not hold as no filter', () => {
     expect(stateFromHash('#/?author=ghost%3ASomeone%20Else', named).filters.author).toBeNull();
+  });
+});
+
+describe('the Branch filter in the address', () => {
+  const odd = parseMeta({ ...rawMeta, bases: ['feature/ptl-ci-test', 'main', 'pacific-16.2.7_RC1', 'reef', 'wip-a&b=c#d%e'] });
+
+  it.each([
+    ['a slash', 'feature/ptl-ci-test', 'feature%2Fptl-ci-test'],
+    ['dots and an underscore', 'pacific-16.2.7_RC1', 'pacific-16.2.7_RC1'],
+    ['characters the address would read otherwise', 'wip-a&b=c#d%e', 'wip-a%26b%3Dc%23d%25e'],
+  ])('round-trips a branch name with %s', (_what, base, written) => {
+    const state = { ...defaultState(odd), filters: { ...defaultFilters(odd), target: 'backports' as const, base } };
+    const hash = hashFromState(state, odd);
+    expect(hash).toBe(`#/?target=backports&base=${written}`);
+    expect(stateFromHash(hash, odd)).toEqual(state);
+  });
+
+  it('takes a branch the data does not name as no filter, keeping the others', () => {
+    expect(stateFromHash('#/?target=backports&base=octopus&backport=linked', odd).filters).toMatchObject({
+      target: 'backports',
+      base: null,
+      backportLink: 'linked',
+    });
   });
 });
 
@@ -546,6 +591,34 @@ describe('createStateStore', () => {
       'replace #/?target=all&pr=66500',
     ]);
     expect(get(store).pr).toBe(66500);
+  });
+
+  it('returns the branch to any when the target changes to one that does not hold it, and says so in the address', () => {
+    const f = fakeLocation('#/?target=backports&base=reef&backport=unlinked');
+    const store = createStateStore(meta, f.loc);
+    expect(get(store).filters.base).toBe('reef');
+    store.update((s) => ({ ...s, filters: { ...s.filters, target: 'all' } }));
+    expect(get(store).filters.base).toBe('reef');
+    store.update((s) => ({ ...s, filters: { ...s.filters, target: 'main' } }));
+    expect(get(store).filters).toMatchObject({ target: 'main', base: null, backportLink: 'unlinked' });
+    store.update((s) => ({ ...s, filters: { ...s.filters, target: 'backports' } }));
+    expect(get(store).filters.base).toBeNull();
+    expect(f.writes).toEqual([
+      'push #/?target=all&base=reef&backport=unlinked',
+      'push #/?target=main&backport=unlinked',
+      'push #/?target=backports&backport=unlinked',
+    ]);
+  });
+
+  it('keeps master as the branch when the target goes from main to all, and drops it going to backports', () => {
+    const master = parseMeta({ ...rawMeta, bases: ['main', 'master', 'reef'] });
+    const f = fakeLocation('#/?target=main&base=master');
+    const store = createStateStore(master, f.loc);
+    store.update((s) => ({ ...s, filters: { ...s.filters, target: 'all' } }));
+    expect(get(store).filters.base).toBe('master');
+    store.update((s) => ({ ...s, filters: { ...s.filters, target: 'backports' } }));
+    expect(get(store).filters.base).toBeNull();
+    expect(f.writes).toEqual(['push #/?target=all&base=master', 'push #/?target=backports']);
   });
 
   it('validates what is written', () => {

@@ -151,6 +151,26 @@ describe('parsePrs', () => {
     expect(() => parsePrs(withoutStanding, 'prs-2026.json', meta)).toThrow(/standing/);
   });
 
+  it("reads backport_link, set for the PRs whose table names the PR they backport", () => {
+    const prs = parsePrs(prs2026, 'prs-2026.json', meta);
+    expect(prs.backport_link).toBeInstanceOf(Uint8Array);
+    expect([...prs.backport_link]).toEqual([0, 1, 0, 0, 0, 0, 0, 1, 0, 0, 0, 1]);
+    expect([...prs.backport_link]).toEqual(table2026.backport_of.map((n) => (n > 0 ? 1 : 0)));
+  });
+
+  it('reads a year file written before backport_link as no link on every row, and says the year lacks it', () => {
+    const { backport_link: _, ...before } = prs2026;
+    const prs = parsePrs(before, 'prs-2026.json', meta);
+    expect([...prs.backport_link]).toEqual(Array.from({ length: 12 }, () => 0));
+    expect(parseYear(2026, before, events2026, meta).linksRecorded).toBe(false);
+    expect(parseYear(2026, prs2026, events2026, meta).linksRecorded).toBe(true);
+  });
+
+  it('rejects a backport_link of a different length, as any other column', () => {
+    const short = { ...prs2026, backport_link: prs2026.backport_link.slice(1) };
+    expect(() => parsePrs(short, 'prs-2026.json', meta)).toThrow(/prs-2026\.json.*backport_link/);
+  });
+
   it('rejects a value that is not an integer, which would become NaN', () => {
     const bad = { ...prs2026, ready: prs2026.ready.map((v, i) => (i === 3 ? null : v)) };
     expect(() => parsePrs(bad, 'prs-2026.json', meta)).toThrow(/ready/);
@@ -343,6 +363,17 @@ describe('combine', () => {
     expect(data.events.pr.length).toBe(events2025.pr.length + events2026.pr.length);
     expect([...data.events.pr]).toEqual([...events2025.pr, ...events2026.pr.map((p) => p + 1)]);
     expect([...data.events.at]).toEqual([...events2025.at, ...events2026.at]);
+  });
+
+  it('names no year without the backport link when every year has it', () => {
+    expect(data.linksUnrecorded).toEqual([]);
+  });
+
+  it('names the years whose files predate the backport link, which read as no link', () => {
+    const { backport_link: _, ...before } = prs2025 as typeof prs2026;
+    const mixed = combine(twoYears, [parseYear(2025, before, events2025, twoYears), y2026]);
+    expect(mixed.linksUnrecorded).toEqual([2025]);
+    expect([...mixed.prs.backport_link]).toEqual([0, ...prs2026.backport_link]);
   });
 
   it('gives an empty dataset for no years', () => {

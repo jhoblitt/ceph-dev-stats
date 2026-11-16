@@ -63,6 +63,7 @@ function synthetic(): Dataset {
     standing: new Int32Array(ROWS),
     kind: new Int32Array(ROWS).fill(-1),
     author: Int32Array.from({ length: ROWS }, (_, i) => i % 500),
+    backport_link: new Uint8Array(ROWS),
   };
   const n = ROWS * EVENTS_PER_ROW;
   const pr = new Int32Array(n);
@@ -85,6 +86,7 @@ function synthetic(): Dataset {
     prs,
     events: { pr, at, kind, sub: new Int32Array(n).fill(-1), actor },
     years: [{ year: 2026, first: 0, count: ROWS, firstEvent: 0, eventCount: n }],
+    linksUnrecorded: [],
   };
 }
 
@@ -205,6 +207,7 @@ describe('at the whole history, 75,000 PRs and 1,000,000 events over fifteen yea
         standing: Int32Array.from(rows, (i) => i % 120),
         kind: Int32Array.from(rows, (i) => i % 5),
         author: Int32Array.from(rows, (i) => i % 2000),
+        backport_link: new Uint8Array(n),
       };
       const count = (i: number) => perPr + (i < extra ? 1 : 0);
       let total = 0;
@@ -244,6 +247,7 @@ describe('at the whole history, 75,000 PRs and 1,000,000 events over fifteen yea
         prs,
         events: { pr, at, kind, sub: new Int32Array(total).fill(-1), actor },
         years,
+        linksUnrecorded: [],
       };
     }
 

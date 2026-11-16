@@ -1,6 +1,7 @@
 <script lang="ts">
   import { get } from 'svelte/store';
   import {
+    BACKPORT_LINKS,
     type Choice,
     DISCLOSURES,
     type Filters,
@@ -11,12 +12,14 @@
     UNKNOWN_KIND,
     findChoice,
   } from '../lib/filters';
+  import { formatCount } from '../lib/format';
   import { findLogin, loginHandle, personHandle } from '../lib/handles';
   import { getPage } from '../lib/page';
+  import { branchChoices } from '../lib/select';
   import { RECENT_MONTHS, dataDays, recentFilters } from '../lib/state';
   import { formatDate } from '../lib/timeline-axis';
 
-  const { meta, selection } = getPage();
+  const { meta, selection, view } = getPage();
   const uid = $props.id();
   const { first, last } = dataDays(meta);
   const recent = recentFilters(meta);
@@ -87,18 +90,64 @@
 
   const unknownText = (typed: string | null) => (typed === null ? '' : `No PR in the data names “${typed}”.`);
 
+  // The branches of the reader's target, counted over the period the figures
+  // are for, which is the reader's once its years have loaded.
+  const branches = $derived(branchChoices($view.dataset, { ...$view.filters, target: filters.target }));
+  const branchHint = 'A branch of the target, its PRs in the period counted';
+  let unknownBranch = $state<string | null>(null);
+
+  // A branch's name as given, or in another case when only one branch of the
+  // target has it; one the target does not hold leaves the filter as it was.
+  function findBranch(typed: string): string | null {
+    const exact = branches.find((b) => b.base === typed);
+    if (exact) return exact.base;
+    const folded = branches.filter((b) => b.base.toLowerCase() === typed.toLowerCase());
+    return folded.length === 1 ? (folded[0]?.base ?? null) : null;
+  }
+
+  function setBranch(input: HTMLInputElement) {
+    const typed = input.value.trim();
+    const base = typed === '' ? null : findBranch(typed);
+    unknownBranch = typed !== '' && base === null ? typed : null;
+    if (typed === '' || base !== null) set({ base });
+    input.value = get(selection).filters.base ?? '';
+  }
+
+  function clearBranch() {
+    unknownBranch = null;
+    set({ base: null });
+  }
+
+  const linksHint = $derived(
+    [
+      'The “backport of #N” line in a PR’s description; older backports seldom carry it.',
+      ...($view.dataset.linksUnrecorded.length > 0
+        ? [`The data for ${$view.dataset.linksUnrecorded.join(', ')} does not record it, so every PR there counts as no link.`]
+        : []),
+    ].join(' '),
+  );
+
   interface Select {
     id: string;
     label: string;
     value: string;
     options: readonly Choice<string>[];
     change(value: string): void;
+    hint?: string;
   }
 
   // The empty value stands for no filter.
   const all: Choice<string> = { id: '', label: 'all' };
 
   const selects: Select[] = $derived([
+    {
+      id: 'backport',
+      label: 'Backport link',
+      value: filters.backportLink ?? '',
+      options: [{ id: '', label: 'any' }, ...BACKPORT_LINKS],
+      change: (v) => set({ backportLink: findChoice(BACKPORT_LINKS, v) }),
+      hint: linksHint,
+    },
     {
       id: 'component',
       label: 'Component',
@@ -213,14 +262,52 @@
     <p class="hint target-hint" id="{uid}-target-hint">{MAIN_TARGET_NOTE}</p>
   </fieldset>
 
+  <div class="field">
+    <label for="{uid}-base">Branch</label>
+    <div class="branch">
+      <input
+        id="{uid}-base"
+        type="text"
+        list="{uid}-bases"
+        value={filters.base ?? ''}
+        placeholder="any branch"
+        autocomplete="off"
+        autocapitalize="off"
+        spellcheck="false"
+        aria-describedby={unknownBranch === null ? `${uid}-base-hint` : `${uid}-base-hint ${uid}-base-unknown`}
+        onchange={(e) => setBranch(e.currentTarget)}
+      />
+      {#if filters.base !== null}
+        <button type="button" aria-label="Clear the Branch filter" onclick={clearBranch}>clear</button>
+      {/if}
+    </div>
+    <p class="hint" id="{uid}-base-hint">{branchHint}</p>
+    <p class="unknown" id="{uid}-base-unknown" role="status">
+      {unknownBranch === null ? '' : `No branch of this target is named “${unknownBranch}”.`}
+    </p>
+  </div>
+  <datalist id="{uid}-bases">
+    {#each branches as b (b.base)}
+      <option value={b.base}>{formatCount(b.count)} {b.count === 1 ? 'PR' : 'PRs'}</option>
+    {/each}
+  </datalist>
+
   {#each selects as f (f.id)}
     <div class="field">
       <label for="{uid}-{f.id}">{f.label}</label>
-      <select id="{uid}-{f.id}" value={f.value} onchange={(e) => f.change(e.currentTarget.value)}>
+      <select
+        id="{uid}-{f.id}"
+        value={f.value}
+        aria-describedby={f.hint === undefined ? undefined : `${uid}-${f.id}-hint`}
+        onchange={(e) => f.change(e.currentTarget.value)}
+      >
         {#each f.options as o (o.id)}
           <option value={o.id}>{o.label}</option>
         {/each}
       </select>
+      {#if f.hint !== undefined}
+        <p class="hint" id="{uid}-{f.id}-hint">{f.hint}</p>
+      {/if}
     </div>
   {/each}
 
@@ -296,7 +383,8 @@
   fieldset,
   .field,
   .people,
-  .person {
+  .person,
+  .branch {
     min-width: 0;
     max-width: 100%;
   }
@@ -374,7 +462,8 @@
     gap: var(--space-4) var(--space-5);
   }
 
-  .person {
+  .person,
+  .branch {
     display: flex;
     gap: var(--space-2);
     align-items: center;
@@ -398,6 +487,7 @@
   }
 
   .person button,
+  .branch button,
   .presets button {
     box-sizing: border-box;
     height: var(--control-height);

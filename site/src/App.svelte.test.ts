@@ -4,6 +4,7 @@ import { get } from 'svelte/store';
 import { beforeAll, describe, expect, it } from 'vitest';
 import App from './App.svelte';
 import rawMeta from './lib/__fixtures__/data/meta.json';
+import prs2026 from './lib/__fixtures__/data/prs-2026.json';
 import { NAME_A, NAME_B, deletedMeta } from './lib/__fixtures__/deleted';
 import { BASE, fixtureFetch, heldByYear, withEarlierYear, withYears } from './lib/__fixtures__/fetch';
 import { DataLoader, type Fetch, parseMeta } from './lib/data';
@@ -400,6 +401,75 @@ describe('filter bar', () => {
     reopened.value = 'only';
     await fireEvent.change(reopened);
     expect(loc.hash()).toBe('#/?target=backports&size=gt1000&reopened=only');
+  });
+
+  describe('the Branch and Backport link filters', () => {
+    const branch = () => screen.getByLabelText('Branch') as HTMLInputElement;
+    const offered = () =>
+      [...(document.getElementById(branch().getAttribute('list') as string) as HTMLDataListElement).options].map(
+        (o) => `${o.value}: ${o.textContent}`,
+      );
+
+    it("offers the target's branches, most PRs in the period first, each with its count", async () => {
+      const { props } = await page('#/?target=all');
+      render(App, props);
+      // The fixture's whole window: rows 0, 2–6 and 8–10 on main, one each on reef, squid and tentacle.
+      expect(offered()).toEqual(['main: 9 PRs', 'reef: 1 PR', 'squid: 1 PR', 'tentacle: 1 PR']);
+      await fireEvent.click(screen.getByRole('radio', { name: 'backports and other branches' }));
+      expect(offered()).toEqual(['reef: 1 PR', 'squid: 1 PR', 'tentacle: 1 PR']);
+      await fireEvent.click(screen.getByRole('radio', { name: 'main' }));
+      expect(offered()).toEqual(['main: 9 PRs']);
+    });
+
+    it('writes a branch typed to the address, and returns it to any when the target leaves it out', async () => {
+      const { props, loc } = await page('#/?target=backports');
+      render(App, props);
+      branch().value = 'Squid';
+      await fireEvent.change(branch());
+      expect(loc.hash()).toBe('#/?target=backports&base=squid');
+      expect(branch().value).toBe('squid');
+      await fireEvent.click(screen.getByRole('radio', { name: 'all' }));
+      expect(loc.hash()).toBe('#/?target=all&base=squid');
+      await fireEvent.click(screen.getByRole('radio', { name: 'main' }));
+      expect(loc.hash()).toBe('#/?target=main');
+      expect(branch().value).toBe('');
+    });
+
+    it('keeps the branch and says so when a name typed is not a branch of the target', async () => {
+      const { props, loc } = await page('#/?target=backports&base=reef');
+      render(App, props);
+      branch().value = 'main';
+      await fireEvent.change(branch());
+      expect(loc.hash()).toBe('#/?target=backports&base=reef');
+      expect(branch().value).toBe('reef');
+      expect(screen.getByText('No branch of this target is named “main”.')).toBeTruthy();
+      await fireEvent.click(screen.getByRole('button', { name: 'Clear the Branch filter' }));
+      expect(loc.hash()).toBe('#/?target=backports');
+    });
+
+    it('offers any, links its original and no link, and says what the link is beside it', async () => {
+      const { props, loc } = await page('');
+      render(App, props);
+      const links = screen.getByLabelText('Backport link') as HTMLSelectElement;
+      expect([...links.options].map((o) => [o.value, o.textContent])).toEqual([
+        ['', 'any'],
+        ['linked', 'links its original'],
+        ['unlinked', 'no link'],
+      ]);
+      const hint = document.getElementById(links.getAttribute('aria-describedby') as string);
+      expect(hint?.textContent).toBe('The “backport of #N” line in a PR’s description; older backports seldom carry it.');
+      links.value = 'unlinked';
+      await fireEvent.change(links);
+      expect(loc.hash()).toBe('#/?target=main&backport=unlinked');
+    });
+
+    it('says when the data does not record the link, which then counts as none', async () => {
+      const { backport_link: _, ...before } = prs2026;
+      render(App, (await page('', { 'prs-2026.json': before })).props);
+      const links = screen.getByLabelText('Backport link') as HTMLSelectElement;
+      const hint = document.getElementById(links.getAttribute('aria-describedby') as string);
+      expect(hint?.textContent).toContain('The data for 2026 does not record it, so every PR there counts as no link.');
+    });
   });
 
   it('says what was disclosed in the AI use disclosure filter, its label and each choice', async () => {

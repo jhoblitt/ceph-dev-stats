@@ -16,7 +16,7 @@ import {
 } from './charts';
 import { COLOURS } from './colours';
 import type { Named } from './data';
-import { type Filters, type Target, dayOf, periodRange } from './filters';
+import { type Filters, dayOf, periodRange } from './filters';
 import { bucketName, formatCount, formatDays, formatMean, formatShare } from './format';
 import { formatDate } from './timeline-axis';
 import type { Step } from './stats/buckets';
@@ -337,18 +337,35 @@ const SPAN_TITLES: Record<'firstCommitToOpened' | 'openedToLastCommit' | 'afterL
 };
 
 /**
- * A span's title. A backport's first commit is the original work's, so with
- * only backports selected the first span measures how long after it the
- * backport was opened.
+ * Whether the filters select backports alone: only the PRs whose description
+ * links the one they backport. No target does, since every branch but the
+ * development branch holds feature branches' PRs too, and old backports
+ * seldom carry the link.
  */
-export function spanTitle(span: keyof typeof SPAN_TITLES, target: Target): string {
-  if (span === 'firstCommitToOpened' && target === 'backports') return 'Original work to backport opened';
+export function onlyBackports(filters: Pick<Filters, 'backportLink'>): boolean {
+  return filters.backportLink === 'linked';
+}
+
+/**
+ * A span's title. A backport's first commit is the original work's, so over
+ * backports alone the first span measures how long after it the backport
+ * was opened.
+ */
+export function spanTitle(span: keyof typeof SPAN_TITLES, backportsOnly: boolean): string {
+  if (span === 'firstCommitToOpened' && backportsOnly) return 'Original work to backport opened';
   return SPAN_TITLES[span];
 }
 
-/** A note under a span's title, where the selection mixes what it measures; else undefined. */
-export function spanNote(span: keyof typeof SPAN_TITLES, target: Target): string | undefined {
-  return span === 'firstCommitToOpened' && target === 'all'
+/**
+ * A note under a span's title, where backports may be among the PRs selected
+ * without being all of them: off the development branch, or on every branch;
+ * else undefined.
+ */
+export function spanNote(
+  span: keyof typeof SPAN_TITLES,
+  filters: Pick<Filters, 'target' | 'backportLink'>,
+): string | undefined {
+  return span === 'firstCommitToOpened' && filters.target !== 'main' && !onlyBackports(filters)
     ? 'For a backport, the first commit is the original work’s, so this is how long after it the backport was opened.'
     : undefined;
 }

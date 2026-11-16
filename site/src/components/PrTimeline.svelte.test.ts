@@ -94,6 +94,7 @@ function withEveryKind(): Record<string, unknown> {
     standing: [-1],
     kind: [-1],
     author: [0],
+    backport_link: [0],
   });
   const events = append(rawEvents2026, {
     pr: EVERY.map(() => row),

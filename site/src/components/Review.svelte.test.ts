@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { fireEvent, render, screen, within } from '@testing-library/svelte';
+import { cleanup, fireEvent, render, screen, within } from '@testing-library/svelte';
 import { beforeAll, describe, expect, it } from 'vitest';
 import App from '../App.svelte';
 import rawEvents2026 from '../lib/__fixtures__/data/events-2026.json';
@@ -278,10 +278,25 @@ describe('Review', () => {
     expect(section().getByText('4 people did all of the human reviews in this period.')).toBeTruthy();
   });
 
-  it('names the first span for backports when only other branches are selected', async () => {
+  it('names the first span for backports when only PRs that link their originals are selected, whatever the target', async () => {
+    for (const hash of ['#/?target=backports&backport=linked', '#/?target=main&backport=linked']) {
+      render(App, (await fixturePage(hash)).props);
+      expect(figure('Original work to backport opened').textContent, hash).not.toContain('For a backport');
+      expect(figure('Original work to backport opened, by week opened')).toBeTruthy();
+      cleanup();
+    }
+  });
+
+  it('keeps the plain title under backports and other branches, which holds more than backports, and notes it', async () => {
     render(App, (await fixturePage('#/?target=backports')).props);
-    expect(figure('Original work to backport opened')).toBeTruthy();
-    expect(figure('Original work to backport opened, by week opened')).toBeTruthy();
+    expect(section().queryByText(/Original work to backport opened/)).toBeNull();
+    expect(figure('First commit to opened').textContent).toContain('For a backport, the first commit is the original work’s');
+  });
+
+  it('keeps the plain title, with no note, on the default view', async () => {
+    render(App, (await fixturePage('')).props);
+    expect(section().queryByText(/Original work to backport opened/)).toBeNull();
+    expect(figure('First commit to opened').textContent).not.toContain('For a backport');
   });
 
   it('keeps the plain title with every branch selected, and notes what a backport\'s first commit is', async () => {

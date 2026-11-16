@@ -42,6 +42,11 @@ export function developmentBases(bases: readonly string[]): Uint8Array {
   return Uint8Array.from(bases, (b) => (isDevelopmentBranch(b) ? 1 : 0));
 }
 
+/** Whether a target keeps the PRs on a base branch: the Branch filter's choices under it. */
+export function inTarget(target: Target, base: string): boolean {
+  return target === 'all' || (target === 'main') === isDevelopmentBranch(base);
+}
+
 /** The target that keeps the development branch. */
 const MAIN_TARGET = TARGETS.find((t) => t.id === 'main') as Extract<(typeof TARGETS)[number], { id: 'main' }>;
 
@@ -57,6 +62,16 @@ export function baseNote(base: string): string | null {
     ? `On ${base}, so under the ${MAIN_TARGET.label} target: ${MAIN_TARGET_NOTE}.`
     : null;
 }
+
+/**
+ * By the `backport_link` column: whether the description links the PR it
+ * backports. Old backports seldom do, so no link does not mean no backport.
+ */
+export const BACKPORT_LINKS = [
+  { id: 'linked', label: 'links its original' },
+  { id: 'unlinked', label: 'no link' },
+] as const satisfies readonly Choice<string>[];
+export type BackportLink = (typeof BACKPORT_LINKS)[number]['id'];
 
 /** By lines added plus lines deleted. */
 export const SIZE_BANDS = [
@@ -109,6 +124,9 @@ export interface Filters {
   /** The period's last day, inclusive. */
   to: string;
   target: Target;
+  /** A name from meta's `bases` that the target holds, or null for any branch. */
+  base: string | null;
+  backportLink: BackportLink | null;
   /** A component id from meta, or null for every component. */
   component: string | null;
   size: SizeBand | null;
