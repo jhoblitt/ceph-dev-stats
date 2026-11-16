@@ -31,28 +31,33 @@ type CheckInput struct {
 	Records []record.Record
 	// Meta is nil when there is no meta.json.
 	Meta *record.Meta
-	// Top is how many entries each report lists; 0 lists all.
+	// Top is how many entries each ranked report lists; 0 lists all. The
+	// problem and base-branch reports list every entry.
 	Top int
 }
 
 // Check classifies the records and writes reports for whoever tunes the
-// tables to out: the description and commit-prose candidates that match no
-// phrase, the short comments by people that match no command, the
-// accounts not typed bots with the most comments, and the base branches,
-// each most frequent first. Its error lists every problem the tables leave
-// in the data:
+// tables to out: the candidates behind the problems below, the
+// description and commit-prose candidates that match no phrase, the short
+// comments by people that match no command, the accounts not typed bots
+// with the most comments, and the base branches, each most frequent first.
+// Its error lists every problem the tables leave in the data:
 //   - a trailer candidate whose key is neither a trailer key nor
 //     Co-authored-by, and that ignore does not list;
 //   - a counted disclosure that matches no family;
 //   - a label on 5 or more pull requests that no table classifies;
 //   - a ticket type in tickets.json that kinds.yaml does not map;
 //   - record counts more than 0.5% from GitHub's counts in meta.json.
+//
+// A candidate line can name a person, and the error is printed where out is
+// not, so the error names a candidate's problem by its trailer key and pull
+// requests and only out quotes the line.
 func Check(in CheckInput, out io.Writer) error {
 	t := in.Tables
 	prs := Records(t, in.Tickets, in.Records)
 
 	var errs []error
-	unknownKey, noFamily := map[string][]int{}, map[string][]int{}
+	unknownKey, noFamily := problems{}, problems{}
 	unmatched := map[string]int{}
 	for i := range prs {
 		p := &prs[i]
@@ -66,21 +71,24 @@ func Check(in CheckInput, out io.Writer) error {
 			seen[c.Text] = true
 			switch {
 			case c.Class != "" && c.Family == "":
-				noFamily[c.Text] = append(noFamily[c.Text], p.Number)
+				noFamily.add(c, p.Number)
 			case c.Class == "" && c.From == FromTrailers:
-				unknownKey[c.Text] = append(unknownKey[c.Text], p.Number)
+				unknownKey.add(c, p.Number)
 			case c.Class == "":
 				unmatched[c.Text]++
 			}
 		}
 	}
-	for _, text := range slices.Sorted(maps.Keys(unknownKey)) {
-		key, _, _ := strings.Cut(text, ":")
-		errs = append(errs, fmt.Errorf("%s: trailer %q (%s) has key %q, which is not in trailer_keys or Co-authored-by, and no ignore entry lists it",
-			tables.ToolsFile, text, prList(unknownKey[text]), strings.ToLower(strings.TrimSpace(key))))
+	for _, key := range slices.Sorted(maps.Keys(unknownKey)) {
+		errs = append(errs, fmt.Errorf("%s: trailer key %q is not in trailer_keys or Co-authored-by, and no ignore entry lists a line with it (%s)",
+			tables.ToolsFile, key, unknownKey[key].summary()))
 	}
-	for _, text := range slices.Sorted(maps.Keys(noFamily)) {
-		errs = append(errs, fmt.Errorf("%s: disclosure %q (%s) matches no family", tables.ToolsFile, text, prList(noFamily[text])))
+	for _, key := range slices.Sorted(maps.Keys(noFamily)) {
+		what := "a counted description or commit-prose disclosure"
+		if key != "" {
+			what = fmt.Sprintf("a counted disclosure with the trailer key %q", key)
+		}
+		errs = append(errs, fmt.Errorf("%s: no family matches %s (%s)", tables.ToolsFile, what, noFamily[key].summary()))
 	}
 	errs = append(errs, labelProblems(t, in.Records)...)
 	errs = append(errs, ticketProblems(t, in.Tickets)...)
@@ -88,6 +96,8 @@ func Check(in CheckInput, out io.Writer) error {
 	errs = append(errs, countErrs...)
 
 	fmt.Fprintln(out, counts)
+	report(out, "Trailers with an unlisted key and no ignore entry", unknownKey.lines(), 0)
+	report(out, "Counted disclosures that match no family", noFamily.lines(), 0)
 	report(out, "Description and commit-prose candidates that match no phrase", unmatched, in.Top)
 	comments, accounts, bases := map[string]int{}, map[string]int{}, map[string]int{}
 	for i := range in.Records {
@@ -110,6 +120,53 @@ func Check(in CheckInput, out io.Writer) error {
 	report(out, "Accounts with the most comments, not typed bots by GitHub", accounts, in.Top)
 	report(out, "Base branches", bases, 0)
 	return errors.Join(errs...)
+}
+
+// problems are the candidate lines with one kind of problem, grouped by the
+// lower-cased trailer key they share, or "" for lines that are not
+// trailers.
+type problems map[string]problem
+
+// problem is the pull requests each line is on.
+type problem map[string][]int
+
+func (ps problems) add(c Candidate, number int) {
+	key := ""
+	if c.From == FromTrailers {
+		k, _, _ := strings.Cut(c.Text, ":")
+		key = strings.ToLower(strings.TrimSpace(k))
+	}
+	if ps[key] == nil {
+		ps[key] = problem{}
+	}
+	ps[key][c.Text] = append(ps[key][c.Text], number)
+}
+
+// lines are how many pull requests each line is on.
+func (ps problems) lines() map[string]int {
+	out := map[string]int{}
+	for _, p := range ps {
+		for line, numbers := range p {
+			out[line] += len(numbers)
+		}
+	}
+	return out
+}
+
+// summary counts the lines and names their pull requests without quoting a
+// line.
+func (p problem) summary() string {
+	numbers := map[int]bool{}
+	for _, ns := range p {
+		for _, n := range ns {
+			numbers[n] = true
+		}
+	}
+	lines := "1 line"
+	if len(p) != 1 {
+		lines = strconv.Itoa(len(p)) + " lines"
+	}
+	return lines + ", " + prList(slices.Collect(maps.Keys(numbers)))
 }
 
 func labelProblems(t *tables.Tables, recs []record.Record) []error {

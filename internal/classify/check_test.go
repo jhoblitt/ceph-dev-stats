@@ -73,6 +73,8 @@ var _ = Describe("Check", func() {
 	It("passes a clean dataset and reports on it", func() {
 		Expect(classify.Check(in, out)).To(Succeed())
 		Expect(out.String()).To(Equal(`Counts: 2 opened in the window (GitHub: 2), 1 open (GitHub: 1)
+Trailers with an unlisted key and no ignore entry: 0
+Counted disclosures that match no family: 0
 Description and commit-prose candidates that match no phrase: 2
       2  Address Claude review comments
       1  GPT partition table
@@ -92,6 +94,8 @@ Base branches: 2
 	It("passes the tables alone, with no records, meta or tickets", func() {
 		Expect(classify.Check(classify.CheckInput{Tables: in.Tables}, out)).To(Succeed())
 		Expect(out.String()).To(Equal(`Counts: no meta.json to compare with
+Trailers with an unlisted key and no ignore entry: 0
+Counted disclosures that match no family: 0
 Description and commit-prose candidates that match no phrase: 0
 Short comments by people that match no command: 0
 Accounts with the most comments, not typed bots by GitHub: 0
@@ -151,10 +155,13 @@ Base branches: 0
 		},
 		Entry("a trailer whose key is neither listed nor Co-authored-by", func() {
 			in.Records[2].Disclosure.Trailers = []string{"Generated-by: Claude"}
-		}, `tools.yaml: trailer "Generated-by: Claude" (#3) has key "generated-by", which is not in trailer_keys or Co-authored-by, and no ignore entry lists it`),
-		Entry("a counted disclosure that matches no family", func() {
+		}, `tools.yaml: trailer key "generated-by" is not in trailer_keys or Co-authored-by, and no ignore entry lists a line with it (1 line, #3)`),
+		Entry("a counted trailer that matches no family", func() {
 			in.Records[2].Disclosure.Trailers = []string{"Assisted-by: Bard"}
-		}, `tools.yaml: disclosure "Assisted-by: Bard" (#3) matches no family`),
+		}, `tools.yaml: no family matches a counted disclosure with the trailer key "assisted-by" (1 line, #3)`),
+		Entry("a counted description line that matches no family", func() {
+			in.Records[2].Disclosure.Description = []string{"Assisted by Bard"}
+		}, `tools.yaml: no family matches a counted description or commit-prose disclosure (1 line, #3)`),
 		Entry("an unclassified label on 5 PRs", func() {
 			for i := range 5 {
 				in.Records = append(in.Records, pr(10+i))
@@ -190,13 +197,53 @@ Base branches: 0
 		}
 		in.Meta = nil
 		Expect(classify.Check(in, out)).To(MatchError(
-			`tools.yaml: disclosure "Assisted-by: Bard" (#1, #2, #3, #10, #11 and 2 more) matches no family`))
+			`tools.yaml: no family matches a counted disclosure with the trailer key "assisted-by" (1 line, #1, #2, #3, #10, #11 and 2 more)`))
 	})
 
 	It("names a PR once when its lists repeat a line", func() {
 		in.Records[2].Disclosure.Description = []string{"Assisted by Bard"}
 		in.Records[2].Disclosure.CommitProse = []string{"Assisted by Bard"}
-		Expect(classify.Check(in, out)).To(MatchError(`tools.yaml: disclosure "Assisted by Bard" (#3) matches no family`))
+		Expect(classify.Check(in, out)).To(MatchError(
+			`tools.yaml: no family matches a counted description or commit-prose disclosure (1 line, #3)`))
+	})
+
+	It("groups the lines of one trailer key, in any case, counting each line and each PR once", func() {
+		in.Records[1].Disclosure.Trailers = []string{"Assisted-by: Bard", "ASSISTED-BY: Bard 2"}
+		in.Records[2].Disclosure.Trailers = []string{"Assisted-by: Bard"}
+		Expect(classify.Check(in, out)).To(MatchError(
+			`tools.yaml: no family matches a counted disclosure with the trailer key "assisted-by" (2 lines, #2, #3)`))
+	})
+
+	It("never quotes a candidate line in its error, which CI prints", func() {
+		in.Records[2].Disclosure.Trailers = []string{
+			"Co-developed-by: Claude Dupont <claude.dupont@example.com>",
+			"Assisted-by: Jean Bard <jean.bard@example.com>",
+		}
+		in.Records[2].Disclosure.Description = []string{"Assisted by Marie Curie"}
+		err := classify.Check(in, out)
+		Expect(err).To(MatchError(And(
+			ContainSubstring(`trailer key "co-developed-by"`),
+			ContainSubstring(`trailer key "assisted-by"`),
+			ContainSubstring("description or commit-prose"),
+		)))
+		for _, name := range []string{"Dupont", "Bard", "Curie", "example.com"} {
+			Expect(err.Error()).NotTo(ContainSubstring(name))
+		}
+	})
+
+	It("quotes the lines behind those problems in the report, every one whatever the top", func() {
+		in.Top = 1
+		in.Records[1].Disclosure.Trailers = []string{"Generated-by: Claude", "Made-by: Claude"}
+		in.Records[2].Disclosure.Trailers = []string{"Generated-by: Claude", "Assisted-by: Bard"}
+		in.Records[2].Disclosure.Description = []string{"Assisted by Bard"}
+		Expect(classify.Check(in, out)).NotTo(Succeed())
+		Expect(out.String()).To(ContainSubstring(`Trailers with an unlisted key and no ignore entry: 2
+      2  Generated-by: Claude
+      1  Made-by: Claude
+Counted disclosures that match no family: 2
+      1  Assisted by Bard
+      1  Assisted-by: Bard
+`))
 	})
 
 	It("lists every problem at once, and still reports", func() {
@@ -206,8 +253,8 @@ Base branches: 0
 
 		err := classify.Check(in, out)
 		Expect(err).To(MatchError(And(
-			ContainSubstring(`trailer "Generated-by: Claude"`),
-			ContainSubstring(`disclosure "Assisted-by: Bard"`),
+			ContainSubstring(`trailer key "generated-by"`),
+			ContainSubstring(`trailer key "assisted-by"`),
 			ContainSubstring(`ticket type "Weird"`),
 			ContainSubstring(`opened in the window`),
 		)))

@@ -26,12 +26,15 @@ It fails, listing every problem at once, on a table that does not parse,
 holds an unknown key, an invalid regexp, or a duplicate id; on a
 trailer or label no table accounts for; on a counted disclosure that names
 no tool family; on a ticket type kinds.yaml does not map; and on record
-counts more than 0.5% from GitHub's counts in meta.json.
+counts more than 0.5% from GitHub's counts in meta.json. A candidate line
+can name a person, so a problem with one names its trailer key, how many
+lines and which pull requests, and never quotes the line.
 
-With --report it also prints, without failing, what the tables do not
-yet match, most frequent first, for whoever edits them. The reports rank
-accounts by comment count, so they are printed only when asked for and
-never in CI. Records, meta.json and tickets.json are each optional.`,
+With --report it also prints, without failing, the candidate lines behind
+those problems and what the tables do not yet match, most frequent first,
+for whoever edits them. The reports quote lines and rank accounts by
+comment count, so they are printed only when asked for and never in CI.
+Records, meta.json and tickets.json are each optional.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			in, err := checkInput(v.GetString("data"))
@@ -52,7 +55,7 @@ never in CI. Records, meta.json and tickets.json are each optional.`,
 	f := cmd.Flags()
 	f.String("data", "data", "committed data directory (CEPHSTATS_DATA)")
 	f.Bool("report", false, "print the reports for whoever edits the tables (CEPHSTATS_REPORT)")
-	f.Int("top", 50, "entries each report lists, 0 for all (CEPHSTATS_TOP)")
+	f.Int("top", 50, "entries each ranked report lists, 0 for all; the problem and base-branch reports list every entry (CEPHSTATS_TOP)")
 	return cmd
 }
 
