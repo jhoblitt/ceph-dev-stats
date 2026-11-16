@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { BASE, fixtureFetch, withEarlierYear } from './__fixtures__/fetch';
 import { type Dataset, DataLoader, type Fetch, type Meta, type YearData, combine, parseMeta, yearsFor } from './data';
 import { type Filters, dayOf, periodRange } from './filters';
-import { createDataStore, createViewStore, yearsForState } from './page';
+import { createDataStore, createViewStore, firstYears, yearsForState } from './page';
 import { select } from './select';
 import { backlog } from './stats/backlog';
 import { commandUse } from './stats/commands';
@@ -117,6 +117,32 @@ describe('createDataStore', () => {
     await vi.waitFor(() => expect(get(data).dataset.size).toBe(12));
     expect(get(data).dataset.years.map((y) => y.year)).toEqual([2026]);
     expect(requested.length).toBe(before);
+  });
+});
+
+describe('the methods route', () => {
+  const onMethods: AppState = { ...back, route: 'methods' };
+
+  it('loads no year before it first draws, whatever period the address carries for the report', () => {
+    expect(firstYears(meta, onMethods)).toEqual([]);
+    expect(firstYears(meta, back)).toEqual([2025, 2026]);
+  });
+
+  it("loads the report's period only when the reader comes to the report", async () => {
+    const { fetch, requested } = fixtureFetch(earlier);
+    const loader = new DataLoader(meta, BASE, fetch);
+    const selection = writable(onMethods);
+    const years = firstYears(meta, onMethods);
+    const data = createDataStore(loader, selection, years, await loader.load(years));
+    selection.set({ ...onMethods, section: 'limits' });
+    selection.set({ ...onMethods, filters: { ...onMethods.filters, from: '2025-01-01' } });
+    expect(requested).toEqual([]);
+    expect(get(data).loading).toBe(false);
+
+    selection.set({ ...back, filters: { ...back.filters, from: '2025-01-01' } });
+    expect(get(data).loading).toBe(true);
+    await vi.waitFor(() => expect(get(data).dataset.size).toBe(13));
+    expect(requested.filter((u) => u.includes('prs-'))).toEqual([`${BASE}prs-2025.json`, `${BASE}prs-2026.json`]);
   });
 });
 

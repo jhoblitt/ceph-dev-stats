@@ -21,7 +21,6 @@ import {
   noCommits,
   peopleFigures,
   standingUnknown,
-  yearsFrom,
 } from './figures';
 
 // The fixture's rows: 0 #64010 and 1 #65220 opened in 2025, before the
@@ -43,20 +42,6 @@ const END = at('2026-11-16T00:00:00Z');
 const PERIOD = { start: START, end: END };
 /** A window two years longer than the period, as the full history's is longer than its default period. */
 const EARLY = { window_start: at('2024-05-15T00:00:00Z') };
-
-describe('yearsFrom', () => {
-  const meta = { ...META, years: [2011, 2024, 2025, 2026] };
-
-  it('keeps the years at or after the one the start falls in', () => {
-    expect(yearsFrom(meta, START)).toEqual([2026]);
-    expect(yearsFrom(meta, at('2025-12-31T23:59:59Z'))).toEqual([2025, 2026]);
-    expect(yearsFrom(meta, at('2026-01-01T00:00:00Z'))).toEqual([2026]);
-  });
-
-  it('keeps every year from the start of the window', () => {
-    expect(yearsFrom(meta, at('2011-09-01T00:00:00Z'))).toEqual([2011, 2024, 2025, 2026]);
-  });
-});
 
 describe('baseRows', () => {
   it('keeps every PR open at some point in the period, on every branch', () => {

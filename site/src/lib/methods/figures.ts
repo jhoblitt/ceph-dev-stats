@@ -4,7 +4,7 @@
 // every branch, split into main and the rest where the two differ in kind;
 // event counts take only the events inside that period.
 
-import { type Dataset, type Meta, type TableYear, locateEvent, locateRow } from '../data';
+import { type Dataset, type TableYear, locateEvent, locateRow } from '../data';
 import { DAY, type Filters } from '../filters';
 import { isBot } from '../handles';
 import { openedIn, select } from '../select';
@@ -21,16 +21,6 @@ export interface Split {
 
 /** A period as the filters name it, by its first and last day. */
 export type Days = Pick<Filters, 'from' | 'to'>;
-
-/**
- * The years whose files hold every PR active from `start` on: a year's file
- * holds the PRs that finished in it, and the open ones are under the year
- * the data runs to, so no PR active since `start` is in an earlier year's.
- */
-export function yearsFrom(meta: Meta, start: number): number[] {
-  const first = new Date(start * 1000).getUTCFullYear();
-  return meta.years.filter((y) => y >= first);
-}
 
 /** The PRs `days` selects on every branch: those open at some point in it. */
 export function baseRows(data: Dataset, days: Days): Uint32Array {

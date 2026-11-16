@@ -8,9 +8,8 @@
 -->
 <script lang="ts">
   import { onMount, tick } from 'svelte';
-  import { type DataError, type TableYear } from '../lib/data';
+  import { type DataError, type TableYear, yearsFor } from '../lib/data';
   import { dayOf, periodRange } from '../lib/filters';
-  import { yearsFrom } from '../lib/methods/figures';
   import Prose from '../lib/methods/Prose.svelte';
   import {
     type DataFigures,
@@ -30,7 +29,7 @@
   // The figures are over the report's default period, and need only the
   // files of the PRs active in it.
   const days = defaultFilters(meta);
-  const years = yearsFrom(meta, periodRange(days).start);
+  const years = yearsFor(meta, periodRange(days).start);
 
   let data = $state<Loadable<DataFigures>>({ state: 'loading' });
   let tables = $state<Loadable<TableFigures>>({ state: 'loading' });

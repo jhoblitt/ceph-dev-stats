@@ -45,11 +45,22 @@ export function yearsForState(meta: Meta, state: AppState): number[] {
 }
 
 /**
- * The data for the current period: it loads the years a new period needs
- * and keeps showing the last dataset until they arrive. Only the latest
- * load is kept, so a slow one cannot overwrite a newer one. A later start
- * drops the years it no longer needs from the dataset, so every figure
- * scans only the period's years; their files stay with the loader.
+ * The years the page loads before it first draws: the period's on the
+ * report, none on the methods page, which loads the default period's years
+ * itself and should not wait on a period the address carries for the report.
+ */
+export function firstYears(meta: Meta, state: AppState): number[] {
+  return state.route === 'report' ? yearsForState(meta, state) : [];
+}
+
+/**
+ * The report's data for the current period: it loads the years a new period
+ * needs and keeps showing the last dataset until they arrive. Only the
+ * latest load is kept, so a slow one cannot overwrite a newer one. A later
+ * start drops the years it no longer needs from the dataset, so every figure
+ * scans only the period's years; their files stay with the loader. Nothing
+ * loads while another route is shown: the report's period loads when the
+ * reader comes to it.
  */
 export function createDataStore(
   loader: DataLoader,
@@ -61,6 +72,7 @@ export function createDataStore(
   let shown = years.join(',');
   let latest = 0;
   const stop = selection.subscribe((state) => {
+    if (state.route !== 'report') return;
     const wanted = yearsForState(loader.meta, state);
     const key = wanted.join(',');
     if (key === shown) return;

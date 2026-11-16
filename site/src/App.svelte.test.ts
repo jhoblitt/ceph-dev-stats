@@ -6,7 +6,7 @@ import App from './App.svelte';
 import rawMeta from './lib/__fixtures__/data/meta.json';
 import { BASE, fixtureFetch, withEarlierYear } from './lib/__fixtures__/fetch';
 import { DataLoader, parseMeta } from './lib/data';
-import { type Page, createDataStore, createViewStore, yearsForState } from './lib/page';
+import { type Page, createDataStore, createViewStore, firstYears } from './lib/page';
 import { type HashLocation, createStateStore } from './lib/state';
 
 const meta = parseMeta(rawMeta);
@@ -32,7 +32,7 @@ async function page(hash: string, files: Record<string, unknown> = {}, m = meta)
   const loc = memoryLocation(hash);
   const selection = createStateStore(m, loc);
   const loader = new DataLoader(m, BASE, fixtureFetch(files).fetch);
-  const years = yearsForState(m, get(selection));
+  const years = firstYears(m, get(selection));
   const data = createDataStore(loader, selection, years, await loader.load(years));
   const p: Page = { meta: m, selection, data, view: createViewStore(selection, data), loader };
   return { props: { page: p }, loc };

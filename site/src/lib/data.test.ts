@@ -395,6 +395,8 @@ describe('yearsFor', () => {
   it('loads every year from a start at or before the first', () => {
     expect(yearsFor(history, at('2011-03-04T00:00:00Z'))).toEqual(history.years);
     expect(yearsFor(history, at('2009-01-01T00:00:00Z'))).toEqual(history.years);
+    // A start late in the first year still needs that year's file.
+    expect(yearsFor(history, at('2011-09-01T00:00:00Z'))).toEqual(history.years);
   });
 
   it("loads the fixture's one year for its default period", () => {

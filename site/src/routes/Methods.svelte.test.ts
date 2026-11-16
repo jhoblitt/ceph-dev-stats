@@ -181,6 +181,17 @@ describe('the methods page', () => {
     expect(table.mock.calls).toEqual([[2026]]);
   });
 
+  it("fetches on a fresh load only the default period's year files and tables, though the address carries a longer period", async () => {
+    const { props, requested } = await fixturePage('#/methods?from=2025-03-01', withEarlierYear());
+    render(App, props);
+    await waitFor(() => expect(screen.queryByRole('status')).toBeNull());
+    expect(requested.map((u) => u.slice(u.lastIndexOf('/') + 1))).toEqual([
+      'prs-2026.json',
+      'events-2026.json',
+      'table-2026.json',
+    ]);
+  });
+
   it('shows a loading state until the figures are computed', async () => {
     await methods();
     expect(screen.getByRole('status').textContent).toMatch(/Loading the data the figures on this page are computed from/);

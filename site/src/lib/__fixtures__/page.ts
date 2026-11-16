@@ -2,7 +2,7 @@
 
 import { get } from 'svelte/store';
 import { DataLoader, parseMeta } from '../data';
-import { type Page, createDataStore, createViewStore, yearsForState } from '../page';
+import { type Page, createDataStore, createViewStore, firstYears } from '../page';
 import { type HashLocation, createStateStore } from '../state';
 import { BASE, fixtureFetch } from './fetch';
 import rawMeta from './data/meta.json';
@@ -35,7 +35,7 @@ export async function fixturePage(
   const selection = createStateStore(m, loc);
   const fetched = fixtureFetch(files);
   const loader = new DataLoader(m, BASE, fetched.fetch);
-  const years = yearsForState(m, get(selection));
+  const years = firstYears(m, get(selection));
   const data = createDataStore(loader, selection, years, await loader.load(years));
   const view = createViewStore(selection, data);
   return { props: { page: { meta: m, selection, data, view, loader } }, loc, requested: fetched.requested };
