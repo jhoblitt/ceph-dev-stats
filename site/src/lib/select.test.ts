@@ -77,6 +77,61 @@ describe('select', () => {
   });
 });
 
+// The fixture's people: 0 fixture-author-e, 1 fixture-author-f, 2
+// fixture-author-a, 3 fixture-author-i, 4 fixture-reviewer-k, 5
+// fixture-author-b, 6 fixture-author-c, 7 fixture-author-d, 8
+// fixture-author-g, 9 fixture-author-h, 10 fixture-author-j (a bot).
+describe('the Author and Reviewer filters', () => {
+  it.each([
+    ['fixture-author-a', [0, 8]],
+    ['fixture-author-d', [3, 10]],
+    ['fixture-author-j', [11]],
+    ['fixture-reviewer-k', []],
+  ])('keep the PRs %s opened', (login, expected) => {
+    expect(rows({ author: login })).toEqual(expected);
+  });
+
+  // The comments and reviews by people other than the author, by row:
+  //   0 #64010  e on 2025-11-10, f on 2025-11-20 and 2026-06-08
+  //   2 #66100  a on 2026-05-20, e on 2026-07-03
+  //   3 #66500  f twice on 2026-05-19
+  //   5 #66600  i on 2026-06-10
+  //   6 #66700  a on 2026-06-16
+  //   7 #66800  e on 2026-07-03
+  //   8 #66900  i on 2026-07-08 and 2026-08-17
+  //   9 #67000  k twice in August
+  //  10 #67100  e on 2026-09-03, f on 2026-09-21
+  it.each([
+    // 64010's comment from e came before the period, which starts at the window.
+    ['fixture-author-e', [2, 7, 10]],
+    ['fixture-author-f', [0, 3, 10]],
+    ['fixture-author-a', [2, 6]],
+    ['fixture-author-i', [5, 8]],
+    ['fixture-reviewer-k', [9]],
+    // An author whose own PRs have comments, but who commented on no one else's.
+    ['fixture-author-d', []],
+  ])('keep the PRs %s reviewed or commented on in the period, not their own', (login, expected) => {
+    expect(rows({ reviewer: login })).toEqual(expected);
+  });
+
+  it("leave out a review made outside the period on a PR active in it", () => {
+    // #66100 is open through September; e reviewed it in July.
+    expect(rows({ from: '2026-09-01' })).toContain(2);
+    expect(rows({ from: '2026-09-01', reviewer: 'fixture-author-e' })).toEqual([10]);
+  });
+
+  it('combine with each other and with the other filters', () => {
+    expect(rows({ author: 'fixture-author-d', reviewer: 'fixture-author-f' })).toEqual([3, 10]);
+    expect(rows({ author: 'fixture-author-d', reviewer: 'fixture-author-e' })).toEqual([10]);
+    expect(rows({ target: 'main', reviewer: 'fixture-author-e' })).toEqual([2, 10]);
+  });
+
+  it('select nothing for a login the data does not name', () => {
+    expect(rows({ author: 'someone-else' })).toEqual([]);
+    expect(rows({ reviewer: 'someone-else' })).toEqual([]);
+  });
+});
+
 describe('openedInBucket', () => {
   const period = periodRange(every);
   const selected = select(data, every);

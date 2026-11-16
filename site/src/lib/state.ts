@@ -3,7 +3,7 @@
 //
 //   #/<route>?target=backports&from=2026-06-01&to=2026-08-31&component=rgw&kind=bugfix
 //     &size=11-100&standing=first&disclosure=disclosed&drafts=exclude&reopened=only
-//     &week=2026-06-01&band=lt7&pr=66600&sort=-size
+//     &author=<login>&reviewer=<login>&week=2026-06-01&band=lt7&pr=66600&sort=-size
 //
 // <route> is empty for the report or `methods`. The target is always written;
 // the period only when it differs from the whole window, so a link to the
@@ -27,6 +27,7 @@ import {
   isMonday,
   periodRange,
 } from './filters';
+import { findLogin } from './handles';
 import { bucketEnd, bucketStart, stepFor } from './stats/buckets';
 import { DEFAULT_SORT, type Sort, parseSort, sameSort, sortParam } from './sort';
 
@@ -60,6 +61,8 @@ const KEYS = [
   'disclosure',
   'drafts',
   'reopened',
+  'author',
+  'reviewer',
   'week',
   'band',
   'pr',
@@ -99,6 +102,8 @@ export function defaultFilters(meta: Meta): Filters {
     kind: null,
     excludeDrafts: false,
     reopenedOnly: false,
+    author: null,
+    reviewer: null,
   };
 }
 
@@ -155,6 +160,8 @@ export function validateState(raw: RawState, meta: Meta): AppState {
     kind: kind === UNKNOWN_KIND.id || (kind !== undefined && meta.kinds.some((k) => k.id === kind)) ? kind : null,
     excludeDrafts: p.drafts === 'exclude',
     reopenedOnly: p.reopened === 'only',
+    author: p.author === undefined ? null : findLogin(meta, p.author),
+    reviewer: p.reviewer === undefined ? null : findLogin(meta, p.reviewer),
   };
   return {
     route: isRoute(raw.route) ? raw.route : 'report',
@@ -185,6 +192,8 @@ export function hashFromState(state: AppState, meta: Meta): string {
   if (f.disclosure !== null) parts.push(`disclosure=${enc(f.disclosure)}`);
   if (f.excludeDrafts) parts.push('drafts=exclude');
   if (f.reopenedOnly) parts.push('reopened=only');
+  if (f.author !== null) parts.push(`author=${enc(f.author)}`);
+  if (f.reviewer !== null) parts.push(`reviewer=${enc(f.reviewer)}`);
   if (state.week !== null) parts.push(`week=${enc(state.week)}`);
   if (state.band !== null) parts.push(`band=${enc(state.band)}`);
   if (state.pr !== null) parts.push(`pr=${state.pr}`);

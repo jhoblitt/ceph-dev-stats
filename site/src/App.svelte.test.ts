@@ -152,6 +152,61 @@ describe('filter bar', () => {
     expect(loc.hash()).toBe('#/?target=main');
   });
 
+  it('offers every login the data names to the Author and Reviewer filters, a bot marked', async () => {
+    render(App, (await page('')).props);
+    const author = screen.getByLabelText('Author') as HTMLInputElement;
+    const reviewer = screen.getByLabelText('Reviewer') as HTMLInputElement;
+    expect(author.type).toBe('text');
+    expect(reviewer.getAttribute('list')).toBe(author.getAttribute('list'));
+    const list = document.getElementById(author.getAttribute('list') as string) as HTMLDataListElement;
+    expect([...list.options].map((o) => o.value)).toEqual(meta.people);
+    expect([...list.options].find((o) => o.value === 'fixture-author-j')?.textContent).toBe('bot');
+  });
+
+  it('shows the author and reviewer a hash restores, each with a way to clear it', async () => {
+    const { props, loc } = await page('#/?author=fixture-author-d&reviewer=fixture-author-f');
+    render(App, props);
+    expect((screen.getByLabelText('Author') as HTMLInputElement).value).toBe('fixture-author-d');
+    expect((screen.getByLabelText('Reviewer') as HTMLInputElement).value).toBe('fixture-author-f');
+    await fireEvent.click(screen.getByRole('button', { name: 'Clear the Reviewer filter' }));
+    expect(loc.hash()).toBe('#/?target=main&author=fixture-author-d');
+    expect((screen.getByLabelText('Reviewer') as HTMLInputElement).value).toBe('');
+    expect(screen.queryByRole('button', { name: 'Clear the Reviewer filter' })).toBeNull();
+  });
+
+  it('writes a login typed in any case to the hash as the data gives it, and clears it when emptied', async () => {
+    const { props, loc } = await page('');
+    render(App, props);
+    const author = screen.getByLabelText('Author') as HTMLInputElement;
+    author.value = ' Fixture-Author-A ';
+    await fireEvent.change(author);
+    expect(loc.hash()).toBe('#/?target=main&author=fixture-author-a');
+    expect(author.value).toBe('fixture-author-a');
+    author.value = '';
+    await fireEvent.change(author);
+    expect(loc.hash()).toBe('#/?target=main');
+  });
+
+  it('says beside the Reviewer input, in view, that it keeps the PRs reviewed or commented on in the period', async () => {
+    render(App, (await page('')).props);
+    const reviewer = screen.getByLabelText('Reviewer') as HTMLInputElement;
+    const line = screen.getByText('PRs reviewed or commented on in the period');
+    expect(line.tagName).toBe('P');
+    expect(line.classList.contains('visually-hidden')).toBe(false);
+    expect(reviewer.getAttribute('aria-describedby')?.split(' ')).toContain(line.id);
+  });
+
+  it('keeps the filter and says so when a login typed is not in the data', async () => {
+    const { props, loc } = await page('#/?reviewer=fixture-author-e');
+    render(App, props);
+    const reviewer = screen.getByLabelText('Reviewer') as HTMLInputElement;
+    reviewer.value = 'someone-else';
+    await fireEvent.change(reviewer);
+    expect(loc.hash()).toBe('#/?target=main&reviewer=fixture-author-e');
+    expect(reviewer.value).toBe('fixture-author-e');
+    expect(screen.getByText('No PR in the data names “someone-else”.')).toBeTruthy();
+  });
+
   it('puts back a day outside the data rather than show what was typed', async () => {
     const { props, loc } = await page('');
     render(App, props);

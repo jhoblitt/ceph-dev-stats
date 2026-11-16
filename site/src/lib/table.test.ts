@@ -55,10 +55,20 @@ describe('sortRows', () => {
 
   it('sorts by the table file’s text once it is there, and leaves rows without it last', () => {
     // Titles b, C, (not loaded), a: compared without regard to case.
-    const text = { title: (r: number) => (r === 2 ? null : (['b', 'C', '', 'a'][r] ?? null)), author: () => null };
+    const text = { title: (r: number) => (r === 2 ? null : (['b', 'C', '', 'a'][r] ?? null)) };
     expect(nums(sortRows(small, rows, { column: 'title', descending: false }, text))).toEqual([13, 10, 11, 12]);
-    expect(nums(sortRows(small, rows, { column: 'author', descending: false }, text))).toEqual([10, 11, 12, 13]);
     expect(nums(sortRows(small, rows, { column: 'title', descending: true }))).toEqual([10, 11, 12, 13]);
+  });
+
+  it("sorts by the author's login from the data, before any table file is there", () => {
+    // Authors a, c, d, e, f, g, a, i, d of the default selection.
+    const selected = select(data, state.filters);
+    expect(numbers(sortRows(data, selected, { column: 'author', descending: false }))).toEqual([
+      64010, 66900, 66100, 66500, 67100, 66510, 66600, 66700, 67000,
+    ]);
+    expect(numbers(sortRows(data, selected, { column: 'author', descending: true }))).toEqual([
+      67000, 66700, 66600, 66510, 66500, 67100, 66100, 64010, 66900,
+    ]);
   });
 
   it('returns new rows and leaves the input alone', () => {
@@ -113,7 +123,7 @@ describe('tableRows', () => {
 
 describe('cells', () => {
   const row = (n: number) => [...Array(data.size).keys()].find((r) => data.prs.number[r] === n) as number;
-  const text = { title: () => 'a title', author: () => 'someone' };
+  const text = { title: () => 'a title' };
 
   it('writes each column of a merged, disclosed PR', () => {
     const r = row(66500);
@@ -121,7 +131,7 @@ describe('cells', () => {
     expect(cells).toEqual({
       number: '#66500',
       title: 'a title',
-      author: 'someone',
+      author: 'fixture-author-d',
       opened: '2026-05-18',
       state: 'merged',
       kind: 'Bug fix',
@@ -143,7 +153,7 @@ describe('cells', () => {
     expect(cellText(data, row(67250), 'response', text)).toBe('none yet');
     expect(cellText(data, row(66900), 'reopened', text)).toBe('once');
     expect(cellText(data, row(66510), 'disclosure', text)).toBe('not disclosed');
-    expect(cellText(data, row(66510), 'title', { title: () => null, author: () => null })).toBe('');
+    expect(cellText(data, row(66510), 'title', { title: () => null })).toBe('');
   });
 });
 

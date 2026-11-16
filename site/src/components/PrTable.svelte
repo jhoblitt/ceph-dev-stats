@@ -2,15 +2,17 @@
   The PRs behind the page: the current selection, narrowed by a chosen week
   or band, one row each, sortable by any column, the order kept in the URL.
   Only the rows in view are drawn, so the full history stays quick. Titles
-  and authors come from each year's table file, fetched the first time the
-  table is on screen, and only for the years its rows need. A row's title
-  chooses that PR; its number links to it on GitHub. The chosen PR's summary
-  sits above the table.
+  come from each year's table file, fetched the first time the table is on
+  screen, and only for the years its rows need. A row's title chooses that
+  PR; its number links to it on GitHub, and its author's handle to theirs,
+  beside a control that filters by that author. The chosen PR's summary sits
+  above the table.
 -->
 <script lang="ts">
   import { SvelteMap } from 'svelte/reactivity';
   import { DataError, locateRow } from '../lib/data';
   import { keepEqual } from '../lib/memo';
+  import { isBot, personHandle } from '../lib/handles';
   import { getPage } from '../lib/page';
   import { periodRange } from '../lib/filters';
   import { openedIn } from '../lib/select';
@@ -28,6 +30,7 @@
     windowRows,
     yearsOfRows,
   } from '../lib/table';
+  import Person from './Person.svelte';
   import SelectedPr from './SelectedPr.svelte';
   import { onScreen } from './onscreen';
 
@@ -104,6 +107,8 @@
   const choose = (pr: number) => selection.update((s) => ({ ...s, pr }));
   const onsort = (column: SortColumn) => selection.update((s) => ({ ...s, sort: nextSort(s.sort, column) }));
   const widen = () => selection.update((s) => ({ ...s, week: null, band: null }));
+  const byAuthor = (login: string) =>
+    selection.update((s) => ({ ...s, filters: { ...s.filters, author: s.filters.author === login ? null : login } }));
 
   const ariaSort = (column: SortColumn) =>
     sort.column !== column ? 'none' : sort.descending ? 'descending' : 'ascending';
@@ -131,11 +136,10 @@
     {#each needed as year (year)}
       {@const t = tables.get(year)}
       {#if t?.status === 'loading'}
-        <p class="muted">Loading the titles and authors of the PRs opened in {year}…</p>
+        <p class="muted">Loading the titles of the PRs opened in {year}…</p>
       {:else if t?.status === 'error'}
         <p class="error">
-          The titles and authors of the PRs opened in {year} could not be loaded ({t.message}); their rows show the
-          rest.
+          The titles of the PRs opened in {year} could not be loaded ({t.message}); their rows show the rest.
         </p>
       {/if}
     {/each}
@@ -189,7 +193,21 @@
                   </button>
                 </td>
                 {#each TABLE_COLUMNS.slice(2) as c (c.id)}
-                  <td class={c.id}>{cellText(dataset, r, c.id, text)}</td>
+                  {#if c.id === 'author'}
+                    {@const person = dataset.prs.author[r] as number}
+                    {@const handle = personHandle(dataset.meta, person)}
+                    <td class="author">
+                      <Person
+                        {handle}
+                        bot={isBot(dataset.meta, person)}
+                        role="author"
+                        active={filters.author === handle.login}
+                        ontoggle={() => byAuthor(handle.login)}
+                      />
+                    </td>
+                  {:else}
+                    <td class={c.id}>{cellText(dataset, r, c.id, text)}</td>
+                  {/if}
                 {/each}
               </tr>
             {/each}
@@ -259,7 +277,9 @@
     text-align: start;
   }
 
+  /* Positioned, so a visually hidden label inside scrolls with it rather than widening the page. */
   .viewport {
+    position: relative;
     max-height: 70vh;
     overflow: auto;
     border: 1px solid var(--grid);

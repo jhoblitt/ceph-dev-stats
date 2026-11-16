@@ -29,6 +29,8 @@ const defaults: AppState = {
     kind: null,
     excludeDrafts: false,
     reopenedOnly: false,
+    author: null,
+    reviewer: null,
   },
   week: null,
   band: null,
@@ -64,6 +66,8 @@ describe('round trip through the hash', () => {
       kind: 'docs',
       excludeDrafts: true,
       reopenedOnly: true,
+      author: 'fixture-author-d',
+      reviewer: 'fixture-reviewer-k',
     },
     week: '2026-06-01',
     band: '30-90',
@@ -92,6 +96,9 @@ describe('round trip through the hash', () => {
     ['kind unknown', { filters: { ...defaults.filters, kind: 'unknown' } }],
     ['drafts', { filters: { ...defaults.filters, excludeDrafts: true } }],
     ['reopened', { filters: { ...defaults.filters, reopenedOnly: true } }],
+    ['author', { filters: { ...defaults.filters, author: 'fixture-author-a' } }],
+    ['reviewer', { filters: { ...defaults.filters, reviewer: 'fixture-author-e' } }],
+    ['a bot as author', { filters: { ...defaults.filters, author: 'fixture-author-j' } }],
     ['week', { week: '2026-11-09' }],
     ['band', { band: 'lt7' }],
     ['pr', { pr: 64010 }],
@@ -117,6 +124,12 @@ describe('round trip through the hash', () => {
       '#/?target=main&component=rgw&kind=feature',
     );
     expect(hashFromState(withFilters({ kind: 'unknown' }), meta)).toBe('#/?target=main&kind=unknown');
+  });
+
+  it('writes the author and the reviewer as logins, after the other filters', () => {
+    expect(hashFromState(withFilters({ reopenedOnly: true, author: 'fixture-author-a', reviewer: 'fixture-author-e' }), meta)).toBe(
+      '#/?target=main&reopened=only&author=fixture-author-a&reviewer=fixture-author-e',
+    );
   });
 
   it('writes the table sort last, as a column or a minus and a column, and leaves out the default', () => {
@@ -152,6 +165,11 @@ describe('unknown values fall back to their defaults', () => {
     ['kind that is empty', '#/?kind='],
     ['drafts', '#/?drafts=maybe'],
     ['reopened', '#/?reopened=yes'],
+    ['author the data does not name', '#/?author=someone-else'],
+    ['author that is empty', '#/?author='],
+    ['author named like a prototype key', '#/?author=__proto__'],
+    ['reviewer the data does not name', '#/?reviewer=someone-else'],
+    ['reviewer that is a person index, not a login', '#/?reviewer=4'],
     ['band', '#/?band=old'],
     ['pr that is not a number', '#/?pr=abc'],
     ['pr that is zero', '#/?pr=0'],
@@ -165,6 +183,13 @@ describe('unknown values fall back to their defaults', () => {
     ['an unknown parameter', '#/?colour=blue'],
   ])('%s', (_name, hash) => {
     expect(stateFromHash(hash, meta)).toEqual(defaults);
+  });
+
+  it('takes a login in any case as the login the data gives, as GitHub does', () => {
+    expect(stateFromHash('#/?author=FIXTURE-Author-A&reviewer=Fixture-Reviewer-K', meta).filters).toMatchObject({
+      author: 'fixture-author-a',
+      reviewer: 'fixture-reviewer-k',
+    });
   });
 
   it('keeps the valid parameters beside an unknown one', () => {

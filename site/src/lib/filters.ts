@@ -78,6 +78,13 @@ export interface Filters {
   excludeDrafts: boolean;
   /** Keep only the PRs reopened at least once. */
   reopenedOnly: boolean;
+  /** Keep only the PRs this login opened; a login from meta's `people`, or null for anyone. */
+  author: string | null;
+  /**
+   * Keep only the PRs this login reviewed or commented on during the period,
+   * not being their author; a login from meta's `people`, or null for anyone.
+   */
+  reviewer: string | null;
 }
 
 export function findChoice<Id extends string>(choices: readonly Choice<Id>[], id: string | undefined): Id | null {
