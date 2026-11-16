@@ -74,9 +74,21 @@ commands:
   - id: ok-to-test
     name: ok to test
     pattern: '/?ok[ -]+to[ -]+test\.?'
+  # Also addressed to Jenkins ("jenkins: retest this please"), misspelt, or
+  # with the reason in parentheses ("retest this please (jenkins)").
   - id: retest
     name: retest this please
-    pattern: 'retest( this| docs)?( please)?\.?'
+    pattern: '(jenkins[:,，] ?|jenkis )?(retest|restest)( this| docs)?,?( please| pelase)?\.?( \(.*\))?'
+  # An older way to ask Jenkins for a run, mostly 2016 to 2021, alone or
+  # with the reason in parentheses: "test this please (no logs)", "hey
+  # jenkins, test this please !".
+  - id: test-this-please
+    name: test this please
+    pattern: '(hey,? )?(jenkins[:,]? )?test this (please|pls)\.?( !)?( \(.*\))?'
+  # The same request in other words, posted as a whole comment in 2016.
+  - id: check-this-please
+    name: check this please
+    pattern: 'check this please\.?'
   # Asks the stale bot to drop its "stale" label.
   - id: unstale
     name: unstale
