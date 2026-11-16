@@ -96,8 +96,13 @@ describe('People', () => {
       'A comment is any such comment by a person that is not a bot command, such as a posted test result, so a row with comments and no reviews is someone who commented without reviewing.',
     );
     expect(text).toContain(
-      'First responses counts the pull requests whose first response was this person’s; a pull request never made ready for review has none, so it counts for no one.',
+      'First responses counts the pull requests whose first response was this person’s and came before the pull request was finally merged or closed; a pull request never made ready for review has none, so it counts for no one.',
     );
+    expect(text).toContain(
+      'The median is of the time from a pull request being ready for review to this person’s first comment or review on it, made before the pull request was finally merged or closed.',
+    );
+    expect(text).not.toContain('while it was open');
+    expect(text).not.toContain('while the pull request was open');
     // The author's own activity is said once, not again for review threads alone.
     expect(text).not.toContain('A reply in a review thread');
     expect(text).toContain(

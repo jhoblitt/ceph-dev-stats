@@ -192,6 +192,32 @@ describe('reviewerRows medians and edges', () => {
     expect(r?.response).toEqual({ state: 'known', days: 3, prs: 5 });
   });
 
+  it('credits a first response only when it came while the PR was open, though the data records one after', () => {
+    // The data's first response does not check the close; the page does.
+    const late = dataset(
+      [{ created: t, author: 0, state: 2, closed: t + DAY, first_response: t + 2 * DAY }],
+      [{ pr: 0, at: t + 2 * DAY, kind: 'review_commented', actor: 1 }],
+    );
+    expect(reviewerRows(late, all(late), whole)).toMatchObject([{ person: 1, commented: 1, firstResponses: 0 }]);
+    const inTime = dataset(
+      [{ created: t, author: 0, state: 2, closed: t + 3 * DAY, first_response: t + 2 * DAY }],
+      [{ pr: 0, at: t + 2 * DAY, kind: 'review_commented', actor: 1 }],
+    );
+    expect(reviewerRows(inTime, all(inTime), whole)).toMatchObject([{ person: 1, commented: 1, firstResponses: 1 }]);
+  });
+
+  it('credits a first response made while the PR was closed before a reopening: only the final close counts', () => {
+    const d = dataset(
+      [{ created: t, author: 0, state: 1, closed: t + 5 * DAY, reopened: 1, first_response: t + 2 * DAY }],
+      [
+        { pr: 0, at: t + DAY, kind: 'closed' },
+        { pr: 0, at: t + 2 * DAY, kind: 'comment_other', actor: 1 },
+        { pr: 0, at: t + 3 * DAY, kind: 'reopened' },
+      ],
+    );
+    expect(reviewerRows(d, all(d), whole)).toMatchObject([{ person: 1, comments: 1, firstResponses: 1, response: { prs: 1 } }]);
+  });
+
   it('counts a comment after the PR finished, but not as a response', () => {
     const d = dataset(
       [{ created: t, author: 0, state: 1, closed: t + DAY }],

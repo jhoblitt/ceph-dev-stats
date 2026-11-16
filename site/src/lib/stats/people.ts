@@ -127,12 +127,16 @@ export interface ReviewerRow {
   commented: number;
   /** Comments during the period, outside a review. */
   comments: number;
-  /** The selected PRs whose first human response, made during the period, was this person's. */
+  /**
+   * The selected PRs whose first human response, made during the period and
+   * before the PR was finally merged or closed, was this person's.
+   */
   firstResponses: number;
   /**
    * Days from a PR being ready to this person's first comment or review on
-   * it, over the PRs where that came during the period while the PR was
-   * still open. A plain median of durations: each one happened.
+   * it, over the PRs where that came during the period and before the PR
+   * was finally merged or closed. A plain median of durations: each one
+   * happened.
    */
   response: Median;
 }
@@ -181,7 +185,9 @@ export function reviewerRows(data: Dataset, rows: Uint32Array, period: Period): 
     return row;
   };
   const inPeriod = (t: number) => t >= period.start && t < period.end;
-  // A response after the PR finished came too late to be one, as on the rest of the page.
+  // A response after the PR was finally merged or closed came too late to be
+  // one, as on the rest of the page; one while it was closed, before a
+  // reopening, still counts.
   const inTime = (r: number, t: number) => p.state[r] === PR_STATE.open || t <= (p.closed[r] as number);
 
   // Events are sorted by PR, then time: each PR's run is scanned once, and

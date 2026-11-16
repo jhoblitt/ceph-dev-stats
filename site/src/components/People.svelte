@@ -131,10 +131,10 @@
         <p>
           A first response is the first comment or review on a pull request by a person other than its author; comments
           and reviews from bot accounts, and bot commands, do not count. First responses counts the pull requests whose
-          first response was this person’s; a pull request never made ready for review has none, so it counts for no
-          one. The median is of the time from a pull request
-          being ready for review to this person’s first comment or review on it, while it was open. One made before the
-          pull request was ready counts as no time, and pull requests never made ready for review are left out. With
+          first response was this person’s and came before the pull request was finally merged or closed; a pull request
+          never made ready for review has none, so it counts for no one. The median is of the time from a pull request
+          being ready for review to this person’s first comment or review on it, made before the pull request was finally
+          merged or closed. One made before the pull request was ready counts as no time, and pull requests never made ready for review are left out. With
           fewer than five pull requests behind it, the median says “too few”.
         </p>
       </div>
