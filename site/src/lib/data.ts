@@ -108,10 +108,33 @@ export interface Dataset {
   years: YearSpan[];
 }
 
-/** table-<year>.json, aligned with that year's rows. */
+/** A commit of a PR: its SHA, then when it was authored and committed. */
+export type Commit = readonly [sha: string, authored: number, committed: number];
+
+/** Where a PR's kind was decided; `original` is the kind of the PR it backports. */
+export const KIND_SOURCES = ['checklist', 'tracker', 'labels', 'original'] as const;
+/** The empty string exactly when the kind is unknown. */
+export type KindSource = (typeof KIND_SOURCES)[number] | '';
+
+/**
+ * table-<year>.json: what the PR table and the links back to GitHub need.
+ * Every field but `refs` is aligned with that year's rows.
+ */
 export interface TableYear {
   titles: string[];
   authors: string[];
+  commits: (readonly Commit[])[];
+  /**
+   * One per event of that year's events file, in its order: the comment,
+   * review or event id, the SHA for `merged` and `force_push`, or the empty
+   * string when there is none, as for `reopened`.
+   */
+  refs: string[];
+  /** The tracker.ceph.com tickets each row references. */
+  tickets: number[][];
+  /** The number of the PR each row backports, or 0. */
+  backport_of: number[];
+  kind_source: KindSource[];
 }
 
 /** A data file that could not be fetched or does not have the expected shape. */
@@ -297,16 +320,69 @@ export function parseYear(year: number, prsRaw: unknown, eventsRaw: unknown, met
   return { year, prs, events: parseEvents(eventsRaw, eventsFile(year), prs.number.length, meta) };
 }
 
-/** Reads a table, which must have `rows` entries, one per row of its year. */
-export function parseTable(raw: unknown, file: string, rows: number): TableYear {
+const SHA = /^[0-9a-f]{40}$/;
+const ID = /^[1-9]\d*$/;
+const SHA_REF_KINDS = ['merged', 'force_push'];
+
+const isCommit = (c: unknown): boolean =>
+  Array.isArray(c) &&
+  c.length === 3 &&
+  typeof c[0] === 'string' &&
+  SHA.test(c[0]) &&
+  isValue('time', c[1]) &&
+  isValue('time', c[2]);
+
+const isKindSource = (s: unknown): s is KindSource =>
+  s === '' || (KIND_SOURCES as readonly unknown[]).includes(s);
+
+/**
+ * Reads a year's table: one entry per row of `year` in every column but
+ * `refs`, which has one per event. A ref must have the form its event's
+ * kind gives, and a kind source must be empty exactly when the row's kind
+ * is unknown.
+ */
+export function parseTable(raw: unknown, file: string, year: YearData, meta: Meta): TableYear {
   if (!isRecord(raw)) throw new DataError(file, 'is not an object of columns');
-  const column = (name: string): string[] => {
-    const v = raw[name];
-    if (!isStringArray(v)) throw new DataError(file, `column "${name}" is not a list of strings`);
-    if (v.length !== rows) throw new DataError(file, `column "${name}" has ${v.length} values where the year has ${rows} rows`);
-    return v;
+  const rows = year.prs.number.length;
+  const perRow = { length: rows, unit: 'row', of: `the year has ${rows} rows` };
+  const perEvent = {
+    length: year.events.kind.length,
+    unit: 'event',
+    of: `${eventsFile(year.year)} has ${year.events.kind.length} events`,
   };
-  return { titles: column('titles'), authors: column('authors') };
+  const column = <T>(name: string, per: typeof perRow, ok: (v: unknown, i: number) => boolean): T[] => {
+    const v = raw[name];
+    if (!Array.isArray(v)) throw new DataError(file, `column "${name}" is missing`);
+    if (v.length !== per.length) throw new DataError(file, `column "${name}" has ${v.length} values where ${per.of}`);
+    const bad = v.findIndex((x, i) => !ok(x, i));
+    if (bad !== -1) {
+      throw new DataError(file, `column "${name}" has a bad value at ${per.unit} ${bad}: ${JSON.stringify(v[bad])}`);
+    }
+    return v as T[];
+  };
+  const isString = (v: unknown) => typeof v === 'string';
+  const shaKinds = SHA_REF_KINDS.map((k) => meta.event_kinds.indexOf(k)).filter((k) => k !== -1);
+
+  const table: TableYear = {
+    titles: column('titles', perRow, isString),
+    authors: column('authors', perRow, isString),
+    commits: column('commits', perRow, (v) => Array.isArray(v) && v.every(isCommit)),
+    refs: column('refs', perEvent, (v, i) => {
+      if (typeof v !== 'string') return false;
+      return v === '' || (shaKinds.includes(year.events.kind[i] as number) ? SHA : ID).test(v);
+    }),
+    tickets: column('tickets', perRow, (v) => Array.isArray(v) && v.every((t) => Number.isSafeInteger(t) && t > 0)),
+    backport_of: column('backport_of', perRow, (v) => Number.isSafeInteger(v) && (v as number) >= 0),
+    kind_source: column('kind_source', perRow, isKindSource),
+  };
+  table.kind_source.forEach((source, r) => {
+    const kind = year.prs.kind[r] as number;
+    if ((source === '') !== (kind === -1)) {
+      const named = kind === -1 ? 'unknown' : `"${meta.kinds[kind]?.id}"`;
+      throw new DataError(file, `column "kind_source" is "${source}" at row ${r}, where the kind is ${named}`);
+    }
+  });
+  return table;
 }
 
 type Typed = Int32Array | Float64Array | Uint8Array;
@@ -429,12 +505,12 @@ export class DataLoader {
     return { dataset: combine(this.meta, loaded), errors };
   }
 
-  /** A year's titles and authors, fetched on first use. */
+  /** A year's table, fetched on first use. */
   table(year: number): Promise<TableYear> {
     let p = this.#tables.get(year);
     if (!p) {
       p = Promise.all([this.#year(year), fetchJson(this.#fetch, this.#baseUrl, tableFile(year))]).then(([y, raw]) =>
-        parseTable(raw, tableFile(year), y.prs.number.length),
+        parseTable(raw, tableFile(year), y, this.meta),
       );
       this.#tables.set(year, p);
     }

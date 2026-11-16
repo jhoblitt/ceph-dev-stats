@@ -4,6 +4,7 @@ import events2026 from './__fixtures__/data/events-2026.json';
 import rawMeta from './__fixtures__/data/meta.json';
 import prs2025 from './__fixtures__/data/prs-2025.json';
 import prs2026 from './__fixtures__/data/prs-2026.json';
+import table2025 from './__fixtures__/data/table-2025.json';
 import table2026 from './__fixtures__/data/table-2026.json';
 import { BASE, fixtureFetch } from './__fixtures__/fetch';
 import {
@@ -14,11 +15,13 @@ import {
   parseEvents,
   parseMeta,
   parsePrs,
+  parseTable,
   parseYear,
   yearsFor,
 } from './data';
 
 const meta = parseMeta(rawMeta);
+const SHA = /^[0-9a-f]{40}$/;
 
 describe('parseMeta', () => {
   it('reads the fixture', () => {
@@ -143,6 +146,94 @@ describe('parseEvents', () => {
   });
 });
 
+describe('parseTable', () => {
+  const y2026 = parseYear(2026, prs2026, events2026, meta);
+  const parse = (raw: unknown) => parseTable(raw, 'table-2026.json', y2026, meta);
+  const table = parse(table2026);
+
+  it('reads the titles and authors, one per row', () => {
+    expect(table.titles).toEqual(table2026.titles);
+    expect(table.authors).toEqual(table2026.authors);
+  });
+
+  it('reads each row its commits as [sha, authored, committed]', () => {
+    expect(table.commits).toHaveLength(10);
+    // #66500, one commit authored and committed at 2026-05-18 09:30.
+    expect(table.commits[1]).toEqual([[expect.stringMatching(SHA), 1779096600, 1779096600]]);
+    table.commits.forEach((list, r) => {
+      expect(list, `row ${r}`).toHaveLength(prs2026.commits[r] as number);
+      expect(list.at(-1)?.[2], `row ${r}`).toBe(prs2026.last_commit[r]);
+    });
+  });
+
+  it('reads one ref per event, in the events file order', () => {
+    expect(table.refs).toHaveLength(events2026.pr.length);
+    expect(table.refs[0]).toMatch(/^[1-9]\d*$/); // comment_other: a comment id
+    expect(table.refs[7]).toMatch(SHA); // merged: the merge commit
+    expect(table.refs[21]).toBe(''); // reopened
+    expect(table.refs[30]).toMatch(/^[1-9]\d*$/); // ready: an event id
+    expect(table.refs[34]).toBe(''); // bot_account without an id
+  });
+
+  it('reads the tickets, the PR a backport is of, and where each kind came from', () => {
+    expect(table.tickets).toEqual([[], [72001], [], [], [72510], [72140], [72377, 72378], [], [], []]);
+    expect(table.backport_of).toEqual([0, 0, 0, 0, 0, 66500, 0, 0, 0, 67010]);
+    expect(table.kind_source).toEqual([
+      'labels',
+      'checklist',
+      'checklist',
+      'checklist',
+      'checklist',
+      'original',
+      'tracker',
+      'labels',
+      'labels',
+      'labels',
+    ]);
+  });
+
+  it('reads a kind source of "" for an unknown kind', () => {
+    const y2025 = parseYear(2025, prs2025, events2025, meta);
+    expect(parseTable(table2025, 'table-2025.json', y2025, meta).kind_source).toEqual(['tracker', '']);
+  });
+
+  const sha = 'a'.repeat(40);
+  const at = <T>(column: readonly T[], i: number, value: T) => column.map((v, j) => (j === i ? value : v));
+  it.each([
+    ['titles one short', 'titles', { titles: table2026.titles.slice(1) }],
+    ['commits one short', 'commits', { commits: table2026.commits.slice(1) }],
+    ['a commit without its committed time', 'commits', { commits: at(table2026.commits, 2, [[sha, 1]]) }],
+    ['a commit whose sha is not 40 hex digits', 'commits', { commits: at(table2026.commits, 2, [['abc', 1, 2]]) }],
+    ['a commit whose time is not a number', 'commits', { commits: at(table2026.commits, 2, [[sha, '1', 2]]) }],
+    ['refs one short of the events', 'refs', { refs: table2026.refs.slice(1) }],
+    ['a merge ref that is not a sha', 'refs', { refs: at(table2026.refs, 7, '3412345678') }],
+    ['a comment ref that is a sha', 'refs', { refs: at(table2026.refs, 0, sha) }],
+    ['a ref that is not an id', 'refs', { refs: at(table2026.refs, 0, 'issuecomment-1') }],
+    ['tickets one short', 'tickets', { tickets: table2026.tickets.slice(1) }],
+    ['a ticket that is not a positive number', 'tickets', { tickets: at(table2026.tickets, 1, [0]) }],
+    ['backport_of one short', 'backport_of', { backport_of: table2026.backport_of.slice(1) }],
+    ['a negative backport_of', 'backport_of', { backport_of: at(table2026.backport_of, 5, -1) }],
+    ['kind_source one short', 'kind_source', { kind_source: table2026.kind_source.slice(1) }],
+    ['an unheard-of kind source', 'kind_source', { kind_source: at(table2026.kind_source, 0, 'guess') }],
+    ['no kind source for a known kind', 'kind_source', { kind_source: at(table2026.kind_source, 0, '') }],
+  ])('rejects %s, naming the file and the column', (_name, column, patch) => {
+    const bad = { ...table2026, ...patch };
+    expect(() => parse(bad)).toThrow(DataError);
+    expect(() => parse(bad)).toThrow(new RegExp(`table-2026\\.json.*"${column}"`));
+  });
+
+  it('rejects a kind source for an unknown kind', () => {
+    const y2025 = parseYear(2025, prs2025, events2025, meta);
+    const bad = { ...table2025, kind_source: ['tracker', 'labels'] };
+    expect(() => parseTable(bad, 'table-2025.json', y2025, meta)).toThrow(/table-2025\.json.*"kind_source".*row 1/);
+  });
+
+  it('rejects a missing column', () => {
+    const { refs: _, ...withoutRefs } = table2026;
+    expect(() => parse(withoutRefs)).toThrow(/table-2026\.json.*"refs"/);
+  });
+});
+
 describe('combine', () => {
   const y2025 = parseYear(2025, prs2025, events2025, meta);
   const y2026 = parseYear(2026, prs2026, events2026, meta);
@@ -219,6 +310,8 @@ describe('DataLoader', () => {
     const table = await loader.table(2026);
     expect(table.titles).toEqual(table2026.titles);
     expect(table.authors).toEqual(table2026.authors);
+    expect(table.refs).toEqual(table2026.refs);
+    expect(table.kind_source).toEqual(table2026.kind_source);
     expect(requested.filter((u) => u.includes('table-'))).toEqual([`${BASE}table-2026.json`]);
   });
 
@@ -251,5 +344,11 @@ describe('DataLoader', () => {
     const { fetch } = fixtureFetch({ 'table-2026.json': { ...table2026, titles: table2026.titles.slice(1) } });
     const loader = new DataLoader(meta, BASE, fetch);
     await expect(loader.table(2026)).rejects.toThrow(/table-2026\.json.*titles/);
+  });
+
+  it('rejects a table whose refs do not match its year events', async () => {
+    const { fetch } = fixtureFetch({ 'table-2026.json': { ...table2026, refs: table2026.refs.slice(1) } });
+    const loader = new DataLoader(meta, BASE, fetch);
+    await expect(loader.table(2026)).rejects.toThrow(/table-2026\.json.*"refs".*events-2026\.json has 35 events/);
   });
 });
