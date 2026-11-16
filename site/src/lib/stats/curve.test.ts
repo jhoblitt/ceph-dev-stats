@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { DAY } from '../filters';
-import { type Curve, SPAN_OUTCOMES, type Span, outcomeCurve, quantileDays } from './curve';
+import { type Curve, SPAN_OUTCOMES, type Span, outcomeCurve, quantileDays, spanQuantile } from './curve';
 import { type Row, all, at, dataset, random } from './testing';
 
 const T0 = at('2026-06-01T00:00:00Z');
@@ -41,6 +41,63 @@ describe('outcomeCurve for merge', () => {
     expectClose(c.shares.merged, [1 / 3, 1 / 3, 1 / 3]);
     expectClose(c.shares.open, [2 / 3, 1 / 3, 1 / 3]);
     expect(quantileDays(c, 'merged', 0.5)).toBeNull();
+  });
+
+  it('counts the PRs at each outcome, the open ones under what remains', () => {
+    const data = dataset(four, [], { fetched_through: NOW });
+    expect(outcomeCurve(data, all(data), 'merge').counts).toEqual({ merged: 2, closed: 1, open: 1 });
+    expect(outcomeCurve(data, new Uint32Array(0), 'merge').counts).toEqual({ merged: 0, closed: 0, open: 0 });
+  });
+
+  it('tells a quantile known, not yet known, and not reached apart', () => {
+    // Merged 1/4 from day 1 and 3/4 from day 5, closed 1/4 from day 2. The third PR is
+    // still open, at age 3, but the curve's open share falls to 0 once the merge at day 5
+    // outlasts it.
+    const data = dataset(four, [], { fetched_through: NOW });
+    const c = outcomeCurve(data, all(data), 'merge');
+    expect(spanQuantile(c, 'merge', 0.5)).toEqual({ state: 'known', days: 5 });
+    // Two merged and one open of four: at most 3/4 can merge, short of 9 in 10.
+    expect(spanQuantile(c, 'merge', 0.9)).toEqual({ state: 'notReached', share: 0.75 });
+    // Of three, 1/3 merged and 1/3 still open: 1/2 can still be reached, 9 in 10 cannot.
+    const three = dataset(four.slice(0, 3), [], { fetched_through: NOW });
+    const d = outcomeCurve(three, all(three), 'merge');
+    expect(spanQuantile(d, 'merge', 0.5)).toEqual({ state: 'notYetKnown' });
+    const notReached = spanQuantile(d, 'merge', 0.9);
+    expect(notReached.state).toBe('notReached');
+    expect(notReached.state === 'notReached' && notReached.share).toBeCloseTo(1 / 3, 12);
+    // Exactly reachable: 1/3 merged plus 1/3 open is 2/3.
+    expect(spanQuantile(d, 'merge', 2 / 3)).toEqual({ state: 'notYetKnown' });
+  });
+
+  it('keeps a quantile not yet known while a PR younger than the slowest finished one is still open', () => {
+    // A open at age 1 day, B closed after 2, C closed after 3, D merged after 4. The curve
+    // ends at merged 1/3 and open 0, but A may still merge: one merged and one open of four
+    // can still make a half.
+    const rows: Row[] = [
+      { created: NOW - DAY },
+      { created: T0, state: CLOSED, closed: T0 + 2 * DAY },
+      { created: T0, state: CLOSED, closed: T0 + 3 * DAY },
+      { created: T0, state: MERGED, closed: T0 + 4 * DAY },
+    ];
+    const open = dataset(rows, [], { fetched_through: NOW });
+    const c = outcomeCurve(open, all(open), 'merge');
+    expectClose(c.shares.merged, [0, 0, 0, 1 / 3]);
+    expectClose(c.shares.open, [1, 2 / 3, 1 / 3, 0]);
+    expect(spanQuantile(c, 'merge', 0.5)).toEqual({ state: 'notYetKnown' });
+    // Two of four cannot make nine in ten, whatever A does.
+    const p90 = spanQuantile(c, 'merge', 0.9);
+    expect(p90.state).toBe('notReached');
+    expect(p90.state === 'notReached' && p90.share).toBeCloseTo(1 / 3, 12);
+    // A merges at day 5: half merged by day 5.
+    const merged = dataset([{ created: T0, state: MERGED, closed: T0 + 5 * DAY }, ...rows.slice(1)], [], {
+      fetched_through: NOW,
+    });
+    expect(spanQuantile(outcomeCurve(merged, all(merged), 'merge'), 'merge', 0.5)).toEqual({ state: 'known', days: 5 });
+  });
+
+  it('has nothing to say about a quantile of no PRs', () => {
+    const none = dataset(four, [], { fetched_through: NOW });
+    expect(spanQuantile(outcomeCurve(none, new Uint32Array(0), 'merge'), 'merge', 0.5)).toEqual({ state: 'none' });
   });
 
   it('removes a PR open at an age after the outcomes at that same age', () => {

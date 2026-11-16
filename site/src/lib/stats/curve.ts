@@ -39,6 +39,11 @@ export interface Curve<O extends string = string> {
   days: number[];
   /** Each outcome's share from that day on, aligned with `days`. */
   shares: Record<O, number[]>;
+  /**
+   * How many PRs on the curve reached each outcome; what remains counts the
+   * PRs with none yet, which are still at risk whatever their age.
+   */
+  counts: Record<O, number>;
 }
 
 // A row is packed into one number, its duration in seconds times 8 plus its
@@ -130,6 +135,8 @@ export function outcomeCurve<S extends Span>(data: Dataset, rows: Uint32Array, s
   const series: number[][] = names.map(() => []);
   const shares = new Float64Array(kinds);
   const count = new Float64Array(kinds);
+  // PRs per outcome; a PR with none yet counts under what remains.
+  const totals = new Float64Array(names.length);
   let remaining = 1;
   let atRisk = n;
   for (let i = 0; i < n; ) {
@@ -139,6 +146,8 @@ export function outcomeCurve<S extends Span>(data: Dataset, rows: Uint32Array, s
     for (; i < n && Math.floor((sorted[i] as number) / CODES) === seconds; i++, leaving++) {
       const code = (sorted[i] as number) - seconds * CODES;
       if (code !== LEFT) count[code] = (count[code] as number) + 1;
+      const t = code === LEFT ? kinds : code;
+      totals[t] = (totals[t] as number) + 1;
     }
     let outcomes = 0;
     for (let k = 0; k < kinds; k++) {
@@ -155,8 +164,12 @@ export function outcomeCurve<S extends Span>(data: Dataset, rows: Uint32Array, s
     if (names.length > kinds) series[kinds]?.push(remaining);
   }
   const out: Record<string, number[]> = {};
-  names.forEach((name, k) => (out[name] = series[k] as number[]));
-  return { days, shares: out as Record<Outcome<S>, number[]> };
+  const counts: Record<string, number> = {};
+  names.forEach((name, k) => {
+    out[name] = series[k] as number[];
+    counts[name] = totals[k] as number;
+  });
+  return { days, shares: out as Record<Outcome<S>, number[]>, counts: counts as Record<Outcome<S>, number> };
 }
 
 // Floating-point sums of shares may fall short of a quantile they reach.
@@ -170,4 +183,37 @@ export function quantileDays<O extends string>(curve: Curve<O>, outcome: O, q: n
   const s = curve.shares[outcome];
   for (let i = 0; i < s.length; i++) if ((s[i] as number) >= q - EPSILON) return curve.days[i] as number;
   return null;
+}
+
+/** A quantile of a span's first outcome, with the reason when it has no value. */
+export type Quantile =
+  | { state: 'known'; days: number }
+  /** Enough PRs are still waiting for the outcome's share to reach it. */
+  | { state: 'notYetKnown' }
+  /**
+   * It can no longer be reached: the PRs that reached the outcome plus every
+   * PR still waiting fall short of it. `share` is the outcome's share now.
+   */
+  | { state: 'notReached'; share: number }
+  /** The curve has no PR on it. */
+  | { state: 'none' };
+
+/**
+ * The day the span's first outcome (merged, responded, approved, done)
+ * reaches the share `q`, telling a quantile that may still come from one that
+ * no longer can. That is decided from counts, not from the curve's tail: the
+ * curve's share still waiting falls to 0 once its slowest finished PR
+ * outlasts a younger one still open, which may yet reach the outcome.
+ */
+export function spanQuantile<S extends Span>(curve: Curve<Outcome<S>>, span: S, q: number): Quantile {
+  if (curve.days.length === 0) return { state: 'none' };
+  const names: readonly Outcome<S>[] = SPAN_OUTCOMES[span];
+  const first = names[0] as Outcome<S>;
+  const days = quantileDays(curve, first, q);
+  if (days !== null) return { state: 'known', days };
+  const all = names.reduce((n, o) => n + curve.counts[o], 0);
+  // With one outcome a span is complete, so nothing still waits.
+  const waiting = names.length === 3 ? curve.counts[names[2] as Outcome<S>] : 0;
+  if ((curve.counts[first] + waiting) / all >= q - EPSILON) return { state: 'notYetKnown' };
+  return { state: 'notReached', share: curve.shares[first].at(-1) as number };
 }
