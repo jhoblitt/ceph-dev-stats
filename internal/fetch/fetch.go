@@ -194,14 +194,15 @@ type reviewNode struct {
 }
 
 // prNode is a listed pull request. Its connection fields shadow Entry's
-// lists when decoding.
+// lists when decoding; they are pointers so that a connection missing from
+// the reply, or null, is told apart from an empty one.
 type prNode struct {
 	Entry
-	Labels        connection[Label]       `json:"labels"`
-	Commits       connection[commitNode]  `json:"commits"`
-	Comments      connection[commentNode] `json:"comments"`
-	Reviews       connection[reviewNode]  `json:"reviews"`
-	TimelineItems connection[Event]       `json:"timelineItems"`
+	Labels        *connection[Label]       `json:"labels"`
+	Commits       *connection[commitNode]  `json:"commits"`
+	Comments      *connection[commentNode] `json:"comments"`
+	Reviews       *connection[reviewNode]  `json:"reviews"`
+	TimelineItems *connection[Event]       `json:"timelineItems"`
 }
 
 // databaseID parses a fullDatabaseId of pull request number; null is no id.
@@ -272,9 +273,11 @@ func (w *walker) listPage(ctx context.Context, states []string, after string) (c
 		if states != nil {
 			vars["states"] = states
 		}
+		// Pointers, so that a reply without either key is told apart from
+		// an empty last page.
 		var resp struct {
-			Repository struct {
-				PullRequests connection[prNode] `json:"pullRequests"`
+			Repository *struct {
+				PullRequests *connection[prNode] `json:"pullRequests"`
 			} `json:"repository"`
 		}
 		err := w.client.Do(ctx, ghapi.PullRequests, vars, &resp)
@@ -285,7 +288,13 @@ func (w *walker) listPage(ctx context.Context, states []string, after string) (c
 				slog.String("error", err.Error()))
 			continue
 		}
-		return resp.Repository.PullRequests, err
+		if err != nil {
+			return connection[prNode]{}, err
+		}
+		if resp.Repository == nil || resp.Repository.PullRequests == nil {
+			return connection[prNode]{}, errors.New("reply without repository.pullRequests")
+		}
+		return *resp.Repository.PullRequests, nil
 	}
 }
 
@@ -359,14 +368,18 @@ func (w *walker) store(ctx context.Context, n *prNode) (bool, error) {
 }
 
 // rest returns first's nodes followed by every later page of connection c
-// of pull request number.
-func rest[T any](ctx context.Context, w *walker, number int, c ghapi.Connection, first connection[T]) ([]T, error) {
+// of pull request number. A first page or a later one that the reply left
+// out, or gave as null, is an error rather than an empty last page.
+func rest[T any](ctx context.Context, w *walker, number int, c ghapi.Connection, first *connection[T]) ([]T, error) {
+	if first == nil {
+		return nil, fmt.Errorf("listing pull request %d: reply without %s", number, c)
+	}
 	nodes := first.Nodes
 	info := first.PageInfo
 	for info.HasNextPage {
 		var resp struct {
 			Repository struct {
-				PullRequest map[string]connection[T] `json:"pullRequest"`
+				PullRequest map[string]*connection[T] `json:"pullRequest"`
 			} `json:"repository"`
 		}
 		vars := map[string]any{
@@ -377,6 +390,9 @@ func rest[T any](ctx context.Context, w *walker, number int, c ghapi.Connection,
 			return nil, fmt.Errorf("paging %s of pull request %d: %w", c, number, err)
 		}
 		page := resp.Repository.PullRequest[string(c)]
+		if page == nil {
+			return nil, fmt.Errorf("paging %s of pull request %d: reply without repository.pullRequest.%s", c, number, c)
+		}
 		nodes = append(nodes, page.Nodes...)
 		info = page.PageInfo
 	}
@@ -425,18 +441,20 @@ func (w *walker) baselines(ctx context.Context) error {
 		for i, login := range batch {
 			vars["q"+strconv.Itoa(i)] = fmt.Sprintf("repo:%s/%s is:pr author:%s created:<%s", Owner, Name, login, before)
 		}
-		var resp map[string]struct {
-			IssueCount int `json:"issueCount"`
+		// Pointers, so that a missing or null answer is not a count of 0,
+		// which would be kept for good.
+		var resp map[string]*struct {
+			IssueCount *int `json:"issueCount"`
 		}
 		if err := w.client.Do(ctx, ghapi.AuthorBaselines(len(batch)), vars, &resp); err != nil {
 			return fmt.Errorf("counting prior pull requests: %w", err)
 		}
 		for i, login := range batch {
-			r, ok := resp["a"+strconv.Itoa(i)]
-			if !ok {
+			r := resp["a"+strconv.Itoa(i)]
+			if r == nil || r.IssueCount == nil {
 				return fmt.Errorf("counting prior pull requests: no answer for %s", login)
 			}
-			known[login] = r.IssueCount
+			known[login] = *r.IssueCount
 		}
 		if err := writeJSON(path, known); err != nil {
 			return err
