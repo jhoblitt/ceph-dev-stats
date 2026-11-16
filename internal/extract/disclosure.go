@@ -11,8 +11,9 @@ import (
 
 // The whole disclosure-candidate rule lives in this file. It finds
 // candidates, never verdicts: the hand-edited tools table decides later,
-// so the broad list errs towards keeping a line, and tuning it means
-// re-deriving every record with extract --all.
+// so the broad list errs towards keeping a line. A plain extract run
+// re-derives every record its current-format cache entry is as new as, so
+// a tuned rule reaches the records on the next run.
 
 // broad is the broad word list. Everything is case-insensitive except "AI",
 // which is matched only as an upper-case word. "cursor" is a RADOS term, so

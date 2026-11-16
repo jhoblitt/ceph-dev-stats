@@ -24,10 +24,6 @@ type Config struct {
 	CacheDir string
 	// DataDir holds the committed prs/, authors.json and meta.json.
 	DataDir string
-	// All re-derives the record of every cached pull request, including
-	// those whose cache entry is older than their record, or as old and of
-	// an older format.
-	All bool
 	// Logger receives progress; slog.Default() when nil.
 	Logger *slog.Logger
 }
@@ -38,10 +34,11 @@ var entryName = regexp.MustCompile(`^(\d+)\.json$`)
 
 // Run upserts the records in cfg.DataDir from the cache in cfg.CacheDir.
 // A cached pull request replaces its record when it was updated after the
-// record, when it was updated at the same time and is in the current
-// FormatVersion, or always with cfg.All. So an entry fetched again in a
-// newer format re-derives its record, and an entry of an older format
-// never strips what a newer one added. Every record's prior_prs is then
+// record, or when it was updated at the same time and is in the current
+// FormatVersion. So every run re-derives each record a current-format entry
+// is as new as, and an entry older than its record, or as old and of an
+// older format, never strips what a newer one added: such entries are
+// counted in a warning instead. Every record's prior_prs is then
 // recomputed, since a newly added pull request can come before others by
 // the same author, and only the monthly files whose bytes change are
 // rewritten. The cache's baselines are added to data/authors.json, and its
@@ -58,6 +55,11 @@ func Run(ctx context.Context, cfg Config) error {
 	u, err := upsert(cfg, numbers)
 	if err != nil {
 		return err
+	}
+	if len(u.older) > 0 {
+		log.WarnContext(ctx, "cache entries older than their records",
+			slog.Int("entries", len(u.older)),
+			slog.Int("example", u.older[0]))
 	}
 	if len(u.odd) > 0 {
 		log.WarnContext(ctx, "event addresses without an event id",
@@ -101,6 +103,9 @@ type upserted struct {
 	byNumber map[int]record.Record
 	// replaced counts the records derived from the cache.
 	replaced int
+	// older is the pull requests, ascending, whose entry did not replace
+	// their record for being older or of an older format.
+	older []int
 	// odd is the event addresses of the derived records that held no
 	// event id.
 	odd []string
@@ -129,7 +134,8 @@ func upsert(cfg Config, numbers []int) (upserted, error) {
 		if err != nil {
 			return upserted{}, err
 		}
-		if old, ok := u.byNumber[n]; ok && !cfg.All && !replaces(e, old) {
+		if old, ok := u.byNumber[n]; ok && !replaces(e, old) {
+			u.older = append(u.older, n)
 			continue
 		}
 		r, withheld, err := fromEntry(e)

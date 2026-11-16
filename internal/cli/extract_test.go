@@ -39,6 +39,7 @@ var _ = Describe("extract", func() {
 		writeJSON(filepath.Join(cacheDir, fetch.RawDir, "7.json"), fetch.Entry{
 			Number: 7, Title: "pr", State: "OPEN", CreatedAt: opened, UpdatedAt: opened,
 			BaseRefName: "main", Author: &fetch.Actor{Login: "alice", Typename: "User"},
+			FormatVersion: fetch.FormatVersion,
 		})
 		writeJSON(filepath.Join(cacheDir, "authors.json"), map[string]int{"alice": 2})
 		writeJSON(filepath.Join(cacheDir, "meta.json"), fetch.Meta{WalkStarted: time.Date(2026, 11, 15, 12, 0, 0, 0, time.UTC)})
@@ -60,13 +61,14 @@ var _ = Describe("extract", func() {
 		Expect(stderr.String()).To(ContainSubstring(`"msg":"extract finished"`))
 	})
 
-	It("re-derives every record with --all, leaving identical bytes", func() {
+	It("re-derives a record from its entry at the same updatedAt, leaving identical bytes", func() {
 		Expect(run()).To(Succeed())
 		path := filepath.Join(dataDir, record.PRsDir, "2026-06.jsonl")
 		before, err := os.ReadFile(path)
 		Expect(err).NotTo(HaveOccurred())
+		stderr.Reset()
 
-		Expect(run("--all")).To(Succeed())
+		Expect(run()).To(Succeed())
 
 		Expect(os.ReadFile(path)).To(Equal(before))
 		Expect(stderr.String()).To(ContainSubstring(`"replaced":1`))
