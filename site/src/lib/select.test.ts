@@ -16,6 +16,8 @@ const data = combine(meta, [parseYear(2025, prs2025, events2025, meta), parseYea
 
 // Rows in the fixture: 0 #64010, 1 #65220, 2 #66100, 3 #66500, 4 #66510,
 // 5 #66600, 6 #66700, 7 #66800, 8 #66900, 9 #67000, 10 #67100, 11 #67250.
+// Their kinds: bugfix 0, 3, 7; feature 6, 8, 10; cleanup 2, 5; docs 4, 11;
+// other 9; unknown 1.
 const every: Filters = { ...defaultFilters(meta), target: 'all' };
 const rows = (patch: Partial<Filters>) => [...select(data, { ...every, ...patch })];
 
@@ -46,6 +48,12 @@ describe('select', () => {
     ['not disclosed', { disclosure: 'not-disclosed' }, [0, 1, 2, 4, 5, 6, 8, 11]],
     ['drafts excluded', { excludeDrafts: true }, [0, 1, 2, 3, 4, 5, 7, 8, 9, 10, 11]],
     ['reopened only', { reopenedOnly: true }, [8]],
+    ['kind bug fix', { kind: 'bugfix' }, [0, 3, 7]],
+    ['kind feature', { kind: 'feature' }, [6, 8, 10]],
+    ['kind cleanup', { kind: 'cleanup' }, [2, 5]],
+    ['kind documentation', { kind: 'docs' }, [4, 11]],
+    ['kind other', { kind: 'other' }, [9]],
+    ['kind unknown', { kind: 'unknown' }, [1]],
     // Opened before August and not finished before July.
     ['period July 2026', { from: '2026-07-01', to: '2026-07-31' }, [1, 2, 5, 6, 7, 8]],
   ] satisfies [string, Partial<Filters>, number[]][])('%s alone', (_name, patch, expected) => {
@@ -58,6 +66,14 @@ describe('select', () => {
 
   it('selects nothing for a component meta does not name', () => {
     expect(rows({ component: 'no-such-component' })).toEqual([]);
+  });
+
+  it('selects nothing for a kind meta does not name, not the unknown kinds', () => {
+    expect(rows({ kind: 'refactor' })).toEqual([]);
+  });
+
+  it('combines the kind with the other filters', () => {
+    expect(rows({ target: 'main', kind: 'bugfix' })).toEqual([0, 3]);
   });
 });
 

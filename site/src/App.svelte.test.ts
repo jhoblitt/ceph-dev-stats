@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { fireEvent, render, screen, within } from '@testing-library/svelte';
+import { cleanup, fireEvent, render, screen, within } from '@testing-library/svelte';
 import { get } from 'svelte/store';
 import { beforeAll, describe, expect, it } from 'vitest';
 import App from './App.svelte';
@@ -114,6 +114,42 @@ describe('filter bar', () => {
     reopened.value = 'only';
     await fireEvent.change(reopened);
     expect(loc.hash()).toBe('#/?target=backports&size=gt1000&reopened=only');
+  });
+
+  it('offers every kind in meta, then unknown, under a Kind label', async () => {
+    render(App, (await page('')).props);
+    const kind = screen.getByLabelText('Kind') as HTMLSelectElement;
+    expect(kind.tagName).toBe('SELECT');
+    expect([...kind.options].map((o) => [o.value, o.text])).toEqual([
+      ['', 'all'],
+      ['bugfix', 'Bug fix'],
+      ['feature', 'Feature'],
+      ['cleanup', 'Cleanup'],
+      ['docs', 'Documentation'],
+      ['other', 'Other'],
+      ['unknown', 'unknown'],
+    ]);
+    expect(kind.value).toBe('');
+  });
+
+  it('shows the kind a hash restores, and all for a kind meta does not name', async () => {
+    render(App, (await page('#/?kind=unknown')).props);
+    expect((screen.getByLabelText('Kind') as HTMLSelectElement).value).toBe('unknown');
+    cleanup();
+    render(App, (await page('#/?kind=refactor')).props);
+    expect((screen.getByLabelText('Kind') as HTMLSelectElement).value).toBe('');
+  });
+
+  it('writes a kind to the hash, and clears it for all', async () => {
+    const { props, loc } = await page('');
+    render(App, props);
+    const kind = screen.getByLabelText('Kind') as HTMLSelectElement;
+    kind.value = 'docs';
+    await fireEvent.change(kind);
+    expect(loc.hash()).toBe('#/?target=main&kind=docs');
+    kind.value = '';
+    await fireEvent.change(kind);
+    expect(loc.hash()).toBe('#/?target=main');
   });
 
   it('puts back a day outside the data rather than show what was typed', async () => {

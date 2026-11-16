@@ -1,8 +1,8 @@
 // The reader's filters and selection, kept in the URL hash so any view can be
 // linked:
 //
-//   #/<route>?target=backports&from=2026-06-01&to=2026-08-31&component=rgw&size=11-100
-//     &standing=first&disclosure=disclosed&drafts=exclude&reopened=only
+//   #/<route>?target=backports&from=2026-06-01&to=2026-08-31&component=rgw&kind=bugfix
+//     &size=11-100&standing=first&disclosure=disclosed&drafts=exclude&reopened=only
 //     &week=2026-06-01&band=lt7&pr=66600
 //
 // <route> is empty for the report or `methods`. The target is always written;
@@ -20,6 +20,7 @@ import {
   SIZE_BANDS,
   STANDING_BANDS,
   TARGETS,
+  UNKNOWN_KIND,
   dayOf,
   dayStart,
   findChoice,
@@ -50,6 +51,7 @@ const KEYS = [
   'from',
   'to',
   'component',
+  'kind',
   'size',
   'standing',
   'disclosure',
@@ -90,6 +92,7 @@ export function defaultFilters(meta: Meta): Filters {
     size: null,
     standing: null,
     disclosure: null,
+    kind: null,
     excludeDrafts: false,
     reopenedOnly: false,
   };
@@ -137,6 +140,7 @@ export function validateState(raw: RawState, meta: Meta): AppState {
   const d = defaultFilters(meta);
   const p = raw.params;
   const component = p.component;
+  const kind = p.kind;
   const filters: Filters = {
     ...validPeriod(p.from, p.to, d),
     target: findChoice(TARGETS, p.target) ?? d.target,
@@ -144,6 +148,7 @@ export function validateState(raw: RawState, meta: Meta): AppState {
     size: findChoice(SIZE_BANDS, p.size),
     standing: findChoice(STANDING_BANDS, p.standing),
     disclosure: findChoice(DISCLOSURES, p.disclosure),
+    kind: kind === UNKNOWN_KIND.id || (kind !== undefined && meta.kinds.some((k) => k.id === kind)) ? kind : null,
     excludeDrafts: p.drafts === 'exclude',
     reopenedOnly: p.reopened === 'only',
   };
@@ -169,6 +174,7 @@ export function hashFromState(state: AppState, meta: Meta): string {
   if (f.from !== d.from) parts.push(`from=${enc(f.from)}`);
   if (f.to !== d.to) parts.push(`to=${enc(f.to)}`);
   if (f.component !== null) parts.push(`component=${enc(f.component)}`);
+  if (f.kind !== null) parts.push(`kind=${enc(f.kind)}`);
   if (f.size !== null) parts.push(`size=${enc(f.size)}`);
   if (f.standing !== null) parts.push(`standing=${enc(f.standing)}`);
   if (f.disclosure !== null) parts.push(`disclosure=${enc(f.disclosure)}`);

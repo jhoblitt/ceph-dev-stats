@@ -1,8 +1,8 @@
 // Filters to a selection of rows. The selection is of PRs; an event is in it
 // when its PR is.
 
-import type { Dataset } from './data';
-import { type Filters, SIZE_BANDS, STANDING_BANDS, periodRange } from './filters';
+import type { Dataset, Meta } from './data';
+import { type Filters, SIZE_BANDS, STANDING_BANDS, UNKNOWN_KIND, periodRange } from './filters';
 import { type Period, bucketOf, buckets } from './stats/buckets';
 
 /**
@@ -16,6 +16,7 @@ export function select(data: Dataset, filters: Filters): Uint32Array {
   const { start, end } = periodRange(filters);
   const main = meta.bases.indexOf('main');
   const component = filters.component === null ? -1 : meta.components.findIndex((c) => c.id === filters.component);
+  const kind = kindValue(meta, filters.kind);
   const size = SIZE_BANDS.find((b) => b.id === filters.size);
   const standing = STANDING_BANDS.find((b) => b.id === filters.standing);
   const none = meta.disclosure.indexOf('none');
@@ -39,11 +40,23 @@ export function select(data: Dataset, filters: Filters): Uint32Array {
     }
     if (filters.disclosure === 'disclosed' && p.disclosure[r] === none) continue;
     if (filters.disclosure === 'not-disclosed' && p.disclosure[r] !== none) continue;
+    if (kind !== null && p.kind[r] !== kind) continue;
     if (filters.excludeDrafts && p.draft[r] === 1) continue;
     if (filters.reopenedOnly && !((p.reopened[r] as number) > 0)) continue;
     out[n++] = r;
   }
   return out.slice(0, n);
+}
+
+/**
+ * The `kind` value the Kind filter keeps: null for every kind, -1 for the
+ * unknown ones, and -2, which no row has, for a kind meta does not name.
+ */
+function kindValue(meta: Meta, id: string | null): number | null {
+  if (id === null) return null;
+  if (id === UNKNOWN_KIND.id) return -1;
+  const i = meta.kinds.findIndex((k) => k.id === id);
+  return i === -1 ? -2 : i;
 }
 
 /**
