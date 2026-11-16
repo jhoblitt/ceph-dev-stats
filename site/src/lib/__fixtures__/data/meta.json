@@ -1,0 +1,80 @@
+{
+  "repo": "ceph/ceph",
+  "fetched_through": 1794722400,
+  "window_start": 1778803200,
+  "years": [
+    2025,
+    2026
+  ],
+  "bases": [
+    "main",
+    "reef",
+    "squid",
+    "tentacle"
+  ],
+  "components": [
+    {
+      "id": "cephfs",
+      "name": "CephFS"
+    },
+    {
+      "id": "mgr",
+      "name": "mgr"
+    },
+    {
+      "id": "rbd",
+      "name": "RBD"
+    },
+    {
+      "id": "rgw",
+      "name": "RGW"
+    }
+  ],
+  "families": [
+    {
+      "id": "claude",
+      "name": "Claude"
+    },
+    {
+      "id": "copilot",
+      "name": "GitHub Copilot"
+    },
+    {
+      "id": "unspecified",
+      "name": "unspecified"
+    }
+  ],
+  "commands": [
+    {
+      "id": "jenkins-test",
+      "name": "jenkins test"
+    },
+    {
+      "id": "config-check",
+      "name": "/config check ok"
+    }
+  ],
+  "disclosure": [
+    "none",
+    "description",
+    "coauthor",
+    "trailer"
+  ],
+  "event_kinds": [
+    "comment_other",
+    "comment_author",
+    "command_author",
+    "command_other",
+    "bot_account",
+    "review_approved",
+    "review_changes",
+    "review_commented",
+    "bot_review",
+    "ready",
+    "draft",
+    "force_push",
+    "closed",
+    "reopened",
+    "merged"
+  ]
+}

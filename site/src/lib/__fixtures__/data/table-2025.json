@@ -1,0 +1,4 @@
+{
+  "titles": ["rgw: fix a stall in multisite bucket sync","reef: rbd: backport a mirroring fix"],
+  "authors": ["fixture-author-a","fixture-author-b"]
+}
