@@ -6,6 +6,7 @@ import (
 	"regexp"
 	"slices"
 	"strconv"
+	"time"
 
 	"github.com/jhoblitt/ceph-dev-stats/internal/classify"
 	"github.com/jhoblitt/ceph-dev-stats/internal/record"
@@ -87,6 +88,10 @@ type event struct {
 }
 
 var sha = regexp.MustCompile(`^[0-9a-f]{40}$`)
+
+// mergeCloseLag is how long after a merge GitHub may record the close the
+// merge itself caused: in the data, at the merge's second or the next.
+const mergeCloseLag = 5 * time.Second
 
 func (b *builder) add(r *record.Record, p *classify.PR) error {
 	state, ok := states[r.State]
@@ -180,8 +185,10 @@ func (b *builder) add(r *record.Record, p *classify.PR) error {
 }
 
 // events are r's comments, reviews and lifecycle events in time order,
-// leaving out the close GitHub records at the second of a merge. Those
-// at the same second keep the order comments, reviews, lifecycle events.
+// leaving out the close GitHub records for a merge, which is the merge
+// rather than a second disposition, and writing a merged pull request's
+// last close as its merge when GitHub recorded no merge. Those at the same
+// second keep the order comments, reviews, lifecycle events.
 func (b *builder) events(r *record.Record, p *classify.PR) ([]event, error) {
 	evs := make([]event, 0, len(r.Comments)+len(r.Reviews)+len(r.Events))
 	for i, c := range r.Comments {
@@ -209,21 +216,40 @@ func (b *builder) events(r *record.Record, p *classify.PR) ([]event, error) {
 		}
 		evs = append(evs, e)
 	}
-	merges := map[int64]bool{}
+	var merges []time.Time
 	for _, le := range r.Events {
 		if le.Kind == record.KindMerged {
-			merges[epoch(le.At)] = true
+			merges = append(merges, le.At)
 		}
 	}
-	for _, le := range r.Events {
+	causedByMerge := func(at time.Time) bool {
+		return slices.ContainsFunc(merges, func(m time.Time) bool {
+			return !at.Before(m) && at.Sub(m) <= mergeCloseLag
+		})
+	}
+	// GitHub can mark a pull request merged and record only its close; that
+	// last close is the merge, and a merge's ref is a SHA, of which it has
+	// none.
+	unrecordedMerge := -1
+	if r.State == record.StateMerged && len(merges) == 0 {
+		for i, le := range r.Events {
+			if le.Kind == record.KindClosed && (unrecordedMerge == -1 || !le.At.Before(r.Events[unrecordedMerge].At)) {
+				unrecordedMerge = i
+			}
+		}
+	}
+	for i, le := range r.Events {
 		if !slices.Contains(lifecycleKinds, le.Kind) {
 			return nil, fmt.Errorf("pull request %d has a lifecycle event of kind %q, which is not one a record holds", r.Number, le.Kind)
 		}
-		if le.Kind == record.KindClosed && merges[epoch(le.At)] {
+		if le.Kind == record.KindClosed && causedByMerge(le.At) {
 			continue
 		}
 		e := event{at: epoch(le.At), kind: le.Kind, sub: -1, ref: id(le.ID)}
-		if le.Kind == record.KindMerged || le.Kind == record.KindForcePush {
+		switch {
+		case i == unrecordedMerge:
+			e.kind, e.ref = record.KindMerged, ""
+		case le.Kind == record.KindMerged || le.Kind == record.KindForcePush:
 			e.ref = commitRef(le.SHA)
 		}
 		evs = append(evs, e)

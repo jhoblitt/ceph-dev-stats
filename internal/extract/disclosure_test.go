@@ -381,6 +381,10 @@ var _ = Describe("Candidates", func() {
 			Entry("a second @ in the token", "Claude, ask @a@b", "other"),
 			Entry("a %40 in the token", "Claude, ask @x%40y", "other"),
 			Entry("a mention defused by GitHub after a tag", "Generated with Claude by <code>@\u200bCopilot</code>", "copilot"),
+			Entry("after a > that follows a space", "Generated with Claude >@claude", "claude"),
+			Entry("after a > at the start of a line", ">@claude drafted this", "claude"),
+			Entry("after a non-breaking space", "Generated with Claude\u00a0@claude", "claude"),
+			Entry("after an ideographic space", "Generated with Claude\u3000@claude", "claude"),
 		)
 
 		// Each cuts a person's address at a split rune so that what is left

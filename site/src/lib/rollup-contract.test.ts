@@ -36,9 +36,9 @@ describe('the rollup output for the hand-made dataset', () => {
   });
 
   it('loads every year and table through the loader', () => {
-    expect(years.map((y) => y.prs.number.length)).toEqual([1, 5]);
-    expect(years.map((y) => y.events.pr.length)).toEqual([3, 25]);
-    expect(tables.map((t) => t.refs.length)).toEqual([3, 25]);
+    expect(years.map((y) => y.prs.number.length)).toEqual([1, 7]);
+    expect(years.map((y) => y.events.pr.length)).toEqual([3, 27]);
+    expect(tables.map((t) => t.refs.length)).toEqual([3, 27]);
     expect(meta.window_start).toBe(at(2026, 5, 15, 0));
   });
 

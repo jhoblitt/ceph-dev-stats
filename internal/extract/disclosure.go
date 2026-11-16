@@ -321,8 +321,9 @@ func isLetterOrDigit(r rune) bool {
 
 // domainKey is the log key of an address token: what follows its first @
 // or %40, once through trimAddress, when that is a plain domain, and
-// "other" otherwise, so that nothing else a contributor wrote reaches the
-// log.
+// "other" otherwise. A plain domain is any run of letters, digits, dots and
+// hyphens someone wrote after an @, so the key may be a login or a fragment
+// of a name; it goes to the log of a local run and never into data/.
 func domainKey(t string) string {
 	t = trimAddress(t)
 	i, n := strings.Index(t, "@"), 1

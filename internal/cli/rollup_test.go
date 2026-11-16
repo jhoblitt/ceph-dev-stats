@@ -54,7 +54,7 @@ var _ = Describe("rollup", func() {
 			Expect(os.ReadFile(filepath.Join(outDir, n))).To(Equal(want), n)
 		}
 		Expect(stderr.String()).To(ContainSubstring(`"msg":"rollup finished"`))
-		Expect(stderr.String()).To(ContainSubstring(`"records":6`))
+		Expect(stderr.String()).To(ContainSubstring(`"records":8`))
 		Expect(stderr.String()).To(ContainSubstring(`"written":7`))
 	})
 
