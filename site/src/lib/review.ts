@@ -1,37 +1,192 @@
 // The Review section's charts and figures, from the statistics library's results.
 
-import { type BucketModel, type CurveModel, type LineSeries, NOT_YET_KNOWN, type Quantiles, type Shape, describeCounts } from './charts';
+import {
+  type BucketModel,
+  type Coverage,
+  type CurveModel,
+  type LegendItem,
+  type LineSeries,
+  NOT_YET_KNOWN,
+  type Panel,
+  type Quantiles,
+  type Shape,
+  bucketLegend,
+  describeCounts,
+  partialText,
+} from './charts';
 import { COLOURS } from './colours';
 import type { Named } from './data';
-import type { Target } from './filters';
-import { formatCount, formatDays, formatMean, formatShare } from './format';
+import { type Target, dayOf } from './filters';
+import { bucketName, formatCount, formatDays, formatMean, formatShare } from './format';
+import type { Step } from './stats/buckets';
+import { type Capacity, type WindowMean, compareEnds } from './stats/capacity';
 import type { CommandUse } from './stats/commands';
 import { type Curve, type Outcome, type Quantile, SPAN_OUTCOMES, type Span, spanQuantile } from './stats/curve';
 import type { ReviewLoad } from './stats/reviewers';
 import type { WaitingSeries, Weekly } from './stats/weekly';
-import { openedBars } from './velocity';
+
+const plural = (n: number, noun: string) => `${formatCount(n)} ${noun}${n === 1 ? '' : 's'}`;
+
+/** A ratio or a count, exactly: whole numbers as counts, else two decimals. */
+export function formatRatio(v: number): string {
+  return Number.isInteger(v) ? formatCount(v) : v.toFixed(2).replace(/0$/, '');
+}
+
+const NO_ONE_REVIEWING = 'no one giving reviews';
+const NO_PRS_OPENED = 'no PRs opened';
 
 /**
- * The PRs opened per bucket, stacked by disclosure as on the velocity chart,
- * against the human reviews made and the people making them, on one axis.
+ * Review capacity against arrivals, per bucket: the people giving reviews,
+ * the PRs opened per person giving reviews, the human reviews per PR opened, and
+ * the PRs waiting for a first response at the bucket's end, each a statistic
+ * in neutral ink told apart by its marker. The counts the ratios divide ride
+ * along undrawn, for the readout and the table.
  */
-export function arrivalsModel(opened: Weekly<number>, reviews: Weekly<number>, reviewers: Weekly<number>): BucketModel {
-  return {
-    step: opened.step,
-    buckets: opened.week,
-    bars: openedBars(opened),
-    stackLabel: 'opened',
-    lines: [
-      { key: 'human', label: 'human reviews', color: COLOURS.humanReviews, shape: 'circle', values: reviews.values['human'] ?? [] },
-      {
-        key: 'reviewers',
-        label: 'people reviewing',
-        color: COLOURS.statistic,
-        shape: 'square',
-        values: reviewers.values['reviewers'] ?? [],
-      },
-    ],
+export function capacityModel(c: Capacity): BucketModel {
+  const line = (key: string, label: string, shape: Shape, values: readonly (number | null)[], missing?: string): LineSeries => {
+    const l: LineSeries = { key, label, color: COLOURS.statistic, shape, values };
+    if (missing) l.missing = values.map((v) => (v === null ? missing : null));
+    return l;
   };
+  const count = (key: string, label: string, values: readonly number[]): LineSeries => ({
+    ...line(key, label, 'circle', values),
+    undrawn: true,
+  });
+  return {
+    step: c.step,
+    buckets: c.week,
+    bars: [],
+    lines: [
+      line('reviewers', 'people giving reviews', 'square', c.reviewers),
+      count('opened', 'PRs opened', c.opened),
+      line('openedPerReviewer', 'PRs opened per person giving reviews', 'circle', c.openedPerReviewer, NO_ONE_REVIEWING),
+      count('reviews', 'human reviews', c.reviews),
+      line('reviewsPerOpened', 'human reviews per PR opened', 'triangle', c.reviewsPerOpened, NO_PRS_OPENED),
+      line('waiting', 'PRs waiting for a first response', 'diamond', c.waiting),
+    ],
+    partialNote:
+      `each ratio divides two partial counts; the PRs waiting are counted at the ${c.step}'s end, ` +
+      "or at the period's end or the data's last fetch if sooner",
+  };
+}
+
+/**
+ * The capacity chart's key: only the partial bucket's mark, since each
+ * panel's title names its one line.
+ */
+export function capacityLegend(model: BucketModel): LegendItem[] {
+  return bucketLegend(model).filter((i) => i.mark === 'partial');
+}
+
+/** The capacity chart's four panels, each on its own scale with at least three labelled ticks. */
+export function capacityPanels(step: Step): Panel[] {
+  return [
+    { keys: ['reviewers'], unit: `people giving reviews per ${step}`, minTicks: 3 },
+    { keys: ['openedPerReviewer'], unit: 'PRs opened per person giving reviews', minTicks: 3 },
+    { keys: ['reviewsPerOpened'], unit: 'human reviews per PR opened', minTicks: 3 },
+    {
+      keys: ['waiting'],
+      unit: `PRs waiting for a first response, at the end of each ${step}`,
+      narrowUnit: `PRs waiting for a first response, at ${step}'s end`,
+      minTicks: 3,
+    },
+  ];
+}
+
+/** The line under the capacity chart's title: what the reviews-per-PR panel divides. */
+export function capacityNote(step: Step): string {
+  return (
+    `"Human reviews per PR opened" compares two flows of the same ${step}, not one group of PRs followed over time: ` +
+    `the human reviews done that ${step}, on any selected PR, against the PRs opened that ${step}.`
+  );
+}
+
+/**
+ * What the capacity chart is missing when there are no arrivals to set it
+ * against: no PR opened in the period, or none in any of its full buckets.
+ * Null when there is something to draw, or no bucket at all.
+ */
+export function capacityNothing(c: Capacity, partial: readonly (Coverage | null)[]): string | null {
+  if (c.week.length === 0) return null;
+  if (c.opened.every((n) => n === 0)) return 'no PR was opened in this period, so there are no arrivals to set review against';
+  const whole = c.opened.filter((_, i) => (partial[i] ?? null) === null);
+  if (whole.length > 0 && whole.every((n) => n === 0)) {
+    return `no PR was opened in any full ${c.step} of this period, so there are no arrivals to set review against`;
+  }
+  return null;
+}
+
+/** One ratio's first four and last four complete buckets, as a sentence without its full stop. */
+function compareSentence(label: string, cmp: { first: WindowMean; last: WindowMean }, reason: string, step: Step): string {
+  const part = (w: WindowMean, where: string) => {
+    if (w.mean === null) return `none in the ${where}, ${reason} in all ${formatCount(w.weeks)}`;
+    const left = w.missing > 0 ? ` (${plural(w.missing, step)} with ${reason} left out)` : '';
+    return `${formatRatio(w.mean)} in the ${where}${left}`;
+  };
+  return `${label}, a ${step} on average: ${part(cmp.first, `first four full ${step}s`)}, ${part(cmp.last, 'last four')}`;
+}
+
+/** The PRs waiting for a first response at the end of the first and the last complete bucket, and the change. */
+function waitingSentence(c: Capacity, complete: readonly boolean[]): string | null {
+  const whole = c.waiting.filter((_, i) => complete[i]);
+  if (whole.length < 2) return null;
+  const [first, last] = [whole[0] as number, whole.at(-1) as number];
+  const change = last > first ? `${formatCount(last - first)} more` : last < first ? `${formatCount(first - last)} fewer` : 'no change';
+  return (
+    `PRs waiting for a first response: ${formatCount(first)} at the end of the first full ${c.step}, ` +
+    `${formatCount(last)} at the end of the last, ${change}.`
+  );
+}
+
+/**
+ * The answer in words: each ratio's mean over the first four and the last
+ * four complete buckets, or that there are too few complete buckets; and the
+ * PRs waiting for a first response at the end of the first and the last.
+ */
+export function capacitySentences(c: Capacity, partial: readonly (Coverage | null)[]): string[] {
+  const complete = c.week.map((_, i) => (partial[i] ?? null) === null);
+  const perReviewer = compareEnds(c.openedPerReviewer, complete);
+  const perOpened = compareEnds(c.reviewsPerOpened, complete);
+  const waiting = waitingSentence(c, complete);
+  const ratios =
+    perReviewer === null || perOpened === null
+      ? [
+          `Too few full ${c.step}s to compare the first four with the last four: ${formatCount(complete.filter(Boolean).length)} of the 8 needed.`,
+        ]
+      : [
+          `${compareSentence('PRs opened per person giving reviews', perReviewer, NO_ONE_REVIEWING, c.step)}.`,
+          `${compareSentence('Human reviews per PR opened', perOpened, NO_PRS_OPENED, c.step)}.`,
+        ];
+  return waiting === null ? ratios : [...ratios, waiting];
+}
+
+/** The capacity chart's text alternative: the people giving reviews, the answer, the gaps and the partial buckets. */
+export function describeCapacity(c: Capacity, partial: readonly (Coverage | null)[]): string {
+  if (c.week.length === 0) return '';
+  const out = [
+    `By ${c.step}, ${plural(c.week.length, c.step)} from ${dayOf(c.week[0] as number)} to ${dayOf(c.week.at(-1) as number)}.`,
+  ];
+  const whole = c.reviewers.filter((_, i) => (partial[i] ?? null) === null);
+  if (whole.length > 0) {
+    out.push(`People giving reviews: from ${formatCount(Math.min(...whole))} to ${formatCount(Math.max(...whole))} a full ${c.step}.`);
+  }
+  out.push(...capacitySentences(c, partial));
+  const gaps = (values: readonly (number | null)[], reason: string) => {
+    const n = values.filter((v) => v === null).length;
+    return n > 0 ? [`${reason.charAt(0).toUpperCase()}${reason.slice(1)} in ${plural(n, c.step)}.`] : [];
+  };
+  out.push(...gaps(c.openedPerReviewer, NO_ONE_REVIEWING), ...gaps(c.reviewsPerOpened, NO_PRS_OPENED));
+  const cut = c.week.flatMap((start, i) => {
+    const p = partial[i] ?? null;
+    return p === null ? [] : [`${bucketName(start, c.step)}, ${partialText(p)}`];
+  });
+  if (cut.length > 0) {
+    out.push(
+      `Partial, each ratio dividing two partial counts and the PRs waiting counted at the ${c.step}'s end, ` +
+        `or at the period's end or the data's last fetch if sooner: ${cut.join('; ')}.`,
+    );
+  }
+  return out.join(' ');
 }
 
 /** The reviews per bucket, human under bot. */

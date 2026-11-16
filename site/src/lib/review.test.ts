@@ -1,7 +1,14 @@
 import { describe, expect, it } from 'vitest';
 import { periodRange } from './filters';
 import {
-  arrivalsModel,
+  capacityLegend,
+  capacityModel,
+  capacityNote,
+  capacityNothing,
+  capacityPanels,
+  capacitySentences,
+  describeCapacity,
+  formatRatio,
   commandFigures,
   commandSummary,
   commandsModel,
@@ -21,9 +28,17 @@ import { openedIn, select } from './select';
 import { defaultFilters } from './state';
 import { commandUse } from './stats/commands';
 import { outcomeCurve } from './stats/curve';
+import { bucketHead, bucketReadout, bucketTable, coverage } from './charts';
+import { awaitingResponse } from './stats/backlog';
+import { type Capacity, capacity } from './stats/capacity';
 import { META, at, fixture } from './stats/testing';
 import { COLOURS } from './colours';
 import { weekly } from './stats/weekly';
+
+/** What a capacity chart's partial week says beside its coverage. */
+const PARTIAL_NOTE =
+  "each ratio divides two partial counts; the PRs waiting are counted at the week's end, " +
+  "or at the period's end or the data's last fetch if sooner";
 
 // The default view: PRs on main, 2026-05-15 to 2026-11-15, 27 weeks from 2026-05-11.
 const data = fixture();
@@ -38,27 +53,186 @@ function weeks<T>(set: Record<number, T>, fill: T): T[] {
   return Array.from({ length: 27 }, (_, i) => (i in set ? (set[i] as T) : fill));
 }
 
-describe('arrivalsModel', () => {
-  const model = arrivalsModel(
+describe('capacity on the fixture', () => {
+  const c = capacity(
     weekly(data, rows, period, 'opened'),
     weekly(data, rows, period, 'reviews'),
     weekly(data, rows, period, 'reviewers'),
+    awaitingResponse(data, rows, period),
   );
+  // The first week holds 3 of its 7 days, the last 6 (fetched Sunday 06:00).
+  const partial = coverage(c.week, c.step, period, META.fetched_through);
 
-  it('stacks the PRs opened as the velocity chart does', () => {
-    expect(model.bars.map((b) => b.label)).toEqual(['not disclosed', 'disclosed']);
-    expect(model.bars[1]?.values).toEqual(weeks({ 1: 1, 12: 1, 16: 1 }, 0));
+  it('divides the PRs opened by the people giving reviews, with no value where no one reviewed', () => {
+    // Opened: 05-18 two, 06-01, 06-15, 07-06, 08-03, 08-31 one each.
+    // Reviewing: 05-18 one, 06-08 two, 06-29, 08-03, 08-10, 08-24, 09-14 one each.
+    expect(c.openedPerReviewer).toEqual(weeks({ 1: 2, 4: 0, 7: 0, 12: 1, 13: 0, 15: 0, 18: 0 }, null));
   });
 
-  it('sets the human reviews and the people making them against them', () => {
-    expect(model.lines.map((l) => [l.label, l.color, l.shape])).toEqual([
-      ['human reviews', COLOURS.humanReviews, 'circle'],
-      ['people reviewing', COLOURS.statistic, 'square'],
+  it('divides the human reviews by the PRs opened, with no value where none was opened', () => {
+    expect(c.reviewsPerOpened).toEqual(weeks({ 1: 0.5, 3: 0, 5: 0, 8: 0, 12: 1, 16: 0 }, null));
+  });
+
+  it('counts the PRs waiting for a first response at the end of each week', () => {
+    // 05-18: #66100, answered 05-20. 05-25 and 06-01: #66510, never answered, closed 06-01 09:00.
+    // 06-08: #66600, answered 06-10. Every other PR was answered within its first week end,
+    // or (the draft #66700) never ready.
+    expect(c.waiting).toEqual(weeks({ 0: 1, 1: 1, 2: 1, 3: 1 }, 0));
+  });
+
+  it('draws people giving reviews, the two ratios and the PRs waiting in neutral ink, apart by marker, the counts carried undrawn', () => {
+    const model = capacityModel(c);
+    expect(model.lines.map((l) => [l.key, l.label, l.color, l.shape, l.undrawn === true])).toEqual([
+      ['reviewers', 'people giving reviews', COLOURS.statistic, 'square', false],
+      ['opened', 'PRs opened', COLOURS.statistic, 'circle', true],
+      ['openedPerReviewer', 'PRs opened per person giving reviews', COLOURS.statistic, 'circle', false],
+      ['reviews', 'human reviews', COLOURS.statistic, 'circle', true],
+      ['reviewsPerOpened', 'human reviews per PR opened', COLOURS.statistic, 'triangle', false],
+      ['waiting', 'PRs waiting for a first response', COLOURS.statistic, 'diamond', false],
     ]);
-    // 05-20; 06-08 and 06-10; 07-03; 08-07; 08-14; 08-25; 09-18.
-    expect(model.lines[0]?.values).toEqual(weeks({ 1: 1, 4: 2, 7: 1, 12: 1, 13: 1, 15: 1, 18: 1 }, 0));
-    // The week of 06-08 has two different reviewers.
-    expect(model.lines[1]?.values).toEqual(weeks({ 1: 1, 4: 2, 7: 1, 12: 1, 13: 1, 15: 1, 18: 1 }, 0));
+    expect(model.bars).toEqual([]);
+    expect(model.lines[2]?.missing?.[3]).toBe('no one giving reviews');
+    expect(model.lines[4]?.missing?.[2]).toBe('no PRs opened');
+    expect(model.lines[2]?.missing?.[1]).toBeNull();
+    expect(model.lines[5]?.missing).toBeUndefined();
+  });
+
+  it('stacks four panels with at least three ticks each, the last a count of PRs waiting', () => {
+    expect(capacityPanels('week')).toEqual([
+      { keys: ['reviewers'], unit: 'people giving reviews per week', minTicks: 3 },
+      { keys: ['openedPerReviewer'], unit: 'PRs opened per person giving reviews', minTicks: 3 },
+      { keys: ['reviewsPerOpened'], unit: 'human reviews per PR opened', minTicks: 3 },
+      {
+        keys: ['waiting'],
+        unit: 'PRs waiting for a first response, at the end of each week',
+        narrowUnit: "PRs waiting for a first response, at week's end",
+        minTicks: 3,
+      },
+    ]);
+    expect(capacityNote('week')).toBe(
+      '"Human reviews per PR opened" compares two flows of the same week, not one group of PRs followed over time: ' +
+        'the human reviews done that week, on any selected PR, against the PRs opened that week.',
+    );
+  });
+
+  it('says in a partial week that each ratio divides two partial counts, and when the PRs waiting are counted', () => {
+    const model = { ...capacityModel(c), partial };
+    expect(bucketHead(model, 0)).toBe(`week of 2026-05-11, partial: 3 of 7 days; ${PARTIAL_NOTE}`);
+    expect(bucketTable(model, formatRatio).rows[0]?.head).toBe(
+      `week of 2026-05-11, partial: 3 of 7 days; ${PARTIAL_NOTE}`,
+    );
+  });
+
+  it('tabulates the four values and the counts each ratio came from, one row a week', () => {
+    const t = bucketTable({ ...capacityModel(c), partial }, formatRatio);
+    expect(t.columns).toEqual([
+      'Week',
+      'people giving reviews',
+      'PRs opened',
+      'PRs opened per person giving reviews',
+      'human reviews',
+      'human reviews per PR opened',
+      'PRs waiting for a first response',
+    ]);
+    expect(t.rows[1]?.cells).toEqual(['1', '2', '2', '1', '0.5', '1']);
+    expect(t.rows[3]?.cells).toEqual(['0', '1', 'no one giving reviews', '0', '0', '1']);
+    expect(t.rows[4]?.cells).toEqual(['2', '0', '0', '2', 'no PRs opened', '0']);
+  });
+
+  it('keys only the partial week, each panel title naming its line, and gives the undrawn counts no key in the readout', () => {
+    const model = { ...capacityModel(c), partial };
+    expect(capacityLegend(model)).toEqual([
+      // Drawn as the lone hollow marker it explains, after the first panel's square.
+      { label: 'partial week', mark: 'partial', color: COLOURS.statistic, shape: 'square' },
+    ]);
+    expect(capacityLegend(capacityModel(c))).toEqual([]);
+    const readout = bucketReadout(model, 1, formatRatio);
+    expect(readout.filter((r) => r.color === null).map((r) => r.label)).toEqual(['PRs opened', 'human reviews']);
+  });
+
+  it('compares the first four full weeks with the last four, saying what it left out, and the PRs waiting at both ends', () => {
+    // First four full weeks, 05-18 to 06-08: per person 2, —, —, 0; reviews per PR 0.5, —, 0, —.
+    // Last four, 10-12 to 11-02: no one giving reviews and no PRs opened.
+    // PRs waiting: 1 at the end of 05-18, the first full week; 0 at the end of 11-02, the last.
+    expect(capacitySentences(c, partial)).toEqual([
+      'PRs opened per person giving reviews, a week on average: 1 in the first four full weeks (2 weeks with no one giving reviews left out), ' +
+        'none in the last four, no one giving reviews in all 4.',
+      'Human reviews per PR opened, a week on average: 0.25 in the first four full weeks (2 weeks with no PRs opened left out), ' +
+        'none in the last four, no PRs opened in all 4.',
+      'PRs waiting for a first response: 1 at the end of the first full week, 0 at the end of the last, 1 fewer.',
+    ]);
+  });
+
+  it('says there are too few full weeks to compare when there are fewer than eight, and still gives the PRs waiting', () => {
+    // 2026-05-15 to 2026-06-30: full weeks 05-18 to 06-22, six of them; 06-22 ends with none waiting.
+    const short = { start: period.start, end: at('2026-07-01T00:00:00Z') };
+    const s = capacity(
+      weekly(data, rows, short, 'opened'),
+      weekly(data, rows, short, 'reviews'),
+      weekly(data, rows, short, 'reviewers'),
+      awaitingResponse(data, rows, short),
+    );
+    expect(capacitySentences(s, coverage(s.week, s.step, short, META.fetched_through))).toEqual([
+      'Too few full weeks to compare the first four with the last four: 6 of the 8 needed.',
+      'PRs waiting for a first response: 1 at the end of the first full week, 0 at the end of the last, 1 fewer.',
+    ]);
+  });
+
+  it('states the people giving reviews, the answer, the gaps once each and the partial weeks as its text alternative', () => {
+    expect(describeCapacity(c, partial)).toBe(
+      'By week, 27 weeks from 2026-05-11 to 2026-11-09. People giving reviews: from 0 to 2 a full week. ' +
+        capacitySentences(c, partial).join(' ') +
+        ' No one giving reviews in 20 weeks. No PRs opened in 21 weeks. ' +
+        "Partial, each ratio dividing two partial counts and the PRs waiting counted at the week's end, " +
+        "or at the period's end or the data's last fetch if sooner: " +
+        'week of 2026-05-11, partial: 3 of 7 days; week of 2026-11-09, partial: 6 of 7 days.',
+    );
+  });
+
+  it('draws the chart when some full week has a PR opened', () => {
+    expect(capacityNothing(c, partial)).toBeNull();
+  });
+});
+
+describe('capacityNothing', () => {
+  const W = [at('2026-06-01T00:00:00Z'), at('2026-06-08T00:00:00Z'), at('2026-06-15T00:00:00Z')];
+  const counts = (opened: number[]): Capacity => ({
+    week: W,
+    step: 'week',
+    opened,
+    reviews: [1, 1, 1],
+    reviewers: [1, 1, 1],
+    waiting: [2, 2, 2],
+    openedPerReviewer: opened,
+    reviewsPerOpened: opened.map((n) => (n === 0 ? null : 1 / n)),
+  });
+  const ends = [{ days: 3, of: 7 }, null, { days: 2, of: 7 }];
+
+  it('says no PR was opened in a period with PRs active but none opened', () => {
+    expect(capacityNothing(counts([0, 0, 0]), ends)).toBe(
+      'no PR was opened in this period, so there are no arrivals to set review against',
+    );
+  });
+
+  it('says no PR was opened in any full week when only the partial weeks had some', () => {
+    expect(capacityNothing(counts([2, 0, 1]), ends)).toBe(
+      'no PR was opened in any full week of this period, so there are no arrivals to set review against',
+    );
+  });
+
+  it('draws a period with no full week at all, from what its partial weeks have', () => {
+    const two = { ...counts([2, 1]), week: W.slice(0, 2) };
+    expect(capacityNothing(two, [{ days: 3, of: 7 }, { days: 2, of: 7 }])).toBeNull();
+  });
+
+  it('leaves an empty selection to "no PRs match"', () => {
+    expect(capacityNothing({ ...counts([]), week: [] }, [])).toBeNull();
+  });
+});
+
+describe('formatRatio', () => {
+  it('writes a whole number as a count and anything else to two decimals', () => {
+    expect([2, 0, 0.5, 1 / 3, 1.5, 0.25, 1234].map(formatRatio)).toEqual(['2', '0', '0.5', '0.33', '1.5', '0.25', '1,234']);
   });
 });
 

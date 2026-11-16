@@ -13,13 +13,20 @@
   import { formatCount, formatDays } from '../lib/format';
   import { getPage } from '../lib/page';
   import {
-    arrivalsModel,
+    capacityLegend,
+    capacityModel,
+    capacityNote,
+    capacityNothing,
+    capacityPanels,
+    capacitySentences,
     commandFigures,
     commandSummary,
     commandsModel,
     curveModel,
     curveNothing,
     curveQuantiles,
+    describeCapacity,
+    formatRatio,
     reviewerShareText,
     reviewsModel,
     spanNote,
@@ -31,6 +38,8 @@
   } from '../lib/review';
   import { openedIn, select } from '../lib/select';
   import { chooseBucket } from '../lib/selection';
+  import { awaitingResponse } from '../lib/stats/backlog';
+  import { capacity } from '../lib/stats/capacity';
   import { commandUse } from '../lib/stats/commands';
   import { type Span, outcomeCurve } from '../lib/stats/curve';
   import { reviewLoad } from '../lib/stats/reviewers';
@@ -53,11 +62,21 @@
   const fetched = $derived(dataset.meta.fetched_through);
   const openedWeekly = $derived(weekly(dataset, rows, period, 'opened'));
   const reviewsWeekly = $derived(weekly(dataset, rows, period, 'reviews'));
-  const arrivals = $derived(
-    withCoverage(arrivalsModel(openedWeekly, reviewsWeekly, weekly(dataset, rows, period, 'reviewers')), period, fetched),
+  // Whether human review keeps up with the PRs arriving: the people giving
+  // reviews, two ratios Velocity cannot show, and the part of its backlog
+  // waiting for a first response.
+  const capacityCounts = $derived(
+    capacity(
+      openedWeekly,
+      reviewsWeekly,
+      weekly(dataset, rows, period, 'reviewers'),
+      awaitingResponse(dataset, rows, period),
+    ),
   );
+  const capacityChart = $derived(withCoverage(capacityModel(capacityCounts), period, fetched));
+  const capacityPartial = $derived(capacityChart.partial ?? []);
   const reviews = $derived(withCoverage(reviewsModel(reviewsWeekly), period, fetched));
-  const step = $derived(arrivals.step);
+  const step = $derived(capacityCounts.step);
 
   // A chart with PRs selected but nothing to measure says what is missing;
   // only an empty selection says "no PRs match".
@@ -166,24 +185,28 @@
   <h2 id="review-heading">Review</h2>
 
   <ChartFrame
-    title="PRs arriving against human review, per {step}"
-    summary={describeCounts(arrivals)}
+    title="Review capacity against arrivals, per {step}"
+    note={capacityNote(step)}
+    summary={describeCapacity(capacityCounts, capacityPartial)}
     {empty}
-    legend={bucketLegend(arrivals)}
-    table={bucketTable(arrivals, formatCount)}
+    nothing={capacityNothing(capacityCounts, capacityPartial)}
+    legend={capacityLegend(capacityChart)}
+    table={bucketTable(capacityChart, formatRatio)}
   >
+    {#snippet figures()}
+      <div class="answer">
+        {#each capacitySentences(capacityCounts, capacityPartial) as sentence (sentence)}
+          <p>{sentence}</p>
+        {/each}
+      </div>
+    {/snippet}
     <BucketChart
-      model={arrivals}
-      format={formatCount}
-      label="PRs arriving against human review, per {step}"
-      panels={[
-        { keys: ['not-disclosed', 'disclosed'], unit: `PRs opened per ${step}` },
-        { keys: ['human'], unit: `human reviews per ${step}` },
-        { keys: ['reviewers'], unit: `people reviewing per ${step}` },
-      ]}
+      model={capacityChart}
+      format={formatRatio}
+      label="Review capacity against arrivals, per {step}"
+      panels={capacityPanels(step)}
       sharedScale={false}
-      height={360}
-      integer
+      height={420}
       {selected}
       onselect={onbucket}
     />
@@ -316,6 +339,14 @@
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(min(100%, 26rem), 1fr));
     gap: var(--space-6) var(--space-5);
+  }
+
+  .answer {
+    margin-top: var(--space-3);
+  }
+
+  .answer p {
+    margin: 0 0 var(--space-1);
   }
 
   .quantiles,

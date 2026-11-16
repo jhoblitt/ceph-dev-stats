@@ -10,9 +10,18 @@ import { formatDays, formatShare } from '../lib/format';
 import { openedIn, select } from '../lib/select';
 import { defaultFilters } from '../lib/state';
 import { type Curve, outcomeCurve } from '../lib/stats/curve';
+import { COLOURS } from '../lib/colours';
+import { formatRatio } from '../lib/review';
+import { awaitingResponse } from '../lib/stats/backlog';
+import { capacity } from '../lib/stats/capacity';
 import { reviewLoad } from '../lib/stats/reviewers';
 import { fixture } from '../lib/stats/testing';
 import { weekly } from '../lib/stats/weekly';
+
+/** What a capacity chart's partial week says beside its coverage. */
+const PARTIAL_NOTE =
+  "each ratio divides two partial counts; the PRs waiting are counted at the week's end, " +
+  "or at the period's end or the data's last fetch if sooner";
 
 const NEW_COMMANDS = ['zeta', 'eta', 'theta', 'iota', 'kappa', 'lambda'];
 
@@ -47,7 +56,7 @@ const rows = select(data, filters);
 const opened = openedIn(data, rows, period);
 
 const TITLES = [
-  'PRs arriving against human review, per week',
+  'Review capacity against arrivals, per week',
   'Human and bot reviews per week',
   'Time to first response',
   'Time to first approval',
@@ -95,15 +104,24 @@ describe('Review', () => {
     expect(section().getAllByRole('figure').map((f) => f.querySelector('h3')?.textContent)).toEqual(TITLES);
   });
 
-  it('sets the PRs arriving against the human reviews and the people reviewing that the library counts', async () => {
+  it('tabulates the people giving reviews, the two ratios with their counts, and the PRs waiting', async () => {
     render(App, (await fixturePage('')).props);
-    const o = weekly(data, rows, period, 'opened').values;
-    const human = weekly(data, rows, period, 'reviews').values['human'] as number[];
-    const people = weekly(data, rows, period, 'reviewers').values['reviewers'] as number[];
-    const nd = o['not-disclosed'] as number[];
-    const d = o['disclosed'] as number[];
+    const c = capacity(
+      weekly(data, rows, period, 'opened'),
+      weekly(data, rows, period, 'reviews'),
+      weekly(data, rows, period, 'reviewers'),
+      awaitingResponse(data, rows, period),
+    );
+    const value = (v: number | null, missing: string) => (v === null ? missing : formatRatio(v));
     expect(cells(figure(TITLES[0]!))).toEqual(
-      nd.map((n, i) => [n, d[i] as number, n + (d[i] as number), human[i] as number, people[i] as number].map(String)),
+      c.week.map((_, i) => [
+        formatRatio(c.reviewers[i] as number),
+        formatRatio(c.opened[i] as number),
+        value(c.openedPerReviewer[i] ?? null, 'no one giving reviews'),
+        formatRatio(c.reviews[i] as number),
+        value(c.reviewsPerOpened[i] ?? null, 'no PRs opened'),
+        formatRatio(c.waiting[i] as number),
+      ]),
     );
   });
 
@@ -172,20 +190,65 @@ describe('Review', () => {
     expect(within(f).getByRole('button', { name: 'show the 6 busiest commands' }).getAttribute('aria-expanded')).toBe('true');
   });
 
-  it('stacks PRs opened, human reviews and people reviewing in three panels, each on its own scale', async () => {
+  it('draws people giving reviews, the two ratios and the PRs waiting in four panels of neutral lines, each on its own scale', async () => {
     render(App, (await fixturePage('')).props);
     const f = figure(TITLES[0]!);
     const panels = [...f.querySelectorAll('.plot-panel')];
-    expect(panels.map((p) => [p.querySelectorAll('.bar').length > 0, p.querySelectorAll('.line').length])).toEqual([
-      [true, 0],
-      [false, 1],
-      [false, 1],
+    expect(panels.map((p) => [p.querySelectorAll('.bar').length, p.querySelectorAll('.line').length])).toEqual([
+      [0, 1],
+      [0, 1],
+      [0, 1],
+      [0, 1],
     ]);
     expect([...f.querySelectorAll('.axis-y .unit')].map((u) => u.textContent)).toEqual([
-      'PRs opened per week',
-      'human reviews per week',
-      'people reviewing per week',
+      'people giving reviews per week',
+      'PRs opened per person giving reviews',
+      'human reviews per PR opened',
+      'PRs waiting for a first response, at the end of each week',
     ]);
+    for (const l of f.querySelectorAll('.line')) expect(l.getAttribute('style')).toContain(COLOURS.statistic);
+    // Every panel labels at least three values.
+    for (const a of f.querySelectorAll('.axis-y')) expect(a.querySelectorAll('text:not(.unit)').length).toBeGreaterThanOrEqual(3);
+    // The panel titles name the lines; the key only explains the partial weeks.
+    expect(within(within(f).getByRole('list', { name: 'Legend' })).getAllByRole('listitem').map((i) => i.textContent?.trim())).toEqual([
+      'partial week',
+    ]);
+  });
+
+  it('says under the title what the reviews-per-PR panel divides, and gives the answer in words beneath the chart', async () => {
+    render(App, (await fixturePage('')).props);
+    const f = figure(TITLES[0]!);
+    expect(f.querySelector('.note')?.textContent).toBe(
+      '"Human reviews per PR opened" compares two flows of the same week, not one group of PRs followed over time: ' +
+        'the human reviews done that week, on any selected PR, against the PRs opened that week.',
+    );
+    const answer = [...f.querySelectorAll('.answer p')].map((p) => p.textContent);
+    expect(answer).toEqual([
+      'PRs opened per person giving reviews, a week on average: 1 in the first four full weeks (2 weeks with no one giving reviews left out), ' +
+        'none in the last four, no one giving reviews in all 4.',
+      'Human reviews per PR opened, a week on average: 0.25 in the first four full weeks (2 weeks with no PRs opened left out), ' +
+        'none in the last four, no PRs opened in all 4.',
+      'PRs waiting for a first response: 1 at the end of the first full week, 0 at the end of the last, 1 fewer.',
+    ]);
+    for (const a of answer) expect(f.querySelector('.visually-hidden')?.textContent).toContain(a);
+  });
+
+  it('says there are too few full weeks to compare in a short period', async () => {
+    render(App, (await fixturePage('#/?to=2026-06-30')).props);
+    expect([...figure(TITLES[0]!).querySelectorAll('.answer p')].map((p) => p.textContent)).toEqual([
+      'Too few full weeks to compare the first four with the last four: 6 of the 8 needed.',
+      'PRs waiting for a first response: 1 at the end of the first full week, 0 at the end of the last, 1 fewer.',
+    ]);
+  });
+
+  it('leaves a gap where a ratio has no divisor, and says why', async () => {
+    render(App, (await fixturePage('')).props);
+    const f = figure(TITLES[0]!);
+    // 06-01: one PR opened, no one giving reviews.
+    expect(within(f).getByRole('button', { name: /^week of 2026-06-01:/ }).getAttribute('aria-label')).toBe(
+      'week of 2026-06-01: people giving reviews 0, PRs opened 1, PRs opened per person giving reviews no one giving reviews, ' +
+        'human reviews 0, human reviews per PR opened 0, PRs waiting for a first response 1',
+    );
   });
 
   it('says how many people did the reviews when there were ten or fewer, with no names', async () => {
@@ -215,11 +278,21 @@ describe('Review', () => {
     expect(f.textContent).toContain('no PR was opened in this period');
     expect(f.textContent).not.toContain('no PRs match');
     expect(figure('Wait to merge, by week opened').textContent).toContain('no PR was opened in this period');
+    const capacityFigure = figure(TITLES[0]!);
+    expect(capacityFigure.textContent).toContain(
+      'no PR was opened in this period, so there are no arrivals to set review against',
+    );
+    expect(capacityFigure.querySelector('svg')).toBeNull();
   });
 
   it('marks the weeks the period and the fetch cut short in the count charts', async () => {
     render(App, (await fixturePage('')).props);
-    for (const name of [TITLES[0]!, TITLES[1]!, 'Bot commands per week, by command']) {
+    const heads0 = within(figure(TITLES[0]!))
+      .getAllByRole('rowheader')
+      .map((h) => h.textContent);
+    expect(heads0[0]).toBe(`week of 2026-05-11, partial: 3 of 7 days; ${PARTIAL_NOTE}`);
+    expect(heads0.at(-1)).toBe(`week of 2026-11-09, partial: 6 of 7 days; ${PARTIAL_NOTE}`);
+    for (const name of [TITLES[1]!, 'Bot commands per week, by command']) {
       const heads = within(figure(name))
         .getAllByRole('rowheader')
         .map((h) => h.textContent);
@@ -228,15 +301,11 @@ describe('Review', () => {
     }
   });
 
-  it('keeps the disclosure colours for disclosure alone', async () => {
+  it('uses no disclosure colour anywhere: Velocity keeps the split by disclosure', async () => {
     render(App, (await fixturePage('')).props);
-    const marks = [...screen.getByRole('region', { name: 'Review' }).querySelectorAll<SVGElement>('.bar, .line, .marker')];
-    const disclosure = marks.filter((m) => /var\(--series-[12]\)/.test(m.getAttribute('style') ?? ''));
-    expect(disclosure.length).toBeGreaterThan(0);
-    for (const m of disclosure) {
-      expect(m.closest('figure')?.querySelector('h3')?.textContent).toBe(TITLES[0]);
-      expect(m.classList.contains('bar')).toBe(true);
-    }
+    const marks = [...screen.getByRole('region', { name: 'Review' }).querySelectorAll<SVGElement>('[style]')];
+    expect(marks.length).toBeGreaterThan(0);
+    expect(marks.filter((m) => /var\(--series-[12]\)/.test(m.getAttribute('style') ?? ''))).toEqual([]);
   });
 
   it('says "no PRs match" in every chart when the selection is empty', async () => {
