@@ -12,10 +12,10 @@
   import { onScreen } from './onscreen';
   import TimelineChart from './timeline/TimelineChart.svelte';
 
-  const { selection, data, loader, meta } = getPage();
+  const { selection, data, view, loader, meta } = getPage();
 
   const pr = $derived($selection.pr);
-  const dataset = $derived($data.dataset);
+  const dataset = $derived($view.dataset);
   const row = $derived(pr === null ? -1 : rowOf(dataset, pr));
   const year = $derived(row === -1 ? null : locateRow(dataset, row).year);
   let shown = $state(false);

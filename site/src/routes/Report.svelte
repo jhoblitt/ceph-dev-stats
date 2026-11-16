@@ -3,6 +3,7 @@
   import FilterBar from '../components/FilterBar.svelte';
   import Lanes from '../components/Lanes.svelte';
   import LlmUse from '../components/LlmUse.svelte';
+  import People from '../components/People.svelte';
   import PrTable from '../components/PrTable.svelte';
   import PrTimeline from '../components/PrTimeline.svelte';
   import Review from '../components/Review.svelte';
@@ -38,6 +39,7 @@
 {#if $selection.pr !== null}
   <PrTimeline />
 {/if}
+<People />
 
 <style>
   .load-errors {

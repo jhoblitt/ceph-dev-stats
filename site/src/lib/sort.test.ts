@@ -1,5 +1,17 @@
 import { describe, expect, it } from 'vitest';
-import { DEFAULT_SORT, SORT_COLUMNS, nextSort, parseSort, sameSort, sortParam } from './sort';
+import {
+  AUTHOR_COLUMNS,
+  DEFAULT_AUTHOR_SORT,
+  DEFAULT_REVIEWER_SORT,
+  DEFAULT_SORT,
+  REVIEWER_COLUMNS,
+  SORT_COLUMNS,
+  nextSort,
+  parseSort,
+  parseSortOf,
+  sameSort,
+  sortParam,
+} from './sort';
 import { TABLE_COLUMNS } from './table';
 
 describe('the sort in the URL', () => {
@@ -37,5 +49,25 @@ describe('the sort in the URL', () => {
 
   it('names every column the table shows, and only those', () => {
     expect(TABLE_COLUMNS.map((c) => c.id).sort()).toEqual([...SORT_COLUMNS].sort());
+  });
+});
+
+describe("the People tables' orders", () => {
+  it('default to the most PRs first', () => {
+    expect(DEFAULT_AUTHOR_SORT).toEqual({ column: 'opened', descending: true });
+    expect(DEFAULT_REVIEWER_SORT).toEqual({ column: 'prs', descending: true });
+  });
+
+  it('read a column of their own table either way, and fall back for anything else', () => {
+    expect(parseSortOf(AUTHOR_COLUMNS, '-lines', DEFAULT_AUTHOR_SORT)).toEqual({ column: 'lines', descending: true });
+    expect(parseSortOf(REVIEWER_COLUMNS, 'reviewer', DEFAULT_REVIEWER_SORT)).toEqual({ column: 'reviewer', descending: false });
+    for (const raw of [undefined, '', '-', 'prs', 'title', '--lines']) {
+      expect(parseSortOf(AUTHOR_COLUMNS, raw, DEFAULT_AUTHOR_SORT)).toEqual(DEFAULT_AUTHOR_SORT);
+    }
+  });
+
+  it('sort a newly chosen column descending first when asked, then turn it', () => {
+    expect(nextSort(DEFAULT_AUTHOR_SORT, 'lines', true)).toEqual({ column: 'lines', descending: true });
+    expect(nextSort({ column: 'lines', descending: true }, 'lines', true)).toEqual({ column: 'lines', descending: false });
   });
 });

@@ -11,6 +11,7 @@
     dayOf,
     findChoice,
   } from '../lib/filters';
+  import { GHOST, findLogin } from '../lib/handles';
   import { getPage } from '../lib/page';
 
   const { meta, selection } = getPage();
@@ -29,6 +30,37 @@
     set(which === 'from' ? { from: input.value } : { to: input.value });
     input.value = get(selection).filters[which];
   }
+
+  type PersonFilter = 'author' | 'reviewer';
+  // The Reviewer filter's dependence on the period is shown, not only hinted, since it narrows every section.
+  const PEOPLE: { id: PersonFilter; label: string; hint: string; shown: boolean }[] = [
+    { id: 'author', label: 'Author', hint: 'PRs this GitHub login opened', shown: false },
+    { id: 'reviewer', label: 'Reviewer', hint: 'PRs reviewed or commented on in the period', shown: true },
+  ];
+  const bots = new Set(meta.people_bots);
+  // What was typed that the data does not name, by filter, until the next change.
+  let unknown = $state<Record<PersonFilter, string | null>>({ author: null, reviewer: null });
+
+  // A login in any case is the one the data gives; one it does not name
+  // leaves the filter as it was, and says so.
+  function setPerson(which: PersonFilter, input: HTMLInputElement) {
+    const typed = input.value.trim();
+    const login = typed === '' ? null : findLogin(meta, typed);
+    unknown[which] = typed !== '' && login === null ? typed : null;
+    if (typed === '' || login !== null) setLogin(which, login);
+    input.value = get(selection).filters[which] ?? '';
+  }
+
+  function setLogin(which: PersonFilter, login: string | null) {
+    set(which === 'author' ? { author: login } : { reviewer: login });
+  }
+
+  function clearPerson(which: PersonFilter) {
+    unknown[which] = null;
+    setLogin(which, null);
+  }
+
+  const unknownText = (typed: string | null) => (typed === null ? '' : `No PR in the data names “${typed}”.`);
 
   interface Select {
     id: string;
@@ -156,6 +188,44 @@
       </select>
     </div>
   {/each}
+
+  <div class="people">
+    {#each PEOPLE as f (f.id)}
+      {@const value = filters[f.id]}
+      <div class="field">
+        <label for="{uid}-{f.id}">{f.label}</label>
+        <div class="person">
+          <input
+            id="{uid}-{f.id}"
+            type="text"
+            list="{uid}-people"
+            value={value ?? ''}
+            placeholder="any GitHub login"
+            autocomplete="off"
+            autocapitalize="off"
+            spellcheck="false"
+            title={f.hint}
+            aria-describedby={[f.shown ? `${uid}-${f.id}-hint` : '', unknown[f.id] === null ? '' : `${uid}-${f.id}-unknown`]
+              .filter(Boolean)
+              .join(' ') || undefined}
+            onchange={(e) => setPerson(f.id, e.currentTarget)}
+          />
+          {#if value !== null}
+            <button type="button" aria-label="Clear the {f.label} filter" onclick={() => clearPerson(f.id)}>clear</button>
+          {/if}
+        </div>
+        {#if f.shown}
+          <p class="hint" id="{uid}-{f.id}-hint">{f.hint}</p>
+        {/if}
+        <p class="unknown" id="{uid}-{f.id}-unknown" role="status">{unknownText(unknown[f.id])}</p>
+      </div>
+    {/each}
+  </div>
+  <datalist id="{uid}-people">
+    {#each meta.people as login, i (login)}
+      <option value={login}>{login === GHOST ? 'deleted account' : bots.has(i) ? 'bot' : ''}</option>
+    {/each}
+  </datalist>
 </section>
 
 <style>
@@ -201,6 +271,7 @@
   }
 
   input[type='date'],
+  input[type='text'],
   select {
     min-height: 2.25rem;
     padding: var(--space-1) var(--space-2);
@@ -210,6 +281,54 @@
     color: var(--text);
     font: inherit;
     font-size: var(--text-base);
+  }
+
+  input[type='text'] {
+    width: 13rem;
+  }
+
+  /* The bar aligns its fields at the bottom; the Reviewer's line under its
+     input would lift that input above the Author's, so the pair aligns at
+     the top among themselves. */
+  .people {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: start;
+    gap: var(--space-4) var(--space-5);
+  }
+
+  .person {
+    display: flex;
+    gap: var(--space-2);
+    align-items: center;
+  }
+
+  .person button {
+    min-height: 2.25rem;
+    padding: var(--space-1) var(--space-2);
+    border: 1px solid var(--border-strong);
+    border-radius: var(--radius-sm);
+    background: var(--page);
+    color: var(--accent);
+    font: inherit;
+    font-size: var(--text-sm);
+    cursor: pointer;
+  }
+
+  .hint,
+  .unknown {
+    margin: 0;
+    font-size: var(--text-sm);
+    color: var(--text-muted);
+  }
+
+  .hint {
+    max-width: 16rem;
+  }
+
+  /* Out of the flow while empty, but still rendered, so the live region announces. */
+  .unknown:empty {
+    position: absolute;
   }
 
   .segmented {

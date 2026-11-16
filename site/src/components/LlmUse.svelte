@@ -13,9 +13,8 @@
     percent,
     shareModel,
   } from '../lib/llm';
-  import { keepEqual, sameFilters } from '../lib/memo';
   import { getPage } from '../lib/page';
-  import { openedIn, select } from '../lib/select';
+  import { openedIn } from '../lib/select';
   import { chooseBucket } from '../lib/selection';
   import { routeHash } from '../lib/state';
   import { disclosureCounts, familiesShare, namingAny } from '../lib/stats/measures';
@@ -24,16 +23,14 @@
   import ChartFrame from './charts/ChartFrame.svelte';
   import Key from './charts/Key.svelte';
 
-  const { meta, selection, data } = getPage();
+  const { meta, selection, data, view } = getPage();
 
-  const dataset = $derived($data.dataset);
-  // Choosing a PR or a sort leaves these figures alone, so they are not computed again.
-  const keep = keepEqual(sameFilters);
-  const filters = $derived(keep($selection.filters));
+  const dataset = $derived($view.dataset);
+  const filters = $derived($view.filters);
   const period = $derived(periodRange(filters));
   // Disclosure describes how a PR was written, so every figure here is about
   // the PRs opened in the period.
-  const rows = $derived(select(dataset, filters));
+  const rows = $derived($view.rows);
   const opened = $derived(openedIn(dataset, rows, period));
   const empty = $derived(rows.length === 0);
   const fetched = $derived(dataset.meta.fetched_through);

@@ -35,7 +35,8 @@ export interface Event {
 
 /**
  * A dataset of one year. Defaults: ready at `created`, open, on `main`, in
- * the window, not disclosed, and every optional time `-1`.
+ * the window, not disclosed, by meta's first person, and every optional
+ * time `-1`.
  */
 export function dataset(rows: readonly Row[], events: readonly Event[] = [], meta: Partial<Meta> = {}): Dataset {
   const m: Meta = { ...META, ...meta };
@@ -69,6 +70,7 @@ export function dataset(rows: readonly Row[], events: readonly Event[] = [], met
     components: rows.map((r) => r.components ?? []),
     standing: i32((r) => r.standing ?? -1),
     kind: i32((r) => r.kind ?? -1),
+    author: i32((r) => r.author ?? 0),
   };
   const sorted = [...events].sort((a, b) => a.pr - b.pr || a.at - b.at);
   const kind = (name: string) => {

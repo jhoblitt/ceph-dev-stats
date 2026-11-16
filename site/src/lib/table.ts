@@ -5,6 +5,7 @@
 import { type Dataset, type KindSource, type Named, PR_STATE, type TableYear, locateRow } from './data';
 import { AGE_BANDS, DAY, dayOf, dayStart, periodRange } from './filters';
 import { bucketName, formatCount, formatDays } from './format';
+import { type Handle, personHandle } from './handles';
 import { openedInBucket, select } from './select';
 import type { Sort, SortColumn } from './sort';
 import type { AppState } from './state';
@@ -26,13 +27,17 @@ export const TABLE_COLUMNS: readonly { id: SortColumn; label: string }[] = [
   { id: 'reopened', label: 'Reopened' },
 ];
 
-/** A row's title and author from its year's table file; null until that file has loaded. */
+/** A row's title from its year's table file; null until that file has loaded. */
 export interface RowText {
   title(row: number): string | null;
-  author(row: number): string | null;
 }
 
-const NO_TEXT: RowText = { title: () => null, author: () => null };
+const NO_TEXT: RowText = { title: () => null };
+
+/** The handle of the PR's author, from the data itself. */
+export function authorHandle(data: Dataset, r: number): Handle {
+  return personHandle(data.meta, data.prs.author[r] as number);
+}
 
 const STATE_LABELS = ['open', 'merged', 'closed unmerged'];
 
@@ -77,7 +82,7 @@ function sortKey(data: Dataset, column: SortColumn, text: RowText): (r: number) 
     case 'title':
       return (r) => text.title(r);
     case 'author':
-      return (r) => text.author(r);
+      return (r) => authorHandle(data, r).text;
     case 'opened':
       return (r) => p.created[r] as number;
     case 'state':
@@ -103,15 +108,14 @@ function sortKey(data: Dataset, column: SortColumn, text: RowText): (r: number) 
 const collator = new Intl.Collator('en', { sensitivity: 'base', numeric: true });
 
 /**
- * The rows in the order `sort` gives, a new array; rows that tie keep the
- * order they came in, and a row with no value goes last whichever way the
- * column is sorted. Titles and authors sort once `text` has them.
+ * The items in the order of `key`, a new array; items that tie keep the
+ * order they came in, and an item with no value goes last whichever way.
+ * Strings compare as a reader would, without regard to case.
  */
-export function sortRows(data: Dataset, rows: Uint32Array, sort: Sort, text: RowText = NO_TEXT): Uint32Array {
-  const key = sortKey(data, sort.column, text);
-  const keys = Array.from(rows, (r) => key(r));
-  const order = Array.from(rows, (_, i) => i);
-  const sign = sort.descending ? -1 : 1;
+export function orderBy<T>(items: ArrayLike<T>, key: (item: T) => number | string | null, descending: boolean): T[] {
+  const keys = Array.from(items, (item) => key(item));
+  const order = Array.from(keys, (_, i) => i);
+  const sign = descending ? -1 : 1;
   order.sort((i, j) => {
     const a = keys[i] ?? null;
     const b = keys[j] ?? null;
@@ -119,7 +123,15 @@ export function sortRows(data: Dataset, rows: Uint32Array, sort: Sort, text: Row
     const c = typeof a === 'string' || typeof b === 'string' ? collator.compare(String(a), String(b)) : a - b;
     return sign * c;
   });
-  return Uint32Array.from(order, (i) => rows[i] as number);
+  return order.map((i) => items[i] as T);
+}
+
+/**
+ * The rows in the order `sort` gives, a new array, as `orderBy` orders them.
+ * Titles sort once `text` has them.
+ */
+export function sortRows(data: Dataset, rows: Uint32Array, sort: Sort, text: RowText = NO_TEXT): Uint32Array {
+  return Uint32Array.from(orderBy(rows, sortKey(data, sort.column, text), sort.descending));
 }
 
 /** What decides the table's rows: the filters and any week or band chosen. */
@@ -179,7 +191,7 @@ export function cellText(data: Dataset, r: number, column: SortColumn, text: Row
     case 'title':
       return text.title(r) ?? '';
     case 'author':
-      return text.author(r) ?? '';
+      return authorHandle(data, r).text;
     case 'opened':
       return dayOf(p.created[r] as number);
     case 'state': {
@@ -228,21 +240,13 @@ export function kindDecided(kinds: readonly Named[], kind: number, source: KindS
 /** Where a year's table file stands. */
 export type TableLoad = { status: 'loading' } | { status: 'loaded'; table: TableYear } | { status: 'error'; message: string };
 
-/** Titles and authors from the year tables loaded so far; a row of a year not loaded has none. */
+/** Titles from the year tables loaded so far; a row of a year not loaded has none. */
 export function rowText(data: Dataset, tables: ReadonlyMap<number, TableLoad>): RowText {
-  const find = (r: number): { table: TableYear; index: number } | null => {
-    const { year, index } = locateRow(data, r);
-    const t = tables.get(year);
-    return t?.status === 'loaded' ? { table: t.table, index } : null;
-  };
   return {
     title: (r) => {
-      const f = find(r);
-      return f ? (f.table.titles[f.index] ?? null) : null;
-    },
-    author: (r) => {
-      const f = find(r);
-      return f ? (f.table.authors[f.index] ?? null) : null;
+      const { year, index } = locateRow(data, r);
+      const t = tables.get(year);
+      return t?.status === 'loaded' ? (t.table.titles[index] ?? null) : null;
     },
   };
 }

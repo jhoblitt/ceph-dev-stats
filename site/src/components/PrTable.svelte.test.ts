@@ -6,7 +6,7 @@ import App from '../App.svelte';
 import { BASE, fixtureFetch } from '../lib/__fixtures__/fetch';
 import { memoryLocation, meta } from '../lib/__fixtures__/page';
 import { DataLoader } from '../lib/data';
-import { createDataStore, yearsForState } from '../lib/page';
+import { createDataStore, createViewStore, yearsForState } from '../lib/page';
 import { createStateStore, stateFromHash } from '../lib/state';
 import { fixture } from '../lib/stats/testing';
 import { DEFAULT_SORT } from '../lib/sort';
@@ -28,7 +28,8 @@ async function page(hash: string, files: Record<string, unknown> = {}) {
   const loader = new DataLoader(meta, BASE, fetched.fetch);
   const years = yearsForState(meta, get(selection));
   const store = createDataStore(loader, selection, years, await loader.load(years));
-  return { props: { page: { meta, selection, data: store, loader } }, loc, requested: fetched.requested };
+  const view = createViewStore(selection, store);
+  return { props: { page: { meta, selection, data: store, view, loader } }, loc, requested: fetched.requested };
 }
 
 function region() {
@@ -137,6 +138,32 @@ describe('PrTable', () => {
     expect(link.getAttribute('href')).toBe('https://github.com/ceph/ceph/pull/66500');
     expect(link.getAttribute('target')).toBe('_blank');
     expect(link.getAttribute('rel')).toBe('noopener noreferrer');
+  });
+
+  it("links each author's handle to their page on GitHub, in a new tab, before any table file is there", async () => {
+    render(App, (await page('#/?target=all')).props);
+    const links = within(table()).getAllByRole('link', { name: 'fixture-author-d on GitHub, opens in a new tab' });
+    expect(links).toHaveLength(2);
+    expect(links[0]?.getAttribute('href')).toBe('https://github.com/fixture-author-d');
+    expect(links[0]?.getAttribute('target')).toBe('_blank');
+    expect(links[0]?.getAttribute('rel')).toBe('noopener noreferrer');
+    // fixture-author-j is a bot account.
+    const bot = within(table()).getByRole('link', { name: 'fixture-author-j on GitHub, opens in a new tab' });
+    expect(bot.closest('td')?.textContent).toMatch(/fixture-author-j\s*bot/);
+  });
+
+  it("filters by a row's author, and clears the filter when chosen again", async () => {
+    const { props, loc } = await page('');
+    render(App, props);
+    const toggle = () => within(table()).getAllByRole('button', { name: 'Filter by fixture-author-d as author' })[0]!;
+    expect(toggle().getAttribute('aria-pressed')).toBe('false');
+    await fireEvent.click(toggle());
+    expect(loc.hash()).toBe('#/?target=main&author=fixture-author-d');
+    expect(listed()).toEqual([67100, 66500]);
+    expect(toggle().getAttribute('aria-pressed')).toBe('true');
+    expect((screen.getByLabelText('Author') as HTMLInputElement).value).toBe('fixture-author-d');
+    await fireEvent.click(toggle());
+    expect(loc.hash()).toBe('#/?target=main');
   });
 
   it('writes the PR chosen from a row to the URL, and marks the row', async () => {

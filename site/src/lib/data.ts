@@ -26,6 +26,13 @@ export interface Meta {
   /** Holds `none`; every other value is a form of disclosure. */
   disclosure: string[];
   event_kinds: string[];
+  /**
+   * The login of every person an `author` or an `actor` index names, once
+   * each; a deleted account is `ghost`.
+   */
+  people: string[];
+  /** The indexes into `people` of the bot accounts, ascending. */
+  people_bots: number[];
 }
 
 /** The `state` column. */
@@ -71,6 +78,8 @@ const PR_SPEC = {
   standing: 'int',
   /** An index into meta's `kinds`, or -1 for unknown. */
   kind: 'int',
+  /** An index into meta's `people`. */
+  author: 'int',
 } as const satisfies Record<string, ColumnKind>;
 
 const EVENT_SPEC = {
@@ -78,6 +87,11 @@ const EVENT_SPEC = {
   at: 'time',
   kind: 'small',
   sub: 'int',
+  /**
+   * An index into meta's `people` for a comment by someone other than the
+   * author and for a human review by someone other than the author; -1 for
+   * every other event.
+   */
   actor: 'int',
 } as const satisfies Record<string, ColumnKind>;
 
@@ -228,12 +242,12 @@ export function parseMeta(raw: unknown, file = 'meta.json'): Meta {
     return v;
   };
   const isTime = (v: unknown): v is number => Number.isSafeInteger(v) && (v as number) >= 0;
-  const isYears = (v: unknown): v is number[] => Array.isArray(v) && v.every((y) => Number.isInteger(y));
+  const isIntegers = (v: unknown): v is number[] => Array.isArray(v) && v.every((y) => Number.isInteger(y));
   const meta: Meta = {
     repo: field('repo', (v): v is string => typeof v === 'string', 'a string'),
     fetched_through: field('fetched_through', isTime, 'a time in epoch seconds'),
     window_start: field('window_start', isTime, 'a time in epoch seconds'),
-    years: [...field('years', isYears, 'a list of years')].sort((a, b) => a - b),
+    years: [...field('years', isIntegers, 'a list of years')].sort((a, b) => a - b),
     bases: field('bases', isStringArray, 'a list of strings'),
     components: field('components', isNamedArray, 'a list of {id, name}'),
     families: field('families', isNamedArray, 'a list of {id, name}'),
@@ -241,7 +255,17 @@ export function parseMeta(raw: unknown, file = 'meta.json'): Meta {
     kinds: field('kinds', isNamedArray, 'a list of {id, name}'),
     disclosure: field('disclosure', isStringArray, 'a list of strings'),
     event_kinds: field('event_kinds', isStringArray, 'a list of strings'),
+    people: field('people', isStringArray, 'a list of logins'),
+    people_bots: field('people_bots', isIntegers, 'a list of indexes'),
   };
+  const seen = new Set<string>();
+  for (const login of meta.people) {
+    if (seen.has(login)) throw new DataError(file, `"people" names "${login}" twice`);
+    seen.add(login);
+  }
+  const check = checkIndex(file, 'people_bots', meta.people, 'people', false);
+  meta.people_bots.forEach((b, i) => check(b, `${i}`));
+  meta.people_bots = [...meta.people_bots].sort((a, b) => a - b);
   if (!meta.disclosure.includes('none')) throw new DataError(file, '"disclosure" has no "none"');
   const reserved = meta.kinds.find((k) => RESERVED_KIND_IDS.includes(k.id));
   if (reserved) {
@@ -310,11 +334,13 @@ function parseColumns<Spec extends Record<string, ColumnKind>>(raw: unknown, fil
 function checkIndex(file: string, column: string, dictionary: readonly unknown[], name: string, unknown: boolean) {
   return (value: number, at: string) => {
     if ((value >= 0 && value < dictionary.length) || (unknown && value === -1)) return;
-    throw new DataError(
-      file,
-      `column "${column}" has ${value} at ${at}, outside "${name}" of ${dictionary.length} entries`,
-    );
+    throw new DataError(file, `${columnName(file, column)} has ${value} at ${at}, outside "${name}" of ${dictionary.length} entries`);
   };
+}
+
+/** How an error names a field: a column of a year file, or a field of meta.json. */
+function columnName(file: string, column: string): string {
+  return file === 'meta.json' ? `"${column}"` : `column "${column}"`;
 }
 
 /** Reads a prs file; every index must be inside its dictionary in `meta`. */
@@ -324,6 +350,7 @@ export function parsePrs(raw: unknown, file: string, meta: Meta): PrColumns {
     ['base', meta.bases, 'bases', false],
     ['disclosure', meta.disclosure, 'disclosure', false],
     ['kind', meta.kinds, 'kinds', true],
+    ['author', meta.people, 'people', false],
   ] as const;
   for (const [column, dictionary, name, unknown] of scalars) {
     const check = checkIndex(file, column, dictionary, name, unknown);
@@ -340,8 +367,8 @@ const COMMAND_KINDS = ['command_author', 'command_other'];
 
 /**
  * Reads an events file whose `pr` must be a row of a year with `rows` PRs,
- * whose `kind` must be in meta's `event_kinds`, and whose `sub` must be in
- * its `commands` for a command.
+ * whose `kind` must be in meta's `event_kinds`, whose `sub` must be in its
+ * `commands` for a command, and whose `actor` must be in its `people` or -1.
  */
 export function parseEvents(raw: unknown, file: string, rows: number, meta: Meta): EventColumns {
   const events = parseColumns(raw, file, EVENT_SPEC);
@@ -351,10 +378,12 @@ export function parseEvents(raw: unknown, file: string, rows: number, meta: Meta
   }
   const kind = checkIndex(file, 'kind', meta.event_kinds, 'event_kinds', false);
   const sub = checkIndex(file, 'sub', meta.commands, 'commands', false);
+  const actor = checkIndex(file, 'actor', meta.people, 'people', true);
   const commands = COMMAND_KINDS.map((k) => meta.event_kinds.indexOf(k)).filter((k) => k !== -1);
   events.kind.forEach((k, i) => {
     kind(k, `event ${i}`);
     if (commands.includes(k)) sub(events.sub[i] as number, `event ${i}`);
+    actor(events.actor[i] as number, `event ${i}`);
   });
   return events;
 }

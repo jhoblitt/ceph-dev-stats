@@ -24,9 +24,6 @@ const meta = parseMeta(file('meta.json'));
 const years = meta.years.map((y) => parseYear(y, file(`prs-${y}.json`), file(`events-${y}.json`), meta));
 const tables = years.map((y) => parseTable(file(`table-${y.year}.json`), `table-${y.year}.json`, y, meta));
 
-/** The raw prs file of a year, for the columns the loader does not read. */
-const rawPrs = (year: number) => file(`prs-${year}.json`) as Record<string, number[]>;
-const people = (file('meta.json') as { people: string[] }).people;
 
 describe('the rollup output for the hand-made dataset', () => {
   it('is exactly meta.json and three files for each year', () => {
@@ -71,7 +68,11 @@ describe('the rollup output for the hand-made dataset', () => {
 
   it("resolves a PR's author through people", () => {
     const row = years[1]!.prs.number.indexOf(66400);
-    expect(people[rawPrs(2026)['author']![row]!]).toBe('ghost');
+    expect(meta.people[years[1]!.prs.author[row]!]).toBe('ghost');
     expect(tables[1]!.authors[row]).toBe('ghost');
+  });
+
+  it('names the bot accounts among the people', () => {
+    expect(meta.people_bots.map((b) => meta.people[b])).toEqual(['dependabot']);
   });
 });

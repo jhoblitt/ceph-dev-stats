@@ -3,17 +3,24 @@
 
 import type { Dataset, Meta } from './data';
 import { type Filters, SIZE_BANDS, STANDING_BANDS, UNKNOWN_KIND, periodRange } from './filters';
+import { personIndex } from './handles';
 import { type Period, bucketOf, buckets } from './stats/buckets';
+import { HUMAN_REVIEWS, kindTable } from './stats/events';
 
 /**
  * The rows the filters select, ascending. The period keeps every PR active in
  * it: opened before its end and not finished before its start, so a PR opened
- * earlier and still worked on counts in the calendar charts.
+ * earlier and still worked on counts in the calendar charts. A login the data
+ * does not name selects nothing.
  */
 export function select(data: Dataset, filters: Filters): Uint32Array {
   const p = data.prs;
   const meta = data.meta;
   const { start, end } = periodRange(filters);
+  const author = filters.author === null ? null : personIndex(meta, filters.author);
+  const reviewer = filters.reviewer === null ? null : personIndex(meta, filters.reviewer);
+  if (author === -1 || reviewer === -1) return new Uint32Array(0);
+  const reviewed = reviewer === null ? null : reviewedBy(data, reviewer, start, end);
   const main = meta.bases.indexOf('main');
   const component = filters.component === null ? -1 : meta.components.findIndex((c) => c.id === filters.component);
   const kind = kindValue(meta, filters.kind);
@@ -43,9 +50,30 @@ export function select(data: Dataset, filters: Filters): Uint32Array {
     if (kind !== null && p.kind[r] !== kind) continue;
     if (filters.excludeDrafts && p.draft[r] === 1) continue;
     if (filters.reopenedOnly && !((p.reopened[r] as number) > 0)) continue;
+    if (author !== null && p.author[r] !== author) continue;
+    if (reviewed !== null && reviewed[r] !== 1) continue;
     out[n++] = r;
   }
   return out.slice(0, n);
+}
+
+/**
+ * A flag per row, set for the PRs on which `person`, an index into meta's
+ * `people`, commented or reviewed between `start` and `end` without being
+ * their author.
+ */
+function reviewedBy(data: Dataset, person: number, start: number, end: number): Uint8Array {
+  const ev = data.events;
+  const p = data.prs;
+  const responses = kindTable(data, { comment_other: 1, ...Object.fromEntries(HUMAN_REVIEWS.map((k) => [k, 1])) });
+  const mask = new Uint8Array(data.size);
+  for (let e = 0; e < ev.pr.length; e++) {
+    if (ev.actor[e] !== person || responses[ev.kind[e] as number] !== 1) continue;
+    const t = ev.at[e] as number;
+    const r = ev.pr[e] as number;
+    if (t >= start && t < end && p.author[r] !== person) mask[r] = 1;
+  }
+  return mask;
 }
 
 /**

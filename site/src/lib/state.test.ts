@@ -29,11 +29,16 @@ const defaults: AppState = {
     kind: null,
     excludeDrafts: false,
     reopenedOnly: false,
+    author: null,
+    reviewer: null,
   },
   week: null,
   band: null,
   pr: null,
   sort: { column: 'opened', descending: true },
+  authorSort: { column: 'opened', descending: true },
+  reviewerSort: { column: 'prs', descending: true },
+  bots: false,
 };
 
 function withFilters(patch: Partial<AppState['filters']>): AppState {
@@ -64,11 +69,16 @@ describe('round trip through the hash', () => {
       kind: 'docs',
       excludeDrafts: true,
       reopenedOnly: true,
+      author: 'fixture-author-d',
+      reviewer: 'fixture-reviewer-k',
     },
     week: '2026-06-01',
     band: '30-90',
     pr: 66600,
     sort: { column: 'size', descending: false },
+    authorSort: { column: 'lines', descending: true },
+    reviewerSort: { column: 'response', descending: false },
+    bots: true,
   };
 
   it('preserves every field at once', () => {
@@ -92,11 +102,19 @@ describe('round trip through the hash', () => {
     ['kind unknown', { filters: { ...defaults.filters, kind: 'unknown' } }],
     ['drafts', { filters: { ...defaults.filters, excludeDrafts: true } }],
     ['reopened', { filters: { ...defaults.filters, reopenedOnly: true } }],
+    ['author', { filters: { ...defaults.filters, author: 'fixture-author-a' } }],
+    ['reviewer', { filters: { ...defaults.filters, reviewer: 'fixture-author-e' } }],
+    ['a bot as author', { filters: { ...defaults.filters, author: 'fixture-author-j' } }],
     ['week', { week: '2026-11-09' }],
     ['band', { band: 'lt7' }],
     ['pr', { pr: 64010 }],
     ['sort ascending', { sort: { column: 'title', descending: false } }],
     ['sort descending', { sort: { column: 'reopened', descending: true } }],
+    ['authors by author ascending', { authorSort: { column: 'author', descending: false } }],
+    ['authors by lines changed', { authorSort: { column: 'lines', descending: true } }],
+    ['reviewers by first responses', { reviewerSort: { column: 'first', descending: true } }],
+    ['reviewers by median response ascending', { reviewerSort: { column: 'response', descending: false } }],
+    ['bots shown', { bots: true }],
   ] satisfies [string, Partial<AppState>][])('preserves %s', (_name, patch) => {
     const state = { ...defaults, ...patch };
     expect(stateFromHash(hashFromState(state, meta), meta)).toEqual(state);
@@ -119,12 +137,34 @@ describe('round trip through the hash', () => {
     expect(hashFromState(withFilters({ kind: 'unknown' }), meta)).toBe('#/?target=main&kind=unknown');
   });
 
+  it('writes the author and the reviewer as logins, after the other filters', () => {
+    expect(hashFromState(withFilters({ reopenedOnly: true, author: 'fixture-author-a', reviewer: 'fixture-author-e' }), meta)).toBe(
+      '#/?target=main&reopened=only&author=fixture-author-a&reviewer=fixture-author-e',
+    );
+  });
+
   it('writes the table sort last, as a column or a minus and a column, and leaves out the default', () => {
     expect(hashFromState({ ...defaults, pr: 66600, sort: { column: 'size', descending: false } }, meta)).toBe(
       '#/?target=main&pr=66600&sort=size',
     );
     expect(hashFromState({ ...defaults, sort: { column: 'title', descending: true } }, meta)).toBe('#/?target=main&sort=-title');
     expect(hashFromState({ ...defaults, sort: { column: 'opened', descending: true } }, meta)).toBe('#/?target=main');
+  });
+
+  it("writes the People tables' orders and the bots after the PR table's order, leaving out the defaults", () => {
+    expect(
+      hashFromState(
+        {
+          ...defaults,
+          sort: { column: 'size', descending: true },
+          authorSort: { column: 'lines', descending: true },
+          reviewerSort: { column: 'first', descending: false },
+          bots: true,
+        },
+        meta,
+      ),
+    ).toBe('#/?target=main&sort=-size&authorsort=-lines&reviewersort=first&bots=show');
+    expect(hashFromState({ ...defaults, authorSort: { column: 'opened', descending: true } }, meta)).toBe('#/?target=main');
   });
 
   it('puts the route in the hash path', () => {
@@ -152,6 +192,11 @@ describe('unknown values fall back to their defaults', () => {
     ['kind that is empty', '#/?kind='],
     ['drafts', '#/?drafts=maybe'],
     ['reopened', '#/?reopened=yes'],
+    ['author the data does not name', '#/?author=someone-else'],
+    ['author that is empty', '#/?author='],
+    ['author named like a prototype key', '#/?author=__proto__'],
+    ['reviewer the data does not name', '#/?reviewer=someone-else'],
+    ['reviewer that is a person index, not a login', '#/?reviewer=4'],
     ['band', '#/?band=old'],
     ['pr that is not a number', '#/?pr=abc'],
     ['pr that is zero', '#/?pr=0'],
@@ -162,9 +207,20 @@ describe('unknown values fall back to their defaults', () => {
     ['week that is not a date', '#/?week=soon'],
     ['sort by an unknown column', '#/?sort=colour'],
     ['sort that is a bare minus', '#/?sort=-'],
+    ['authors sorted by a PR table column', '#/?authorsort=title'],
+    ['authors sorted by a reviewer column', '#/?authorsort=-prs'],
+    ['reviewers sorted by an unknown column', '#/?reviewersort=colour'],
+    ['bots other than show', '#/?bots=yes'],
     ['an unknown parameter', '#/?colour=blue'],
   ])('%s', (_name, hash) => {
     expect(stateFromHash(hash, meta)).toEqual(defaults);
+  });
+
+  it('takes a login in any case as the login the data gives, as GitHub does', () => {
+    expect(stateFromHash('#/?author=FIXTURE-Author-A&reviewer=Fixture-Reviewer-K', meta).filters).toMatchObject({
+      author: 'fixture-author-a',
+      reviewer: 'fixture-reviewer-k',
+    });
   });
 
   it('keeps the valid parameters beside an unknown one', () => {

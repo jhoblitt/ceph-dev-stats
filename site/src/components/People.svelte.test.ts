@@ -1,0 +1,197 @@
+// @vitest-environment jsdom
+import { fireEvent, render, screen, within } from '@testing-library/svelte';
+import { beforeAll, describe, expect, it } from 'vitest';
+import App from '../App.svelte';
+import { fixturePage } from '../lib/__fixtures__/page';
+
+beforeAll(() => {
+  window.matchMedia = (query: string) =>
+    ({ matches: false, media: query, addEventListener() {}, removeEventListener() {} }) as unknown as MediaQueryList;
+  HTMLCanvasElement.prototype.getContext = (() => null) as unknown as HTMLCanvasElement['getContext'];
+});
+
+function section() {
+  return within(screen.getByRole('region', { name: 'People' }));
+}
+
+function table(name: 'Authors' | 'Reviewers') {
+  return section().getByRole('table', { name: new RegExp(`^${name}, sorted by`) });
+}
+
+/** Each body row's cells as written, the rank first. */
+function cells(name: 'Authors' | 'Reviewers'): string[][] {
+  return within(table(name))
+    .getAllByRole('row')
+    .slice(1)
+    .map((r) =>
+      [...r.querySelectorAll('td, th')].map((c) => {
+        const copy = c.cloneNode(true) as HTMLElement;
+        copy.querySelectorAll('.visually-hidden, button').forEach((n) => n.remove());
+        return copy.textContent?.replace(/\s+/g, ' ').trim() ?? '';
+      }),
+    );
+}
+
+const people = (name: 'Authors' | 'Reviewers') => cells(name).map((r) => r[1]);
+
+describe('People', () => {
+  it('lists the authors of the selected PRs opened in the period, most PRs opened first, a tie by handle', async () => {
+    render(App, (await fixturePage('')).props);
+    expect(section().getByRole('heading', { level: 3, name: 'Authors' })).toBeTruthy();
+    expect(cells('Authors').map((r) => [r[0], r[1], r[2]])).toEqual([
+      ['1', 'fixture-author-d', '2'],
+      ['2', 'fixture-author-a', '1'],
+      ['3', 'fixture-author-e', '1'],
+      ['4', 'fixture-author-f', '1'],
+      ['5', 'fixture-author-g', '1'],
+      ['6', 'fixture-author-i', '1'],
+    ]);
+    expect(table('Authors').querySelector('th[aria-sort="descending"]')?.textContent).toMatch(/^PRs opened/);
+  });
+
+  it("writes an author's row: fixture-author-d opened #66500 and #67100", async () => {
+    render(App, (await fixturePage('')).props);
+    expect(cells('Authors')[0]).toEqual([
+      '1',
+      'fixture-author-d',
+      '2',
+      '2',
+      '0',
+      '0',
+      '4',
+      '95',
+      '25',
+      '120',
+      'too few',
+      'too few',
+      '100%',
+    ]);
+    const row = within(table('Authors')).getAllByRole('row')[1] as HTMLElement;
+    const response = row.querySelectorAll('td')[10] as HTMLElement;
+    expect(response.getAttribute('title')).toBe('2 PRs, fewer than 5');
+    expect(response.textContent).toBe('too few, 2 PRs, fewer than 5');
+  });
+
+  it('names each table by its order in its caption, keeping each label as written', async () => {
+    render(App, (await fixturePage('')).props);
+    expect(table('Authors').querySelector('caption')?.textContent).toBe('Authors, sorted by PRs opened, descending');
+    expect(table('Reviewers').querySelector('caption')?.textContent).toBe(
+      'Reviewers, sorted by PRs reviewed or commented on, descending',
+    );
+  });
+
+  it("heads the reviewers' first figure as what it counts, and says what a comment and a first response are", async () => {
+    render(App, (await fixturePage('')).props);
+    const heads = within(table('Reviewers'))
+      .getAllByRole('columnheader')
+      .map((h) => h.textContent?.replace(/[↑↓]/g, '').trim());
+    expect(heads[2]).toBe('PRs reviewed or commented on');
+    expect(heads).not.toContain('PRs reviewed');
+    const notes = section().getByText(/^\s*Nothing a person does on a pull request they opened/).closest('.notes');
+    const text = notes?.textContent?.replace(/\s+/g, ' ') ?? '';
+    expect(text).toContain(
+      'Nothing a person does on a pull request they opened is counted here, neither their comments on it nor their replies in its review threads.',
+    );
+    expect(text).toContain(
+      'A comment is any such comment by a person that is not a bot command, such as a posted test result, so a row with comments and no reviews is someone who commented without reviewing.',
+    );
+    expect(text).toContain(
+      'First responses counts the pull requests whose first response was this person’s; a pull request never made ready for review has none, so it counts for no one.',
+    );
+    // The author's own activity is said once, not again for review threads alone.
+    expect(text).not.toContain('A reply in a review thread');
+    expect(text).toContain(
+      'A first response is the first comment or review on a pull request by a person other than its author; comments and reviews from bot accounts, and bot commands, do not count.',
+    );
+    expect(text).toContain(
+      'One made before the pull request was ready counts as no time, and pull requests never made ready for review are left out.',
+    );
+    expect(text).not.toContain('by anyone but its author');
+  });
+
+  it("writes a reviewer's row: fixture-author-f", async () => {
+    render(App, (await fixturePage('')).props);
+    expect(people('Reviewers')).toEqual([
+      'fixture-author-f',
+      'fixture-author-a',
+      'fixture-author-e',
+      'fixture-author-i',
+      'fixture-reviewer-k',
+    ]);
+    expect(cells('Reviewers')[0]).toEqual(['1', 'fixture-author-f', '3', '3', '0', '0', '1', '1', 'too few']);
+  });
+
+  it('links each handle to the person on GitHub, in a new tab', async () => {
+    render(App, (await fixturePage('')).props);
+    const link = within(table('Reviewers')).getByRole('link', { name: 'fixture-reviewer-k on GitHub, opens in a new tab' });
+    expect(link.getAttribute('href')).toBe('https://github.com/fixture-reviewer-k');
+    expect(link.getAttribute('target')).toBe('_blank');
+    expect(link.getAttribute('rel')).toBe('noopener noreferrer');
+  });
+
+  it('sorts by a column chosen, most first, then the other way, the rank following the order', async () => {
+    const { props, loc } = await fixturePage('');
+    render(App, props);
+    const lines = () => within(table('Authors')).getByRole('button', { name: /^Lines changed/ });
+    await fireEvent.click(lines());
+    expect(loc.hash()).toBe('#/?target=main&authorsort=-lines');
+    expect(lines().closest('th')?.getAttribute('aria-sort')).toBe('descending');
+    expect(cells('Authors').map((r) => [r[0], r[1], r[9]])).toEqual([
+      ['1', 'fixture-author-i', '2,200'],
+      ['2', 'fixture-author-f', '1,050'],
+      ['3', 'fixture-author-a', '250'],
+      ['4', 'fixture-author-d', '120'],
+      ['5', 'fixture-author-g', '70'],
+      ['6', 'fixture-author-e', '4'],
+    ]);
+    await fireEvent.click(lines());
+    expect(loc.hash()).toBe('#/?target=main&authorsort=lines');
+    expect(cells('Authors')[0]?.slice(0, 2)).toEqual(['1', 'fixture-author-e']);
+  });
+
+  it('sorts by the handle from A first', async () => {
+    const { props, loc } = await fixturePage('');
+    render(App, props);
+    await fireEvent.click(within(table('Reviewers')).getByRole('button', { name: /^Reviewer/ }));
+    expect(loc.hash()).toBe('#/?target=main&reviewersort=reviewer');
+    expect(people('Reviewers')[0]).toBe('fixture-author-a');
+  });
+
+  it('restores the orders from the URL', async () => {
+    render(App, (await fixturePage('#/?authorsort=-lines&reviewersort=first')).props);
+    expect(people('Authors')[0]).toBe('fixture-author-i');
+    expect(table('Reviewers').querySelector('th[aria-sort="ascending"]')?.textContent).toMatch(/^First responses/);
+  });
+
+  it('leaves out bot accounts until asked, then marks them', async () => {
+    const { props, loc } = await fixturePage('#/?target=all');
+    render(App, props);
+    expect(people('Authors')).not.toContain('fixture-author-j');
+    expect(section().getByText(/1 bot account not shown/)).toBeTruthy();
+    await fireEvent.click(section().getByRole('checkbox', { name: 'Show bot accounts' }));
+    expect(loc.hash()).toBe('#/?target=all&bots=show');
+    const bot = cells('Authors').find((r) => r[1]?.startsWith('fixture-author-j'));
+    expect(bot?.[1]).toBe('fixture-author-j bot');
+  });
+
+  it("sets the Reviewer filter from a row, and every section follows it", async () => {
+    const { props, loc } = await fixturePage('');
+    render(App, props);
+    await fireEvent.click(within(table('Reviewers')).getByRole('button', { name: 'Filter by fixture-author-f as reviewer' }));
+    expect(loc.hash()).toBe('#/?target=main&reviewer=fixture-author-f');
+    // The PRs f reviewed in the period: #64010, #66500 and #67100.
+    const prs = within(screen.getByRole('region', { name: 'Pull requests' }));
+    expect(prs.getByRole('status').textContent).toBe('3 PRs open at some point in the period, 2 of them opened in it');
+    expect(cells('Reviewers').map((r) => [r[1], r[2]])).toContainEqual(['fixture-author-f', '3']);
+    expect(
+      within(table('Reviewers')).getByRole('button', { name: 'Filter by fixture-author-f as reviewer' }).getAttribute('aria-pressed'),
+    ).toBe('true');
+    expect(people('Authors')).toEqual(['fixture-author-d']);
+  });
+
+  it('says "no PRs match" for an empty selection', async () => {
+    render(App, (await fixturePage('#/?component=cephfs&kind=docs')).props);
+    expect(section().getByText('no PRs match')).toBeTruthy();
+    expect(section().queryByRole('table')).toBeNull();
+  });
+});

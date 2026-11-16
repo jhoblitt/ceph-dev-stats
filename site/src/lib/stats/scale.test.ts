@@ -3,6 +3,7 @@ import type { Dataset, PrColumns } from '../data';
 import { DAY } from '../filters';
 import { backlog } from './backlog';
 import { outcomeCurve } from './curve';
+import { authorRows, reviewerRows } from './people';
 import { META, all, random } from './testing';
 import { weekly } from './weekly';
 
@@ -53,6 +54,7 @@ function synthetic(): Dataset {
     components: Array.from({ length: ROWS }, () => []),
     standing: new Int32Array(ROWS),
     kind: new Int32Array(ROWS).fill(-1),
+    author: Int32Array.from({ length: ROWS }, (_, i) => i % 500),
   };
   const n = ROWS * EVENTS_PER_ROW;
   const pr = new Int32Array(n);
@@ -103,5 +105,13 @@ describe('at 100,000 PRs and 2,000,000 events', () => {
 
   it('computes the backlog well inside a second', () => {
     expect(timed(() => backlog(data, rows, PERIOD))).toBeLessThan(1000);
+  });
+
+  it("computes 500 authors' rows, two outcome curves each, well inside a second", () => {
+    expect(timed(() => authorRows(data, rows))).toBeLessThan(1000);
+  });
+
+  it("computes 500 reviewers' rows well inside a second", () => {
+    expect(timed(() => reviewerRows(data, rows, PERIOD))).toBeLessThan(1000);
   });
 });
