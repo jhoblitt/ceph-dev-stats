@@ -414,21 +414,45 @@ var _ = Describe("Build", func() {
 			}))
 		})
 
-		It("leaves out only a close at the second of a merge", func() {
-			r := pr(1)
-			r.State = record.StateMerged
-			r.Events = []record.Event{
-				{At: h(1), Kind: record.KindClosed, ID: 11},
-				{At: h(2), Kind: record.KindReopened},
-				{At: h(3), Kind: record.KindMerged},
-				{At: h(3), Kind: record.KindClosed, ID: 12},
-			}
-			Expect(build(r).evs(2026)).To(Equal([]ev{
-				{PR: 1, At: h(1), Kind: "closed", Ref: "11"},
-				{PR: 1, At: h(2), Kind: "reopened"},
-				{PR: 1, At: h(3), Kind: "merged"},
-			}))
-		})
+		DescribeTable("leaves out only the close a merge causes, up to five seconds after it",
+			func(events []record.Event, want []ev) {
+				r := pr(1)
+				r.State = record.StateMerged
+				r.Events = events
+				Expect(build(r).evs(2026)).To(Equal(want))
+			},
+			Entry("a close at the second of the merge: left out",
+				[]record.Event{{At: h(3), Kind: record.KindMerged}, {At: h(3), Kind: record.KindClosed, ID: 12}},
+				[]ev{{PR: 1, At: h(3), Kind: "merged"}}),
+			Entry("a close a second after the merge: left out",
+				[]record.Event{{At: h(3), Kind: record.KindMerged}, {At: h(3).Add(time.Second), Kind: record.KindClosed, ID: 12}},
+				[]ev{{PR: 1, At: h(3), Kind: "merged"}}),
+			Entry("a close five seconds after the merge: left out",
+				[]record.Event{{At: h(3), Kind: record.KindMerged}, {At: h(3).Add(5 * time.Second), Kind: record.KindClosed, ID: 12}},
+				[]ev{{PR: 1, At: h(3), Kind: "merged"}}),
+			Entry("a close six seconds after the merge: kept",
+				[]record.Event{{At: h(3), Kind: record.KindMerged}, {At: h(3).Add(6 * time.Second), Kind: record.KindClosed, ID: 12}},
+				[]ev{{PR: 1, At: h(3), Kind: "merged"}, {PR: 1, At: h(3).Add(6 * time.Second), Kind: "closed", Ref: "12"}}),
+			Entry("a close before the merge, then reopened: kept",
+				[]record.Event{
+					{At: h(1), Kind: record.KindClosed, ID: 11},
+					{At: h(2), Kind: record.KindReopened},
+					{At: h(3), Kind: record.KindMerged},
+					{At: h(3).Add(time.Second), Kind: record.KindClosed, ID: 12},
+				},
+				[]ev{{PR: 1, At: h(1), Kind: "closed", Ref: "11"}, {PR: 1, At: h(2), Kind: "reopened"}, {PR: 1, At: h(3), Kind: "merged"}}),
+			Entry("a close a second before the merge: kept",
+				[]record.Event{{At: h(3).Add(-time.Second), Kind: record.KindClosed, ID: 11}, {At: h(3), Kind: record.KindMerged}},
+				[]ev{{PR: 1, At: h(3).Add(-time.Second), Kind: "closed", Ref: "11"}, {PR: 1, At: h(3), Kind: "merged"}}),
+			Entry("merged, then reopened and closed again long after: the later close kept",
+				[]record.Event{
+					{At: h(3), Kind: record.KindMerged},
+					{At: h(3).Add(time.Second), Kind: record.KindClosed, ID: 12},
+					{At: h(20), Kind: record.KindReopened},
+					{At: h(21), Kind: record.KindClosed, ID: 13},
+				},
+				[]ev{{PR: 1, At: h(3), Kind: "merged"}, {PR: 1, At: h(20), Kind: "reopened"}, {PR: 1, At: h(21), Kind: "closed", Ref: "13"}}),
+		)
 
 		It("sorts by row, then time, across pull requests given out of order", func() {
 			a, b := pr(2), pr(1)
