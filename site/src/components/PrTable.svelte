@@ -29,6 +29,7 @@
     yearsOfRows,
   } from '../lib/table';
   import SelectedPr from './SelectedPr.svelte';
+  import { onScreen } from './onscreen';
 
   const { selection, data, loader } = getPage();
 
@@ -48,23 +49,8 @@
   // The table lists every PR open at some point in the period; the charts above count those opened in it.
   const openedCount = $derived(openedIn(dataset, selected, periodRange(filters)).length);
 
-  // The table is "shown" once any of it has been on screen; without an
-  // IntersectionObserver (jsdom), at once.
+  // The table is "shown" once any of it has been on screen.
   let shown = $state(false);
-  function onScreen(node: HTMLElement) {
-    if (typeof IntersectionObserver === 'undefined') {
-      shown = true;
-      return;
-    }
-    const observer = new IntersectionObserver((entries) => {
-      if (entries.some((e) => e.isIntersecting)) {
-        shown = true;
-        observer.disconnect();
-      }
-    });
-    observer.observe(node);
-    return () => observer.disconnect();
-  }
 
   const tables = new SvelteMap<number, TableLoad>();
   function request(year: number) {
@@ -127,7 +113,7 @@
   );
 </script>
 
-<section id="table" aria-labelledby="table-heading" class:stale={$data.loading} {@attach onScreen}>
+<section id="table" aria-labelledby="table-heading" class:stale={$data.loading} {@attach onScreen(() => (shown = true))}>
   <h2 id="table-heading">Pull requests</h2>
 
   {#if chosen}
