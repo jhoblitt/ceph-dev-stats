@@ -251,31 +251,11 @@ export function labelWidth(label: string): number {
   return w;
 }
 
-export interface EndLabel {
-  key: string;
-  y: number;
-}
-
-/**
- * The line-end labels to draw, top to bottom. When two would sit closer than
- * `gap`, none is drawn: nudged apart they would leave their lines, so the
- * legend and the markers name the lines instead.
- */
-export function endLabels<L extends EndLabel>(labels: readonly L[], gap: number): L[] {
-  const sorted = [...labels].sort((a, b) => a.y - b.y);
-  for (let i = 1; i < sorted.length; i++) {
-    if ((sorted[i] as L).y - (sorted[i - 1] as L).y < gap) return [];
-  }
-  return sorted;
-}
-
 /** A time-axis plot's left margin, which its value labels take. */
 export const PLOT_LEFT = 44;
-/** A time-axis plot's right margin with no end labels. */
+/** A time-axis plot's right margin. */
 export const PLOT_RIGHT = 8;
-/** A time-axis plot's right margin where lines are named at their ends. */
-export const END_LABEL_MARGIN = 120;
-/** Below this width a time-axis plot keeps no margin for end labels, and a panel says its shorter unit. */
+/** Below this width a panel says its shorter unit. */
 export const NARROW = 480;
 
 /** Where the buckets of a time axis sit: columns that tile the plot from `left` to `right`, in order. */
@@ -291,14 +271,13 @@ export interface TimeColumns {
 }
 
 /**
- * The columns of `n` buckets across a plot `width` wide, which keeps the
- * margin for end labels when `endLabels` is set and the plot is not narrow.
- * Every chart a section stacks over one period takes its columns from here,
- * with the same `endLabels`, so a bucket is at the same x in each.
+ * The columns of `n` buckets across a plot `width` wide. Every chart over the
+ * period takes its columns from here, so in charts of one width a bucket is
+ * at the same x.
  */
-export function timeColumns(width: number, n: number, endLabels: boolean): TimeColumns {
+export function timeColumns(width: number, n: number): TimeColumns {
   const left = PLOT_LEFT;
-  const right = width - (endLabels && width >= NARROW ? END_LABEL_MARGIN : PLOT_RIGHT);
+  const right = width - PLOT_RIGHT;
   const step = (right - left) / Math.max(1, n);
   return { left, right, step, start: (i) => left + i * step, centre: (i) => left + (i + 0.5) * step };
 }

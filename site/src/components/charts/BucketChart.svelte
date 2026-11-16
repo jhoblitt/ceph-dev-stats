@@ -12,11 +12,10 @@
   markers left unconnected, so a short bucket does not read as a fall. A
   value that can no longer be reached is marked in a strip above its panel.
 
-  Given a section's time axis, the chart takes its columns from it, so a
-  bucket sits at the same x as in the section's other charts on that axis.
+  The chart takes its columns from `timeColumns`, as every chart over the
+  period does, so a bucket sits at the same x as in the other charts.
 -->
 <script lang="ts">
-  import { untrack } from 'svelte';
   import { scaleLinear, scaleLog } from 'd3-scale';
   import { line } from 'd3-shape';
   import {
@@ -37,13 +36,11 @@
     barPath,
     bucketTicks,
     durationTicks,
-    endLabels,
     logDays,
     markerPath,
     spaceTicks,
     timeColumns,
   } from '../../lib/plot';
-  import type { TimeAxis } from '../../lib/timeaxis.svelte';
   import AxisX from './AxisX.svelte';
   import AxisY from './AxisY.svelte';
   import Tooltip from './Tooltip.svelte';
@@ -74,8 +71,6 @@
     sharedScale?: boolean;
     /** The value scale: linear, or log over durations in days, from one hour. */
     scale?: 'linear' | 'logDays';
-    /** The time axis this chart shares with the others its section stacks over the period. */
-    timeAxis?: TimeAxis;
   }
 
   let {
@@ -92,7 +87,6 @@
     panels,
     sharedScale = true,
     scale = 'linear',
-    timeAxis,
   }: Props = $props();
 
   let measured = $state(0);
@@ -171,36 +165,7 @@
   });
   const plotTop = $derived((layout[0]?.top ?? TOP) - (layout[0]?.strip ? STRIP : 0));
 
-  // Each line's last value in a whole bucket, named at the plot's right when
-  // the names fit there and none would collide; the margin is kept only for them.
-  const ends = $derived(
-    layout.flatMap((p) =>
-      p.lines.flatMap((l) => {
-        let last = -1;
-        l.values.forEach((v, i) => {
-          if (v !== null && !isPartial(i)) last = i;
-        });
-        return last === -1 ? [] : [{ key: l.key, y: p.y(l.values[last] as number), last, text: l.label }];
-      }),
-    ),
-  );
-  // A line alone in a panel with a unit title, and no bars, is named by that title.
-  const lone = $derived(
-    new Set(layout.flatMap((p) => (p.unit && p.bars.length === 0 && p.lines.length === 1 ? [p.lines[0]?.key] : []))),
-  );
-  const named = $derived(width >= NARROW ? endLabels(ends.filter((e) => !lone.has(e.key)), 14) : []);
-
-  // The margin for end labels is kept when this chart names a line, or,
-  // on a shared axis, when any chart on it does.
-  const id = Symbol('bucket chart');
-  $effect(() => {
-    if (timeAxis === undefined) return;
-    const wants = named.length > 0;
-    // Writing the claim reads the axis; only this chart's labels rerun it.
-    untrack(() => timeAxis.claim(id, wants));
-    return () => timeAxis.release(id);
-  });
-  const x = $derived(timeColumns(width, n, timeAxis === undefined ? named.length > 0 : timeAxis.endLabels));
+  const x = $derived(timeColumns(width, n));
   // A bar takes three quarters of its column, centred in it.
   const barWidth = $derived(Math.min(24, x.step * 0.75));
   const centre = (i: number) => x.centre(i);
@@ -246,7 +211,7 @@
           .x((_, i) => centre(i))
           .y((v) => p.y(v as number));
         const all = x.step >= 12;
-        const last = ends.find((e) => e.key === l.key)?.last ?? -1;
+        const last = l.values.reduce((k: number, _, i) => (joined(i) ? i : k), -1);
         // Markers on every point when the buckets are wide enough; otherwise
         // where a point stands alone, ends its line, or is a partial bucket's.
         const markers = l.values.flatMap((v, i) => {
@@ -351,12 +316,6 @@
         {/each}
       </g>
     {/each}
-    <g aria-hidden="true">
-      {#each named as e (e.key)}
-        <line class="leader" x1={centre(e.last) + 6} x2={x.right + 6} y1={e.y} y2={e.y} />
-        <text class="end-label" x={x.right + 10} y={e.y} dy="0.32em">{e.text}</text>
-      {/each}
-    </g>
     {#if axis}
       <AxisX ticks={xTicks} y={base} x0={LEFT} x1={x.right} />
     {/if}
@@ -454,16 +413,6 @@
   .unreached {
     fill: var(--surface);
     stroke-width: 1.5;
-  }
-
-  .leader {
-    stroke: var(--grid);
-    stroke-width: 1;
-  }
-
-  .end-label {
-    fill: var(--text-muted);
-    font-size: 12px;
   }
 
   .hit {

@@ -7,7 +7,6 @@ import {
   barPath,
   bucketTicks,
   durationTicks,
-  endLabels,
   glyphWidth,
   logDays,
   markerPath,
@@ -112,19 +111,6 @@ describe('spaceTicks', () => {
       { at: 100, label: 'c' },
     ];
     expect(spaceTicks(down, 14).map((t) => t.label)).toEqual(['a', 'c']);
-  });
-});
-
-describe('endLabels', () => {
-  it('keeps labels that sit apart', () => {
-    expect(endLabels([{ key: 'a', y: 10 }, { key: 'b', y: 40 }], 14)).toEqual([
-      { key: 'a', y: 10 },
-      { key: 'b', y: 40 },
-    ]);
-  });
-
-  it('drops every label when two collide, leaving the legend to name the lines', () => {
-    expect(endLabels([{ key: 'a', y: 10 }, { key: 'b', y: 40 }, { key: 'c', y: 50 }], 14)).toEqual([]);
   });
 });
 

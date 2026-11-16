@@ -1,7 +1,8 @@
 // @vitest-environment jsdom
-// The time-axis charts a section stacks over the same period read as one
-// axis: a bucket is at the same x in each, whichever has end labels, a
-// partial last bucket or a scale of its own, and their tick labels agree.
+// The time-axis charts over the period read as one axis down the whole
+// page: every one runs between the same left and right edges, a bucket is at
+// the same x in each a section stacks, whichever has a partial last bucket
+// or a scale of its own, and their tick labels agree.
 import { cleanup, render, screen } from '@testing-library/svelte';
 import { tick } from 'svelte';
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
@@ -10,8 +11,7 @@ import { withYears } from '../lib/__fixtures__/fetch';
 import { fixturePage } from '../lib/__fixtures__/page';
 import type { AreaModel, BucketModel } from '../lib/charts';
 import { formatCount } from '../lib/format';
-import { END_LABEL_MARGIN, NARROW, PLOT_LEFT, PLOT_RIGHT } from '../lib/plot';
-import { TimeAxis } from '../lib/timeaxis.svelte';
+import { PLOT_LEFT, PLOT_RIGHT } from '../lib/plot';
 import BucketChart from './charts/BucketChart.svelte';
 import StackedArea from './charts/StackedArea.svelte';
 
@@ -72,7 +72,7 @@ const PERIODS = [
   { name: 'fifteen years', hash: '#/', files: withYears(2011, 1) },
 ];
 
-describe('the charts a section stacks share one time axis', () => {
+describe('the charts over the period share one time axis, within a section and across sections', () => {
   for (const width of [320, 390, 768, 1280, 1600]) {
     for (const period of PERIODS) {
       it(`at ${width} px over ${period.name}`, async () => {
@@ -93,7 +93,7 @@ describe('the charts a section stacks share one time axis', () => {
           for (const [k, c] of all.entries()) {
             expect(c, `${section}, chart ${k}`).toHaveLength(n);
             at.forEach((i, j) => expect(Math.abs((c[i] as number) - (first[j] as number)), `${section}, chart ${k}, bucket ${i}`).toBeLessThanOrEqual(0.5));
-            expect(edges(svgs[k] as SVGElement), `${section}, chart ${k}, edges`).toEqual(edges(svgs[0] as SVGElement));
+            expect(edges(svgs[k] as SVGElement), `${section}, chart ${k}, edges`).toEqual([PLOT_LEFT, width - PLOT_RIGHT]);
           }
           const labelled = svgs.map(ticks).filter((t): t is string[] => t !== null);
           expect(labelled.length, section).toBeGreaterThan(1);
@@ -105,8 +105,7 @@ describe('the charts a section stacks share one time axis', () => {
 
 });
 
-// A bar chart that names its line at its right end, and an area chart that
-// names nothing there, on one axis, as Velocity's two charts are.
+// A bar chart with a line, and an area chart, as Velocity's two charts are.
 const at = (iso: string) => Date.parse(iso) / 1000;
 const WEEKS = [at('2026-05-11T00:00:00Z'), at('2026-05-18T00:00:00Z'), at('2026-05-25T00:00:00Z')];
 const counts: BucketModel = {
@@ -124,11 +123,10 @@ const backlog: AreaModel = {
   totalLabel: 'open',
 };
 
-describe('a chart with end labels and one without, on one time axis', () => {
+describe('a bar chart with a line and an area chart', () => {
   for (const width of [320, 390, 768, 1280, 1600]) {
-    it(`at ${width} px, both keep the margin for end labels, or both drop it below ${NARROW} px`, async () => {
+    it(`at ${width} px, both run from the left margin to the right one, with every bucket at the same x`, async () => {
       atWidth(width);
-      const timeAxis = new TimeAxis();
       const onselect = () => {};
       const bars = render(BucketChart, {
         model: counts,
@@ -136,35 +134,16 @@ describe('a chart with end labels and one without, on one time axis', () => {
         label: 'counts',
         panels: [{ keys: ['opened', 'merged'], unit: 'PRs' }],
         onselect,
-        timeAxis,
       });
-      const area = render(StackedArea, { model: backlog, label: 'backlog', selected: { bucket: null, key: null }, onselect, timeAxis });
+      const area = render(StackedArea, { model: backlog, label: 'backlog', selected: { bucket: null, key: null }, onselect });
       await tick();
       const [a, b] = [bars.container, area.container].map((c) => c.querySelector('svg[role="group"]') as SVGElement);
-      const wide = width >= NARROW;
-      expect((a as SVGElement).querySelectorAll('.end-label').length).toBe(wide ? 1 : 0);
-      expect((b as SVGElement).querySelectorAll('.end-label').length).toBe(0);
-      const margin = wide ? END_LABEL_MARGIN : PLOT_RIGHT;
-      expect(edges(a as SVGElement)).toEqual([PLOT_LEFT, width - margin]);
-      expect(edges(b as SVGElement)).toEqual([PLOT_LEFT, width - margin]);
+      expect(edges(a as SVGElement)).toEqual([PLOT_LEFT, width - PLOT_RIGHT]);
+      expect(edges(b as SVGElement)).toEqual([PLOT_LEFT, width - PLOT_RIGHT]);
       const [ca, cb] = [centres(a as SVGElement), centres(b as SVGElement)];
       expect(ca).toHaveLength(3);
       ca.forEach((x, i) => expect(Math.abs(x - (cb[i] as number))).toBeLessThanOrEqual(0.5));
       expect(ticks(a as SVGElement)).toEqual(ticks(b as SVGElement));
     });
   }
-
-  it('gives the area chart back its own margin once the chart with end labels is gone', async () => {
-    atWidth(1280);
-    const timeAxis = new TimeAxis();
-    const onselect = () => {};
-    const bars = render(BucketChart, { model: counts, format: formatCount, label: 'counts', panels: [{ keys: ['opened', 'merged'], unit: 'PRs' }], onselect, timeAxis });
-    const area = render(StackedArea, { model: backlog, label: 'backlog', selected: { bucket: null, key: null }, onselect, timeAxis });
-    await tick();
-    const svg = () => area.container.querySelector('svg[role="group"]') as SVGElement;
-    expect(edges(svg())[1]).toBe(1280 - END_LABEL_MARGIN);
-    bars.unmount();
-    await tick();
-    expect(edges(svg())[1]).toBe(1280 - PLOT_RIGHT);
-  });
 });

@@ -13,7 +13,7 @@
   import { curveStepAfter, line } from 'd3-shape';
   import { type CurveModel, curveAt, curveReadout, readoutText } from '../../lib/charts';
   import { formatDays, formatShare } from '../../lib/format';
-  import { HOUR, type Tick, durationTicks, endLabels, logDays, markerPath, spaceTicks } from '../../lib/plot';
+  import { HOUR, type Tick, durationTicks, logDays, markerPath, spaceTicks } from '../../lib/plot';
   import AxisX from './AxisX.svelte';
   import AxisY from './AxisY.svelte';
   import Tooltip from './Tooltip.svelte';
@@ -36,6 +36,7 @@
   const width = $derived(measured > 0 ? measured : 640);
 
   const LEFT = 44;
+  const RIGHT = 12;
   const TOP = 8;
   const base = $derived(height - 40);
   const last = $derived(model.days.at(-1) ?? 0);
@@ -47,18 +48,7 @@
   const y = $derived(scaleLinear().domain([0, 1]).range([base, TOP]));
   const start = $derived(curveAt(model, HOUR));
   const end = $derived(curveAt(model, last));
-  // Each line is named at the plot's right when the names fit there and none
-  // would collide; the margin is kept only for them.
-  const named = $derived(
-    width >= 480
-      ? endLabels(
-          model.series.map((s, k) => ({ key: s.key, y: y(end[k] as number), text: s.label })),
-          14,
-        )
-      : [],
-  );
-  const right = $derived(named.length > 0 ? 132 : 12);
-  const x = $derived(scaleLog().domain([min, max]).range([LEFT, width - right]).clamp(true));
+  const x = $derived(scaleLog().domain([min, max]).range([LEFT, width - RIGHT]).clamp(true));
 
   const yTicks: Tick[] = $derived([0, 0.25, 0.5, 0.75, 1].map((t) => ({ at: y(t), label: formatShare(t) })));
   const xTicks: Tick[] = $derived(
@@ -136,7 +126,7 @@
 
 <div class="plot" {@attach measureWidth((w) => (measured = w))}>
   <svg bind:this={svg} {width} {height}>
-    <AxisY ticks={yTicks} x0={LEFT} x1={width - right} />
+    <AxisY ticks={yTicks} x0={LEFT} x1={width - RIGHT} />
     <g aria-hidden="true">
       {#if showing}
         <line class="crosshair" x1={x(day)} x2={x(day)} y1={TOP} y2={base} />
@@ -150,20 +140,14 @@
           <path class="marker" d={markerPath(l.shape)} transform="translate({x(day)} {y(atDay[k] as number)})" style:fill={l.color} />
         {/each}
       {/if}
-      {#each named as e (e.key)}
-        {#if x(lastAt) + 8 < width - right + 6}
-          <line class="leader" x1={x(lastAt) + 8} x2={width - right + 6} y1={e.y} y2={e.y} />
-        {/if}
-        <text class="end-label" x={width - right + 10} y={e.y} dy="0.32em">{e.text}</text>
-      {/each}
     </g>
-    <AxisX ticks={xTicks} y={base} x0={LEFT} x1={width - right} />
+    <AxisX ticks={xTicks} y={base} x0={LEFT} x1={width - RIGHT} />
     <text class="unit" x={LEFT} y={height - 4} aria-hidden="true">{xUnit}, log scale</text>
     <rect
       class="hit"
       x={LEFT}
       y={TOP}
-      width={Math.max(0, width - right - LEFT)}
+      width={Math.max(0, width - RIGHT - LEFT)}
       height={base - TOP}
       role="slider"
       tabindex="0"
@@ -216,16 +200,6 @@
   .marker {
     stroke: var(--surface);
     stroke-width: 2;
-  }
-
-  .leader {
-    stroke: var(--grid);
-    stroke-width: 1;
-  }
-
-  .end-label {
-    fill: var(--text-muted);
-    font-size: 12px;
   }
 
   .unit {

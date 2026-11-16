@@ -44,16 +44,12 @@
   import { type Span, outcomeCurve } from '../lib/stats/curve';
   import { reviewLoad } from '../lib/stats/reviewers';
   import { weekly } from '../lib/stats/weekly';
-  import { TimeAxis } from '../lib/timeaxis.svelte';
   import BucketChart from './charts/BucketChart.svelte';
   import ChartFrame from './charts/ChartFrame.svelte';
   import StepCurve from './charts/StepCurve.svelte';
   import ReviewsRecordedNote from './ReviewsRecordedNote.svelte';
 
   const { selection, data, view } = getPage();
-  // The full-width charts stacked over the period, capacity, reviews and bot
-  // commands, share one time axis, so a bucket is at the same x in each.
-  const timeAxis = new TimeAxis();
 
   const dataset = $derived($view.dataset);
   const filters = $derived($view.filters);
@@ -215,7 +211,6 @@
       height={420}
       {selected}
       onselect={onbucket}
-      {timeAxis}
     />
   </ChartFrame>
 
@@ -234,7 +229,6 @@
       integer
       {selected}
       onselect={onbucket}
-      {timeAxis}
     />
   </ChartFrame>
 
@@ -300,7 +294,6 @@
           axis={last}
           {selected}
           onselect={onbucket}
-          {timeAxis}
         />
       </div>
     {/each}

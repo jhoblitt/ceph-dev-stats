@@ -6,15 +6,12 @@
   import { chooseBand, chooseBucket } from '../lib/selection';
   import { backlog } from '../lib/stats/backlog';
   import { weekly } from '../lib/stats/weekly';
-  import { TimeAxis } from '../lib/timeaxis.svelte';
   import { backlogModel, prsModel } from '../lib/velocity';
   import BucketChart from './charts/BucketChart.svelte';
   import ChartFrame from './charts/ChartFrame.svelte';
   import StackedArea from './charts/StackedArea.svelte';
 
   const { selection, data, view } = getPage();
-  // The charts below stacked over the period share one time axis, so a bucket is at the same x in each.
-  const timeAxis = new TimeAxis();
 
   const dataset = $derived($view.dataset);
   const filters = $derived($view.filters);
@@ -67,7 +64,6 @@
       integer
       {selected}
       onselect={onbucket}
-      {timeAxis}
     />
   </ChartFrame>
 
@@ -78,7 +74,6 @@
       unit="open PRs"
       selected={{ bucket: selected, key: $selection.band }}
       onselect={onband}
-      {timeAxis}
     />
   </ChartFrame>
 </section>
