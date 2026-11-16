@@ -166,11 +166,13 @@ export function describeLanes(lanes: readonly Lane[], total: number, orderName: 
 /**
  * The line over the lanes: which PRs they show, in `rowsName` (the PR
  * table's own words for its rows), how many, and in what order. Shown
- * whatever the count.
+ * whatever the count. `newest` is whether the order is newest opened first,
+ * so that a cut keeps the most recently opened.
  */
-export function lanesLine(shown: number, total: number, rowsName: string, orderName: string): string {
+export function lanesLine(shown: number, total: number, rowsName: string, orderName: string, newest: boolean): string {
   const prs = plural(total, 'PR');
-  const which = shown >= total ? prs : `The first ${formatCount(shown)} of ${prs}`;
-  return `${which} ${rowsName}, ${orderName}.`;
+  if (shown >= total) return `${prs} ${rowsName}, ${orderName}.`;
+  if (newest) return `The ${formatCount(shown)} most recently opened of ${prs} ${rowsName}, ${orderName}.`;
+  return `The first ${formatCount(shown)} ${orderName}, of ${prs} ${rowsName}.`;
 }
 
