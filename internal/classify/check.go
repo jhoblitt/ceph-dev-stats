@@ -275,16 +275,22 @@ func compareCounts(recs []record.Record, meta *record.Meta) (string, []error) {
 		}
 	}
 	gh := meta.GitHubCounts
+	source := gh.OpenedInWindowSource.OrSearch()
 	var errs []error
 	if apart(opened, gh.OpenedInWindow) {
-		errs = append(errs, fmt.Errorf("%s: the records hold %d pull requests opened in the window, GitHub counted %d: more than 0.5%% apart",
-			record.MetaFile, opened, gh.OpenedInWindow))
+		err := fmt.Errorf("%s: the records hold %d pull requests opened in the window, GitHub's %s counted %d: more than 0.5%% apart",
+			record.MetaFile, opened, source, gh.OpenedInWindow)
+		if source == record.SourceSearch {
+			err = fmt.Errorf("%w; GitHub's search has been seen to omit pull requests that its listing returns", err)
+		}
+		errs = append(errs, err)
 	}
 	if apart(open, gh.Open) {
-		errs = append(errs, fmt.Errorf("%s: the records hold %d open pull requests, GitHub counted %d: more than 0.5%% apart",
-			record.MetaFile, open, gh.Open))
+		errs = append(errs, fmt.Errorf("%s: the records hold %d open pull requests, GitHub's %s counted %d: more than 0.5%% apart",
+			record.MetaFile, open, record.SourceListing, gh.Open))
 	}
-	line := fmt.Sprintf("Counts: %d opened in the window (GitHub: %d), %d open (GitHub: %d)", opened, gh.OpenedInWindow, open, gh.Open)
+	line := fmt.Sprintf("Counts: %d opened in the window (GitHub's %s: %d), %d open (GitHub's %s: %d)",
+		opened, source, gh.OpenedInWindow, open, record.SourceListing, gh.Open)
 	return line, errs
 }
 

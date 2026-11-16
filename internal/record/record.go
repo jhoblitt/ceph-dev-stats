@@ -150,8 +150,34 @@ type Meta struct {
 	GitHubCounts   Counts    `json:"github_counts"`
 }
 
-// Counts are GitHub's own counts, taken at the end of the last walk.
+// Counts are GitHub's own counts, taken at the end of the last walk. Open
+// is always the listing's.
 type Counts struct {
 	OpenedInWindow int `json:"opened_in_window"`
-	Open           int `json:"open"`
+	// OpenedInWindowSource is empty in a meta.json written before
+	// meta.json recorded it, when OpenedInWindow was always the search's.
+	OpenedInWindowSource CountSource `json:"opened_in_window_source,omitzero"`
+	Open                 int         `json:"open"`
+}
+
+// CountSource names which of GitHub's counts a count is.
+type CountSource string
+
+const (
+	// SourceListing is the totalCount of the repository's pull-request
+	// listing, which counts every pull request it holds.
+	SourceListing CountSource = "listing"
+	// SourceSearch is the issueCount of a search for the pull requests
+	// created from the window start on. GitHub's search has been seen to
+	// omit pull requests its listing returns.
+	SourceSearch CountSource = "search"
+)
+
+// OrSearch is s, or SourceSearch when s is empty, as it is in a file
+// written before the source was recorded.
+func (s CountSource) OrSearch() CountSource {
+	if s == "" {
+		return SourceSearch
+	}
+	return s
 }

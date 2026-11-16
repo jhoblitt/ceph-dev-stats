@@ -76,7 +76,7 @@ var _ = Describe("Check", func() {
 
 	It("passes a clean dataset and reports on it", func() {
 		Expect(classify.Check(in, out)).To(Succeed())
-		Expect(out.String()).To(Equal(`Counts: 2 opened in the window (GitHub: 2), 1 open (GitHub: 1)
+		Expect(out.String()).To(Equal(`Counts: 2 opened in the window (GitHub's search: 2), 1 open (GitHub's listing: 1)
 Trailers with an unlisted key and no ignore entry: 0
 Counted disclosures that match no family: 0
 Neighboring candidates that match a phrase only when joined: 0
@@ -116,10 +116,59 @@ Base branches: 0
 			in.Meta = &record.Meta{WindowStart: windowStart, GitHubCounts: record.Counts{OpenedInWindow: 3, Open: 1}}
 
 			Expect(classify.Check(in, out)).To(Succeed())
-			Expect(out.String()).To(HavePrefix("Counts: 3 opened in the window (GitHub: 3), 1 open (GitHub: 1)\n"))
+			Expect(out.String()).To(HavePrefix("Counts: 3 opened in the window (GitHub's search: 3), 1 open (GitHub's listing: 1)\n"))
 		},
 		Entry("meta.json's window_start, as extract writes it", fetch.WindowStart),
 		Entry("a meta.json without window_start", time.Time{}),
+	)
+
+	DescribeTable("names the count of pull requests opened in the window it compared with",
+		func(source record.CountSource, line, problem string, warns bool) {
+			in.Meta = meta(1, 1)
+			in.Meta.GitHubCounts.OpenedInWindowSource = source
+
+			err := classify.Check(in, out)
+
+			Expect(out.String()).To(HavePrefix(line + "\n"))
+			Expect(err).To(MatchError(ContainSubstring(problem)))
+			const warning = "GitHub's search has been seen to omit pull requests that its listing returns"
+			if warns {
+				Expect(err).To(MatchError(ContainSubstring(problem + "; " + warning)))
+			} else {
+				Expect(err).NotTo(MatchError(ContainSubstring(warning)))
+			}
+		},
+		Entry("the search, warning that it can omit pull requests", record.SourceSearch,
+			"Counts: 2 opened in the window (GitHub's search: 1), 1 open (GitHub's listing: 1)",
+			"meta.json: the records hold 2 pull requests opened in the window, GitHub's search counted 1: more than 0.5% apart", true),
+		Entry("the search, for a meta.json that records no source", record.CountSource(""),
+			"Counts: 2 opened in the window (GitHub's search: 1), 1 open (GitHub's listing: 1)",
+			"meta.json: the records hold 2 pull requests opened in the window, GitHub's search counted 1: more than 0.5% apart", true),
+		Entry("the listing, with no warning", record.SourceListing,
+			"Counts: 2 opened in the window (GitHub's listing: 1), 1 open (GitHub's listing: 1)",
+			"meta.json: the records hold 2 pull requests opened in the window, GitHub's listing counted 1: more than 0.5% apart", false),
+	)
+
+	DescribeTable("allows the records and GitHub's count of pull requests opened in the window 0.5% apart, whichever count it is",
+		func(source record.CountSource, github int, passes bool) {
+			for i := range 197 {
+				in.Records = append(in.Records, pr(10+i))
+			}
+			in.Meta = meta(github, 198)
+			in.Meta.GitHubCounts.OpenedInWindowSource = source
+
+			err := classify.Check(in, out)
+
+			if passes {
+				Expect(err).NotTo(HaveOccurred())
+			} else {
+				Expect(err).To(MatchError(ContainSubstring("the records hold 199 pull requests opened in the window")))
+			}
+		},
+		Entry("the search, 0.5% apart", record.SourceSearch, 200, true),
+		Entry("the search, 1% apart", record.SourceSearch, 201, false),
+		Entry("the listing, 0.5% apart", record.SourceListing, 200, true),
+		Entry("the listing, 1% apart", record.SourceListing, 201, false),
 	)
 
 	It("hints at neighboring candidates that match a phrase only when joined, without failing", func() {
@@ -216,16 +265,16 @@ Description`))
 		}, `kinds.yaml: ticket type "Weird" in tickets.json (tickets 3, 5) has no tracker entry`),
 		Entry("more PRs opened in the window than GitHub counted", func() {
 			in.Meta = meta(1, 1)
-		}, `meta.json: the records hold 2 pull requests opened in the window, GitHub counted 1: more than 0.5% apart`),
+		}, `meta.json: the records hold 2 pull requests opened in the window, GitHub's search counted 1: more than 0.5% apart`),
 		Entry("fewer open PRs than GitHub counted", func() {
 			in.Meta = meta(2, 300)
-		}, `meta.json: the records hold 1 open pull requests, GitHub counted 300: more than 0.5% apart`),
+		}, `meta.json: the records hold 1 open pull requests, GitHub's listing counted 300: more than 0.5% apart`),
 		Entry("counts 1% apart", func() {
 			for i := range 196 {
 				in.Records = append(in.Records, pr(10+i))
 			}
 			in.Meta = meta(200, 197)
-		}, `the records hold 198 pull requests opened in the window, GitHub counted 200`),
+		}, `the records hold 198 pull requests opened in the window, GitHub's search counted 200`),
 	)
 
 	It("fails when tools.yaml has no unspecified family, which a disclosure naming no tool needs", func() {

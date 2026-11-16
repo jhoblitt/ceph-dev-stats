@@ -140,6 +140,7 @@ func Run(ctx context.Context, client *ghapi.Client, cfg Config) error {
 	}
 	w.log.InfoContext(ctx, "walk finished",
 		slog.Int("opened_in_window", meta.OpenedInWindow),
+		slog.String("opened_in_window_source", string(meta.OpenedInWindowSource)),
 		slog.Int("open", meta.Open))
 	return nil
 }
@@ -506,29 +507,63 @@ func staleReason(window time.Time) string {
 }
 
 // counts asks GitHub how many pull requests were opened in the window and
-// how many are open now.
+// how many are open now. A window that starts no later than the
+// repository's creation holds every pull request, so the listing's total
+// counts it exactly; a later one only the search can count, and GitHub's
+// search has been seen to omit pull requests its listing returns.
 func (w *walker) counts(ctx context.Context) (Meta, error) {
 	vars := map[string]any{
 		"owner": Owner, "name": Name,
 		"search": fmt.Sprintf("repo:%s/%s is:pr created:>=%s", Owner, Name, w.cfg.WindowStart.Format(time.DateOnly)),
 	}
+	type total struct {
+		TotalCount *int `json:"totalCount"`
+	}
+	// Pointers, so that a reply without a field is an error rather than a
+	// count of 0 or a repository created at the zero time.
 	var resp struct {
-		Search struct {
-			IssueCount int `json:"issueCount"`
+		Search *struct {
+			IssueCount *int `json:"issueCount"`
 		} `json:"search"`
-		Repository struct {
-			PullRequests struct {
-				TotalCount int `json:"totalCount"`
-			} `json:"pullRequests"`
+		Repository *struct {
+			CreatedAt *time.Time `json:"createdAt"`
+			Total     *total     `json:"total"`
+			Open      *total     `json:"open"`
 		} `json:"repository"`
 	}
 	if err := w.client.Do(ctx, ghapi.Counts, vars, &resp); err != nil {
 		return Meta{}, fmt.Errorf("counting pull requests: %w", err)
 	}
-	return Meta{
-		WindowStart:    w.cfg.WindowStart,
-		WalkStarted:    w.started,
-		OpenedInWindow: resp.Search.IssueCount,
-		Open:           resp.Repository.PullRequests.TotalCount,
-	}, nil
+	repo := resp.Repository
+	var missing string
+	switch {
+	case repo == nil || repo.CreatedAt == nil:
+		missing = "repository.createdAt"
+	case repo.Total == nil || repo.Total.TotalCount == nil:
+		missing = "repository.pullRequests.totalCount"
+	case repo.Open == nil || repo.Open.TotalCount == nil:
+		missing = "repository.pullRequests(states: OPEN).totalCount"
+	case resp.Search == nil || resp.Search.IssueCount == nil:
+		missing = "search.issueCount"
+	}
+	if missing != "" {
+		return Meta{}, fmt.Errorf("counting pull requests: reply without %s", missing)
+	}
+	m := Meta{
+		WindowStart:          w.cfg.WindowStart,
+		WalkStarted:          w.started,
+		OpenedInWindow:       *resp.Search.IssueCount,
+		OpenedInWindowSource: record.SourceSearch,
+		Open:                 *repo.Open.TotalCount,
+	}
+	if !w.cfg.WindowStart.After(*repo.CreatedAt) {
+		m.OpenedInWindow, m.OpenedInWindowSource = *repo.Total.TotalCount, record.SourceListing
+	}
+	w.log.InfoContext(ctx, "counted pull requests",
+		slog.Time("window_start", w.cfg.WindowStart),
+		slog.Time("repository_created", *repo.CreatedAt),
+		slog.Int("listing_total", *repo.Total.TotalCount),
+		slog.Int("search_count", *resp.Search.IssueCount),
+		slog.String("opened_in_window_source", string(m.OpenedInWindowSource)))
+	return m, nil
 }

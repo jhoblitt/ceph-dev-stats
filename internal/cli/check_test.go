@@ -81,7 +81,7 @@ var _ = Describe("check", func() {
 		writeData("Bug")
 
 		Expect(run("--report")).To(Succeed())
-		Expect(stdout.String()).To(ContainSubstring("Counts: 1 opened in the window (GitHub: 1), 1 open (GitHub: 1)\n"))
+		Expect(stdout.String()).To(ContainSubstring("Counts: 1 opened in the window (GitHub's search: 1), 1 open (GitHub's listing: 1)\n"))
 		Expect(stdout.String()).To(ContainSubstring("Base branches: 1\n      1  main\n"))
 	})
 
