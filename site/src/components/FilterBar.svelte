@@ -240,11 +240,20 @@
     background: var(--surface);
   }
 
+  /* Every control fits the bar's width on a narrow phone: a field may be no
+     wider than the bar, and what is in it shrinks or wraps. */
+  fieldset,
+  .field,
+  .people,
+  .person {
+    min-width: 0;
+    max-width: 100%;
+  }
+
   fieldset {
     margin: 0;
     padding: 0;
     border: 0;
-    min-width: 0;
   }
 
   legend,
@@ -285,6 +294,8 @@
 
   input[type='text'] {
     width: 13rem;
+    min-width: 0;
+    flex: 0 1 auto;
   }
 
   /* The bar aligns its fields at the bottom; the Reviewer's line under its
@@ -323,7 +334,7 @@
   }
 
   .hint {
-    max-width: 16rem;
+    max-width: min(16rem, 100%);
   }
 
   /* Out of the flow while empty, but still rendered, so the live region announces. */
@@ -363,7 +374,6 @@
     padding: var(--space-1) var(--space-3);
     color: var(--text);
     background: var(--page);
-    white-space: nowrap;
   }
 
   .segmented input:hover + span {
@@ -380,5 +390,11 @@
     outline: 2px solid var(--focus);
     outline-offset: -2px;
     box-shadow: inset 0 0 0 4px var(--page);
+  }
+
+  @media (width < 480px) {
+    .filter-bar {
+      padding: var(--space-3) var(--space-4);
+    }
   }
 </style>

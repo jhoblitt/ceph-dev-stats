@@ -11,6 +11,7 @@ import {
   timelineLayout,
   timelineLegend,
   type PlacedClosed,
+  whoText,
 } from './timeline';
 import { labelWidth } from './timeline-axis';
 import { DAY } from './filters';
@@ -289,10 +290,102 @@ describe('markName', () => {
     expect(push && markName(push)).toBe('Force-push, 3 Aug 2026 23:00 UTC, address not recorded');
   });
 
-  it('has room for who acted', () => {
+});
+
+// The fixture's people: 0 fixture-author-e, 1 fixture-author-f, 2
+// fixture-author-a, 3 fixture-author-i, 4 fixture-reviewer-k, 7
+// fixture-author-d, 10 fixture-author-j (a bot account).
+describe('who made each mark', () => {
+  const ACTORS: Record<string, number> = { comment_other: 1, review_approved: 2, review_changes: 3, review_commented: 4 };
+
+  function withActors(author: number, people = META.people) {
+    const events: Event[] = EVERY.map((e, i) => ({
+      pr: 0,
+      at: hour(i + 1),
+      kind: e.kind,
+      ...(e.sub === undefined ? {} : { sub: e.sub }),
+      ...(ACTORS[e.kind] === undefined ? {} : { actor: ACTORS[e.kind] }),
+    }));
+    const data = dataset(
+      [{ number: 70000, created: OPENED, first_commit: FIRST, last_commit: LAST, state: 1, closed: MERGED, reopened: 1, author }],
+      events,
+      { event_kinds: KINDS, people },
+    );
+    return prTimeline(data, 0, table(1, EVERY.map((e) => e.ref)));
+  }
+  const who = (tl: ReturnType<typeof withActors>, kind: string) => tl.marks.find((m) => m.kind === kind)?.who;
+  const name = (tl: ReturnType<typeof withActors>, kind: string) => markName(tl.marks.find((m) => m.kind === kind) as never);
+
+  it('names the person an event’s actor gives, for comments and reviews by others', () => {
+    const tl = withActors(7);
+    expect(who(tl, 'comment_other')).toEqual({
+      by: 'person',
+      handle: { login: 'fixture-author-f', text: 'fixture-author-f', url: 'https://github.com/fixture-author-f' },
+      author: false,
+      bot: false,
+    });
+    expect(name(tl, 'comment_other')).toBe('Comment by another person (fixture-author-f), 3 Aug 2026 10:00 UTC');
+    expect(name(tl, 'review_approved')).toBe('Review approving (fixture-author-a), 3 Aug 2026 15:00 UTC');
+    expect(name(tl, 'review_changes')).toBe('Review requesting changes (fixture-author-i), 3 Aug 2026 16:00 UTC');
+    expect(name(tl, 'review_commented')).toBe('Review commenting (fixture-reviewer-k), 3 Aug 2026 17:00 UTC');
+  });
+
+  it('names the author for the opening and for the author’s own comments, commands and review replies', () => {
+    const tl = withActors(7);
+    for (const kind of ['opened', 'comment_author', 'command_author', 'review_author']) {
+      expect(who(tl, kind), kind).toMatchObject({ by: 'person', author: true, handle: { login: 'fixture-author-d' } });
+    }
+    expect(name(tl, 'opened')).toBe('Opened (fixture-author-d, the author), 3 Aug 2026 09:00 UTC');
+    expect(name(tl, 'comment_author')).toBe('Comment by the author (fixture-author-d, the author), 3 Aug 2026 11:00 UTC');
+    expect(name(tl, 'command_author')).toBe(
+      `Bot command by the author: ${META.commands[0]?.name} (fixture-author-d, the author), 3 Aug 2026 12:00 UTC`,
+    );
+  });
+
+  it('says a bot account’s comment or review is a bot’s, naming no one', () => {
+    const tl = withActors(7);
+    expect(who(tl, 'bot_account')).toEqual({ by: 'bot' });
+    expect(who(tl, 'bot_review')).toEqual({ by: 'bot' });
+    expect(name(tl, 'bot_review')).toBe('Review by a bot, 3 Aug 2026 18:00 UTC');
+    expect(whoText({ by: 'bot' })).toBe('a bot');
+  });
+
+  it('names no one where the data does not say who: another person’s bot command, and the PR’s other points', () => {
+    const tl = withActors(7);
+    for (const kind of ['command_other', 'first_commit', 'last_commit', 'draft', 'ready', 'force_push', 'closed', 'reopened', 'merged']) {
+      expect(who(tl, kind), kind).toBeNull();
+    }
+    expect(name(tl, 'command_other')).toBe(`Bot command by another person: ${META.commands[1]?.name}, 3 Aug 2026 13:00 UTC`);
+  });
+
+  it('marks an author who is a bot account, and a deleted account by those words, with no link', () => {
+    expect(name(withActors(10), 'opened')).toBe('Opened (fixture-author-j, the author, a bot account), 3 Aug 2026 09:00 UTC');
+    const people = [...META.people, 'ghost'];
+    const tl = withActors(people.length - 1, people);
+    expect(who(tl, 'opened')).toMatchObject({ handle: { text: 'deleted account', url: null } });
+    expect(name(tl, 'opened')).toBe('Opened (deleted account, the author), 3 Aug 2026 09:00 UTC');
+  });
+
+  it('says another person’s comment is not the author’s when both are deleted accounts', () => {
+    // Every deleted account shares the one `ghost` index; another person's
+    // comment carries an actor, and so is never the author's.
+    const people = [...META.people, 'ghost'];
+    const ghost = people.length - 1;
+    const data = dataset(
+      [{ number: 70000, created: OPENED, author: ghost }],
+      [{ pr: 0, at: hour(1), kind: 'comment_other', actor: ghost }],
+      { event_kinds: KINDS, people },
+    );
+    const tl = prTimeline(data, 0, table(1, ['101']));
+    const comment = tl.marks.find((m) => m.kind === 'comment_other');
+    expect(comment?.who).toMatchObject({ by: 'person', author: false, handle: { text: 'deleted account' } });
+    expect(comment && markName(comment)).toBe('Comment by another person (deleted account), 3 Aug 2026 10:00 UTC');
+    expect(tl.marks.find((m) => m.kind === 'opened')?.who).toMatchObject({ author: true });
+  });
+
+  it('never names anyone on a mark when the actor is missing', () => {
     const { data, table: t } = everyKind();
-    const review = prTimeline(data, 0, t).marks.find((m) => m.kind === 'review_changes');
-    expect(review && markName({ ...review, who: 'octocat' })).toBe('Review requesting changes by octocat, 3 Aug 2026 16:00 UTC');
+    expect(prTimeline(data, 0, t).marks.find((m) => m.kind === 'review_changes')?.who).toBeNull();
   });
 });
 

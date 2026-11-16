@@ -2,7 +2,7 @@
   The selected PR in brief: a link to it on GitHub, its kind and what decided
   it, the tracker tickets it references, and for a backport the PR it
   backports. All but the link and the kind's name come from its year's table
-  file, which the table loads.
+  file, which its section loads.
 -->
 <script lang="ts">
   import type { Dataset } from '../lib/data';
@@ -24,7 +24,6 @@
   const number = $derived(data.prs.number[row] as number);
   const repo = $derived(data.meta.repo);
   const loaded = $derived(table?.status === 'loaded' ? table.table : null);
-  const title = $derived(loaded?.titles[index] ?? '');
   const tickets = $derived(loaded?.tickets[index] ?? []);
   const original = $derived(loaded?.backport_of[index] ?? 0);
   const originalInData = $derived(original > 0 && data.prs.number.includes(original));
@@ -36,7 +35,6 @@
 {/snippet}
 
 <div class="selected" role="group" aria-label="Selected PR #{number}">
-  <h3>Selected: #{number}{title ? ` ${title}` : ''}</h3>
   <p class="open">{@render external(prUrl(repo, number), 'Open on GitHub', `Open on GitHub, #${number}`)}</p>
   {#if table === undefined || table.status === 'loading'}
     <p class="muted" role="status">Loading its details…</p>
@@ -82,13 +80,6 @@
     border: 1px solid var(--border-strong);
     border-radius: var(--radius);
     background: var(--page);
-  }
-
-  h3 {
-    margin: 0 0 var(--space-2);
-    font-size: var(--text-base);
-    font-weight: 600;
-    overflow-wrap: anywhere;
   }
 
   p {

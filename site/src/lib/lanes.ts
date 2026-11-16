@@ -163,7 +163,14 @@ export function describeLanes(lanes: readonly Lane[], total: number, orderName: 
   );
 }
 
-/** The note over lanes that do not show the whole selection; null when they do. */
-export function shownNote(shown: number, total: number, orderName: string): string | null {
-  return shown >= total ? null : `Showing ${formatCount(shown)} of ${formatCount(total)} PRs, ${orderName}.`;
+/**
+ * The line over the lanes: which PRs they show, in `rowsName` (the PR
+ * table's own words for its rows), how many, and in what order. Shown
+ * whatever the count.
+ */
+export function lanesLine(shown: number, total: number, rowsName: string, orderName: string): string {
+  const prs = plural(total, 'PR');
+  const which = shown >= total ? prs : `The first ${formatCount(shown)} of ${prs}`;
+  return `${which} ${rowsName}, ${orderName}.`;
 }
+

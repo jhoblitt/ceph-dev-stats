@@ -96,8 +96,13 @@ describe('People', () => {
       'A comment is any such comment by a person that is not a bot command, such as a posted test result, so a row with comments and no reviews is someone who commented without reviewing.',
     );
     expect(text).toContain(
-      'First responses counts the pull requests whose first response was this person’s; a pull request never made ready for review has none, so it counts for no one.',
+      'First responses counts the pull requests whose first response was this person’s and came before the pull request was finally merged or closed; a pull request never made ready for review has none, so it counts for no one.',
     );
+    expect(text).toContain(
+      'The median is of the time from a pull request being ready for review to this person’s first comment or review on it, made before the pull request was finally merged or closed.',
+    );
+    expect(text).not.toContain('while it was open');
+    expect(text).not.toContain('while the pull request was open');
     // The author's own activity is said once, not again for review threads alone.
     expect(text).not.toContain('A reply in a review thread');
     expect(text).toContain(
@@ -168,10 +173,22 @@ describe('People', () => {
     render(App, props);
     expect(people('Authors')).not.toContain('fixture-author-j');
     expect(section().getByText(/1 bot account not shown/)).toBeTruthy();
-    await fireEvent.click(section().getByRole('checkbox', { name: 'Show bot accounts' }));
+    await fireEvent.click(section().getByRole('checkbox', { name: 'Show bot accounts among the authors' }));
     expect(loc.hash()).toBe('#/?target=all&bots=show');
     const bot = cells('Authors').find((r) => r[1]?.startsWith('fixture-author-j'));
     expect(bot?.[1]).toBe('fixture-author-j bot');
+  });
+
+  it('says the bot control is the Authors table’s, and why the Reviewers table lists no bot', async () => {
+    render(App, (await fixturePage('#/?target=all')).props);
+    const authors = section().getByRole('heading', { level: 3, name: 'Authors' }).closest('.part') as HTMLElement;
+    expect(within(authors).getByRole('checkbox', { name: 'Show bot accounts among the authors' })).toBeTruthy();
+    const reviewers = section().getByRole('heading', { level: 3, name: 'Reviewers' }).closest('.part') as HTMLElement;
+    expect(within(reviewers).queryByRole('checkbox')).toBeNull();
+    expect(within(reviewers).getByRole('status').textContent?.replace(/\s+/g, ' ').trim()).toBe(
+      '5 reviewers of the selected PRs in the period, none of them a bot: the data keeps no login for a bot’s comment or review.',
+    );
+    expect(within(reviewers).queryByText(/not shown/)).toBeNull();
   });
 
   it("sets the Reviewer filter from a row, and every section follows it", async () => {

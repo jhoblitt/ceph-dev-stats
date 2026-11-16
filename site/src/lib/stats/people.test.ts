@@ -192,6 +192,32 @@ describe('reviewerRows medians and edges', () => {
     expect(r?.response).toEqual({ state: 'known', days: 3, prs: 5 });
   });
 
+  it('credits a first response only when it came while the PR was open, though the data records one after', () => {
+    // The data's first response does not check the close; the page does.
+    const late = dataset(
+      [{ created: t, author: 0, state: 2, closed: t + DAY, first_response: t + 2 * DAY }],
+      [{ pr: 0, at: t + 2 * DAY, kind: 'review_commented', actor: 1 }],
+    );
+    expect(reviewerRows(late, all(late), whole)).toMatchObject([{ person: 1, commented: 1, firstResponses: 0 }]);
+    const inTime = dataset(
+      [{ created: t, author: 0, state: 2, closed: t + 3 * DAY, first_response: t + 2 * DAY }],
+      [{ pr: 0, at: t + 2 * DAY, kind: 'review_commented', actor: 1 }],
+    );
+    expect(reviewerRows(inTime, all(inTime), whole)).toMatchObject([{ person: 1, commented: 1, firstResponses: 1 }]);
+  });
+
+  it('credits a first response made while the PR was closed before a reopening: only the final close counts', () => {
+    const d = dataset(
+      [{ created: t, author: 0, state: 1, closed: t + 5 * DAY, reopened: 1, first_response: t + 2 * DAY }],
+      [
+        { pr: 0, at: t + DAY, kind: 'closed' },
+        { pr: 0, at: t + 2 * DAY, kind: 'comment_other', actor: 1 },
+        { pr: 0, at: t + 3 * DAY, kind: 'reopened' },
+      ],
+    );
+    expect(reviewerRows(d, all(d), whole)).toMatchObject([{ person: 1, comments: 1, firstResponses: 1, response: { prs: 1 } }]);
+  });
+
   it('counts a comment after the PR finished, but not as a response', () => {
     const d = dataset(
       [{ created: t, author: 0, state: 1, closed: t + DAY }],
@@ -238,33 +264,36 @@ describe('reviewerRows medians and edges', () => {
     expect(reviewerRows(d, Uint32Array.of(1), whole)).toMatchObject([{ person: 1, prs: 1, changes: 0, commented: 1 }]);
   });
 
-  it('counts nothing a person does on a PR they opened, even an event that names them', () => {
-    // The rollup writes the author's own comments and review replies without
-    // an actor; this pins that the table skips them even if one carried it.
+  it('counts no event of the author’s own, which the data gives no actor', () => {
     const d = dataset(
+      [{ created: t, author: 1, first_response: -1 }],
       [
-        { created: t, author: 1, first_response: t + 1 },
-        { created: t, author: 2 },
+        { pr: 0, at: t + 1, kind: 'comment_author' },
+        { pr: 0, at: t + 2, kind: 'review_author' },
+        { pr: 0, at: t + 3, kind: 'command_author', sub: 0 },
       ],
-      [
-        { pr: 0, at: t + 1, kind: 'comment_other', actor: 1 },
-        { pr: 0, at: t + 2, kind: 'review_approved', actor: 1 },
-        { pr: 0, at: t + 3, kind: 'comment_author' },
-        { pr: 1, at: t + 1, kind: 'comment_other', actor: 1 },
-      ],
+      { event_kinds: [...META.event_kinds, 'review_author'] },
     );
-    expect(reviewerRows(d, all(d), whole)).toEqual([
-      {
-        person: 1,
-        prs: 1,
-        approved: 0,
-        changes: 0,
-        commented: 0,
-        comments: 1,
-        firstResponses: 0,
-        response: { state: 'tooFew', prs: 1 },
-      },
-    ]);
+    expect(reviewerRows(d, all(d), whole)).toEqual([]);
+  });
+
+  it('counts a deleted account’s comment on a PR another deleted account opened, and credits its first response', () => {
+    // Every deleted account shares the one `ghost` index. An event that names
+    // an actor is by the data's rule never the author's, so the shared index
+    // must not make it look like one.
+    const people = [...META.people, 'ghost'];
+    const ghost = people.length - 1;
+    const d = dataset(
+      [{ created: t, author: ghost, first_response: t + DAY }],
+      [
+        { pr: 0, at: t + DAY, kind: 'comment_other', actor: ghost },
+        { pr: 0, at: t + 2 * DAY, kind: 'review_approved', actor: 1 },
+      ],
+      { people },
+    );
+    const rows = reviewerRows(d, all(d), whole);
+    expect(rows.find((r) => r.person === ghost)).toMatchObject({ prs: 1, comments: 1, firstResponses: 1 });
+    expect(rows.find((r) => r.person === 1)).toMatchObject({ prs: 1, approved: 1, firstResponses: 0 });
   });
 
   it('gives no one a first response on a PR never made ready', () => {

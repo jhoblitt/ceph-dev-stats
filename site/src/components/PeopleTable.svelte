@@ -96,9 +96,7 @@
             <Person
               {handle}
               bot={isBot(meta, r.person)}
-              {role}
-              active={active === handle.login}
-              ontoggle={() => ontoggle(handle.login)}
+              filter={{ role, active: active === handle.login, ontoggle: () => ontoggle(handle.login) }}
             />
           </th>
           {#each columns.slice(1) as c (c.id)}

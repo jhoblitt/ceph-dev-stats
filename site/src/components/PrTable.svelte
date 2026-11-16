@@ -5,12 +5,10 @@
   come from each year's table file, fetched the first time the table is on
   screen, and only for the years its rows need. A row's title chooses that
   PR; its number links to it on GitHub, and its author's handle to theirs,
-  beside a control that filters by that author. The chosen PR's summary sits
-  above the table.
+  beside a control that filters by that author. The chosen PR's summary and
+  timeline are a section of their own, above this one.
 -->
 <script lang="ts">
-  import { SvelteMap } from 'svelte/reactivity';
-  import { DataError, locateRow } from '../lib/data';
   import { keepEqual } from '../lib/memo';
   import { isBot, personHandle } from '../lib/handles';
   import { getPage } from '../lib/page';
@@ -19,19 +17,19 @@
   import { type Sort, type SortColumn, nextSort, sameSort } from '../lib/sort';
   import {
     TABLE_COLUMNS,
-    type TableLoad,
     cellText,
     countText,
     narrowRows,
     narrowing,
     prUrl,
     rowText,
-    sortRows,
+    sortWords,
+    tableOrder,
     windowRows,
     yearsOfRows,
   } from '../lib/table';
+  import { tableLoads } from '../lib/tables';
   import Person from './Person.svelte';
-  import SelectedPr from './SelectedPr.svelte';
   import { onScreen } from './onscreen';
 
   const { selection, data, view, loader } = getPage();
@@ -54,33 +52,18 @@
   // The table is "shown" once any of it has been on screen.
   let shown = $state(false);
 
-  const tables = new SvelteMap<number, TableLoad>();
-  function request(year: number) {
-    if (tables.has(year)) return;
-    tables.set(year, { status: 'loading' });
-    loader.table(year).then(
-      (table) => tables.set(year, { status: 'loaded', table }),
-      (err: unknown) =>
-        tables.set(year, { status: 'error', message: err instanceof DataError ? `${err.file}: ${err.detail}` : String(err) }),
-    );
-  }
-
-  const chosenRow = $derived.by(() => {
-    const pr = $selection.pr;
-    if (pr === null) return -1;
-    return dataset.prs.number.indexOf(pr);
-  });
-  const chosen = $derived(chosenRow < 0 ? null : { row: chosenRow, ...locateRow(dataset, chosenRow) });
+  const loads = tableLoads(loader);
+  const tables = loads.map;
+  const request = (year: number) => loads.request(year);
 
   const needed = $derived(shown ? yearsOfRows(dataset, rows) : []);
   $effect(() => {
     for (const y of needed) request(y);
-    // A link naming a PR must not fetch a year's titles before the table is on screen.
-    if (chosen && shown) request(chosen.year);
   });
 
   const text = $derived(rowText(dataset, tables));
-  const ordered = $derived(sortRows(dataset, rows, sort, text));
+  // The lanes list the same rows in this order (Report.svelte).
+  const ordered = $derived(tableOrder(dataset, selected, { filters, week, band }, sort, text));
 
   const ROW = 40;
   let scrollTop = $state(0);
@@ -112,17 +95,12 @@
 
   const ariaSort = (column: SortColumn) =>
     sort.column !== column ? 'none' : sort.descending ? 'descending' : 'ascending';
-  const sortedBy = $derived(
-    `${TABLE_COLUMNS.find((c) => c.id === sort.column)?.label.toLowerCase()}, ${sort.descending ? 'descending' : 'ascending'}`,
-  );
+  // A browser test waits on this: a table still loading titles may be about to reorder or relabel its rows.
+  const busy = $derived(needed.some((y) => tables.get(y)?.status === 'loading'));
 </script>
 
 <section id="table" aria-labelledby="table-heading" class:stale={$data.loading} {@attach onScreen(() => (shown = true))}>
   <h2 id="table-heading">Pull requests</h2>
-
-  {#if chosen}
-    <SelectedPr data={dataset} row={chosen.row} index={chosen.index} table={tables.get(chosen.year)} onchoose={choose} />
-  {/if}
 
   {#if empty}
     <p class="muted">no PRs match</p>
@@ -156,8 +134,8 @@
         {@attach measureHeight}
         onscroll={(e) => (scrollTop = e.currentTarget.scrollTop)}
       >
-        <table aria-rowcount={ordered.length + 1}>
-          <caption class="visually-hidden">Pull requests, sorted by {sortedBy}</caption>
+        <table aria-rowcount={ordered.length + 1} aria-busy={busy ? 'true' : 'false'}>
+          <caption class="visually-hidden">Pull requests, sorted {sortWords(sort)}</caption>
           <thead>
             <tr aria-rowindex={1}>
               {#each TABLE_COLUMNS as c (c.id)}
@@ -200,9 +178,7 @@
                       <Person
                         {handle}
                         bot={isBot(dataset.meta, person)}
-                        role="author"
-                        active={filters.author === handle.login}
-                        ontoggle={() => byAuthor(handle.login)}
+                        filter={{ role: 'author', active: filters.author === handle.login, ontoggle: () => byAuthor(handle.login) }}
                       />
                     </td>
                   {:else}

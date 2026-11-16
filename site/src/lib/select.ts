@@ -60,18 +60,18 @@ export function select(data: Dataset, filters: Filters): Uint32Array {
 /**
  * A flag per row, set for the PRs on which `person`, an index into meta's
  * `people`, commented or reviewed between `start` and `end` without being
- * their author.
+ * their author: the events that name an actor, which the author's own never
+ * do. Every deleted account shares one index, so the author's is not
+ * compared.
  */
 function reviewedBy(data: Dataset, person: number, start: number, end: number): Uint8Array {
   const ev = data.events;
-  const p = data.prs;
   const responses = kindTable(data, { comment_other: 1, ...Object.fromEntries(HUMAN_REVIEWS.map((k) => [k, 1])) });
   const mask = new Uint8Array(data.size);
   for (let e = 0; e < ev.pr.length; e++) {
     if (ev.actor[e] !== person || responses[ev.kind[e] as number] !== 1) continue;
     const t = ev.at[e] as number;
-    const r = ev.pr[e] as number;
-    if (t >= start && t < end && p.author[r] !== person) mask[r] = 1;
+    if (t >= start && t < end) mask[ev.pr[e] as number] = 1;
   }
   return mask;
 }

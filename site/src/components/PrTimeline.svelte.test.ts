@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/svelte';
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/svelte';
 import { get } from 'svelte/store';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import App from '../App.svelte';
 import { BASE, fixtureFetch } from '../lib/__fixtures__/fetch';
 import rawEvents2026 from '../lib/__fixtures__/data/events-2026.json';
@@ -29,18 +29,22 @@ const OPENED = at('2026-08-03T09:00:00Z');
 const hour = (h: number) => OPENED + h * 3600;
 const KINDS = [...rawMeta.event_kinds, 'review_author'];
 
-/** Every event kind on one PR, an hour apart, with the ref each address is built from. */
-const EVERY: { kind: string; ref: string; sub?: number; name: string; href: string | null }[] = [
-  { kind: 'comment_other', ref: '101', name: 'Comment by another person', href: `${PR}#issuecomment-101` },
-  { kind: 'comment_author', ref: '102', name: 'Comment by the author', href: `${PR}#issuecomment-102` },
-  { kind: 'command_author', ref: '103', sub: 0, name: 'Bot command by the author: jenkins test', href: `${PR}#issuecomment-103` },
+// #67300's author is the fixture's person 0, fixture-author-e; the comment
+// and reviews by others name persons 1 to 4.
+const AUTHOR = 'fixture-author-e, the author';
+
+/** Every event kind on one PR, an hour apart, with the ref each address is built from and who made it. */
+const EVERY: { kind: string; ref: string; sub?: number; actor?: number; name: string; href: string | null }[] = [
+  { kind: 'comment_other', ref: '101', actor: 1, name: 'Comment by another person (fixture-author-f)', href: `${PR}#issuecomment-101` },
+  { kind: 'comment_author', ref: '102', name: `Comment by the author (${AUTHOR})`, href: `${PR}#issuecomment-102` },
+  { kind: 'command_author', ref: '103', sub: 0, name: `Bot command by the author: jenkins test (${AUTHOR})`, href: `${PR}#issuecomment-103` },
   { kind: 'command_other', ref: '104', sub: 1, name: 'Bot command by another person: /config check ok', href: `${PR}#issuecomment-104` },
   { kind: 'bot_account', ref: '105', name: 'Comment by a bot account', href: `${PR}#issuecomment-105` },
-  { kind: 'review_approved', ref: '201', name: 'Review approving', href: `${PR}#pullrequestreview-201` },
-  { kind: 'review_changes', ref: '202', name: 'Review requesting changes', href: `${PR}#pullrequestreview-202` },
-  { kind: 'review_commented', ref: '203', name: 'Review commenting', href: `${PR}#pullrequestreview-203` },
+  { kind: 'review_approved', ref: '201', actor: 2, name: 'Review approving (fixture-author-a)', href: `${PR}#pullrequestreview-201` },
+  { kind: 'review_changes', ref: '202', actor: 3, name: 'Review requesting changes (fixture-author-i)', href: `${PR}#pullrequestreview-202` },
+  { kind: 'review_commented', ref: '203', actor: 4, name: 'Review commenting (fixture-reviewer-k)', href: `${PR}#pullrequestreview-203` },
   { kind: 'bot_review', ref: '204', name: 'Review by a bot', href: `${PR}#pullrequestreview-204` },
-  { kind: 'review_author', ref: '205', name: 'Reply by the author in a review thread', href: `${PR}#pullrequestreview-205` },
+  { kind: 'review_author', ref: '205', name: `Reply by the author in a review thread (${AUTHOR})`, href: `${PR}#pullrequestreview-205` },
   { kind: 'draft', ref: '301', name: 'Converted to draft', href: `${PR}#event-301` },
   { kind: 'ready', ref: '302', name: 'Marked ready for review', href: `${PR}#event-302` },
   { kind: 'force_push', ref: SHA('a'), name: 'Force-push', href: `https://github.com/ceph/ceph/commit/${SHA('a')}` },
@@ -87,7 +91,7 @@ function withEveryKind(): Record<string, unknown> {
     at: EVERY.map((_, i) => hour(i + 1)),
     kind: EVERY.map((e) => KINDS.indexOf(e.kind)),
     sub: EVERY.map((e) => e.sub ?? -1),
-    actor: EVERY.map(() => -1),
+    actor: EVERY.map((e) => e.actor ?? -1),
   });
   const table = append(rawTable2026, {
     titles: ['mgr: a PR with every event'],
@@ -109,7 +113,7 @@ function withEveryKind(): Record<string, unknown> {
 async function timeline(hash: string, files: Record<string, unknown> = {}) {
   const { props } = await fixturePage(hash, files);
   render(App, { props });
-  return screen.findByRole('region', { name: /^Timeline of #/ });
+  return screen.findByRole('region', { name: /^Pull request #/ });
 }
 
 describe('PrTimeline', () => {
@@ -120,7 +124,7 @@ describe('PrTimeline', () => {
     const named = marks.map((m) => m.getAttribute('aria-label') ?? '');
     const expected = [
       'First commit',
-      'Opened',
+      `Opened (${AUTHOR})`,
       ...EVERY.slice(0, 12).map((e) => e.name),
       'Last commit',
       ...EVERY.slice(12).map((e) => e.name),
@@ -129,13 +133,77 @@ describe('PrTimeline', () => {
 
     const events = marks.filter((m) => !/^(First commit|Opened|Last commit)/.test(m.getAttribute('aria-label') ?? ''));
     expect(events.map((m) => m.getAttribute('href'))).toEqual(EVERY.map((e) => e.href));
-    expect(named[2]).toBe('Comment by another person, 3 Aug 2026 10:00 UTC');
+    expect(named[2]).toBe('Comment by another person (fixture-author-f), 3 Aug 2026 10:00 UTC');
     expect(named[named.length - 4]).toBe('Force-push, 3 Aug 2026 23:00 UTC, address not recorded');
     for (const m of marks.filter((m) => m.hasAttribute('href'))) {
       expect(m.getAttribute('target')).toBe('_blank');
       expect(m.getAttribute('rel')).toBe('noopener noreferrer');
     }
     expect(within(section).getByText('Closed and reopened 1 time: for 1 hour.')).toBeTruthy();
+  });
+
+  it('says who made each mark in the events table, each person linked to GitHub, the author and bots said so', async () => {
+    const section = await timeline('#/?target=all&pr=67300', withEveryKind());
+    const table = await within(section).findByRole('table');
+    const heads = within(table)
+      .getAllByRole('columnheader')
+      .map((h) => h.textContent);
+    expect(heads).toEqual(['When (UTC)', 'What', 'Who', 'On GitHub']);
+    const who = (what: string) => {
+      const row = within(table).getByRole('rowheader', { name: what }).closest('tr') as HTMLElement;
+      return row.querySelector('td.who') as HTMLElement;
+    };
+    const other = who('Review approving');
+    expect(other.textContent?.replace(/\s+/g, ' ').trim()).toBe('fixture-author-a');
+    expect(within(other).getByRole('link', { name: 'fixture-author-a on GitHub, opens in a new tab' }).getAttribute('href')).toBe(
+      'https://github.com/fixture-author-a',
+    );
+    // The handle is an inline box: the space inside it before the comma is not drawn.
+    expect(who('Comment by the author').textContent?.replace(/\s+/g, ' ').replace(' ,', ',').trim()).toBe(
+      'fixture-author-e, the author',
+    );
+    expect(who('Comment by a bot account').textContent?.trim()).toBe('a bot');
+    expect(who('Bot command by another person: /config check ok').textContent?.trim()).toBe('');
+    expect(within(table).queryAllByRole('button', { name: /^Filter by/ })).toHaveLength(0);
+  });
+
+  it('does not take another person’s comment for the author’s when both are deleted accounts', async () => {
+    const files = withEveryKind();
+    const ghost = rawMeta.people.length;
+    const prs = files['prs-2026.json'] as Columns;
+    const events = files['events-2026.json'] as Columns;
+    const comment = EVERY.findIndex((e) => e.kind === 'comment_other');
+    const first = (events['pr'] as number[]).length - EVERY.length;
+    const author = (prs['author'] as number[]).map((a, i, all) => (i === all.length - 1 ? ghost : a));
+    const actor = (events['actor'] as number[]).map((a, i) => (i === first + comment ? ghost : a));
+    const section = await timeline('#/?target=all&pr=67300', {
+      ...files,
+      'meta.json': { ...(files['meta.json'] as object), people: [...rawMeta.people, 'ghost'] },
+      'prs-2026.json': { ...prs, author },
+      'events-2026.json': { ...events, actor },
+    });
+    const group = await within(section).findByRole('group', { name: 'The marks on the line, in time order' });
+    expect(within(group).getByRole('link', { name: /^Comment by another person/ }).getAttribute('aria-label')).toBe(
+      'Comment by another person (deleted account), 3 Aug 2026 10:00 UTC',
+    );
+    const row = within(await within(section).findByRole('table')).getByRole('rowheader', { name: 'Comment by another person' });
+    expect(row.closest('tr')?.querySelector('td.who')?.textContent?.trim()).toBe('deleted account');
+    expect(within(group).getByRole('link', { name: /^Opened/ }).getAttribute('aria-label')).toMatch(/^Opened \(deleted account, the author\)/);
+  });
+
+  it('says who made a mark when it is hovered or focused', async () => {
+    const section = await timeline('#/?target=all&pr=67300', withEveryKind());
+    const group = await within(section).findByRole('group', { name: 'The marks on the line, in time order' });
+    const mark = within(group).getByRole('link', { name: /^Review commenting \(fixture-reviewer-k\)/ });
+    await fireEvent.focus(mark);
+    expect(section.querySelector('.tip-who')?.textContent).toBe('by fixture-reviewer-k');
+    await fireEvent.blur(mark);
+    const own = within(group).getByRole('link', { name: /^Comment by the author/ });
+    await fireEvent.pointerEnter(own);
+    expect(section.querySelector('.tip-who')?.textContent).toBe(`by ${AUTHOR}`);
+    await fireEvent.pointerLeave(own);
+    await fireEvent.pointerEnter(within(group).getByRole('link', { name: /^Review by a bot/ }));
+    expect(section.querySelector('.tip-who')?.textContent).toBe('by a bot');
   });
 
   it('takes the marks as one stop for the keyboard, the arrow keys moving along them in time order', async () => {
@@ -162,7 +230,7 @@ describe('PrTimeline', () => {
   it('names each link of the events table for what it opens', async () => {
     const section = await timeline('#/?target=all&pr=67300', withEveryKind());
     const table = await within(section).findByRole('table');
-    expect(within(table).getByRole('link', { name: 'Review approving, 3 Aug 2026 15:00 UTC, on GitHub' }).getAttribute('href')).toBe(
+    expect(within(table).getByRole('link', { name: 'Review approving (fixture-author-a), 3 Aug 2026 15:00 UTC, on GitHub' }).getAttribute('href')).toBe(
       `${PR}#pullrequestreview-201`,
     );
     expect(within(table).queryAllByRole('link', { name: 'open' })).toHaveLength(0);
@@ -172,14 +240,14 @@ describe('PrTimeline', () => {
   it('starts a new PR’s timeline afresh, not carrying over the last one’s focused mark', async () => {
     const { props } = await fixturePage('#/?target=all&pr=66600');
     render(App, { props });
-    const first = await screen.findByRole('region', { name: 'Timeline of #66600' });
+    const first = await screen.findByRole('region', { name: 'Pull request #66600' });
     const marks = within(await within(first).findByRole('group', { name: /^The marks/ })).getAllByRole('link');
     (marks[0] as HTMLElement).focus();
     await fireEvent.keyDown(marks[0] as HTMLElement, { key: 'End' });
     expect(marks.at(-1)?.tabIndex).toBe(0);
     // #66100 is in the same year's table, so only the key starts its chart afresh.
     props.page.selection.update((st) => ({ ...st, pr: 66100 }));
-    const next = await screen.findByRole('region', { name: 'Timeline of #66100' });
+    const next = await screen.findByRole('region', { name: 'Pull request #66100' });
     const nextMarks = within(await within(next).findByRole('group', { name: /^The marks/ })).getAllByRole('link');
     expect(nextMarks.map((m) => m.tabIndex).indexOf(0)).toBe(0);
   });
@@ -247,7 +315,7 @@ describe('before the timeline is on screen', () => {
     const years = yearsForState(meta, get(selection));
     const data = createDataStore(loader, selection, years, await loader.load(years));
     render(App, { props: { page: { meta, selection, data, view: createViewStore(selection, data), loader } } });
-    const section = await screen.findByRole('region', { name: 'Timeline of #67000' });
+    const section = await screen.findByRole('region', { name: 'Pull request #67000' });
     await new Promise((r) => setTimeout(r, 20));
     const tables = () => fetched.requested.filter((u) => u.includes('table-'));
     expect(tables()).toEqual([]);
@@ -256,5 +324,81 @@ describe('before the timeline is on screen', () => {
     for (const o of observed) if (o.node === section) o.cb([{ isIntersecting: true }]);
     await waitFor(() => expect(tables()).toEqual([`${BASE}table-2026.json`]));
     expect(await within(section).findByRole('group', { name: 'The marks on the line, in time order' })).toBeTruthy();
+  });
+});
+
+// The chosen PR's section: what it is, then its timeline, between the lanes
+// and the PR table, and the reader brought to it when a PR is chosen.
+describe('the chosen PR’s section', () => {
+  const scrolled: Element[] = [];
+  const real = Element.prototype.scrollIntoView;
+  beforeAll(() => {
+    Element.prototype.scrollIntoView = vi.fn(function (this: Element) {
+      scrolled.push(this);
+    });
+  });
+  afterEach(() => {
+    scrolled.length = 0;
+  });
+  afterAll(() => {
+    Element.prototype.scrollIntoView = real;
+  });
+
+  it('sits between the lanes and the PR table, its panel before its timeline', async () => {
+    const section = await timeline('#/?target=all&pr=66600');
+    const heads = screen.getAllByRole('heading', { level: 2 }).map((h) => h.textContent?.trim());
+    const at = heads.indexOf('Pull request #66600');
+    expect(heads.slice(at - 1, at + 2)).toEqual(['Timelines', 'Pull request #66600', 'Pull requests']);
+    const panel = within(section).getByRole('group', { name: 'Selected PR #66600' });
+    const chart = await within(section).findByRole('figure', { name: 'The life of #66600' });
+    expect(panel.compareDocumentPosition(chart) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it('leaves the reader where the page starts for a PR the address names on arrival', async () => {
+    await timeline('#/?target=all&pr=66600');
+    await new Promise((r) => setTimeout(r, 20));
+    expect(scrolled).toEqual([]);
+    expect(document.activeElement?.id).not.toBe('pr-heading');
+  });
+
+  it('brings the reader to it, its heading focused, when a PR is chosen from a table row', async () => {
+    const { props } = await fixturePage('#/?target=all');
+    render(App, { props });
+    const table = within(screen.getByRole('region', { name: 'Pull requests' }));
+    await fireEvent.click(await table.findByRole('button', { name: 'doc: fix a typo' }));
+    const section = await screen.findByRole('region', { name: 'Pull request #66510' });
+    await waitFor(() => expect(scrolled).toEqual([section]));
+    expect(document.activeElement).toBe(within(section).getByRole('heading', { level: 2 }));
+  });
+
+  it('brings the reader to it from a lane, and to the next PR chosen from the panel', async () => {
+    const { props } = await fixturePage('#/?target=all');
+    render(App, { props });
+    const lanes = within(screen.getByRole('region', { name: 'Timelines' }));
+    await fireEvent.click(within(lanes.getByRole('list', { name: /PRs in the lanes/ })).getByRole('link', { name: '#66800' }));
+    const section = await screen.findByRole('region', { name: 'Pull request #66800' });
+    await waitFor(() => expect(scrolled).toEqual([section]));
+    expect(document.activeElement?.id).toBe('pr-heading');
+    // #66800 backports #66500: showing that one brings the reader to the section's top again.
+    await fireEvent.click(await within(section).findByRole('button', { name: 'Show #66500 here' }));
+    await screen.findByRole('region', { name: 'Pull request #66500' });
+    await waitFor(() => expect(scrolled).toHaveLength(2));
+  });
+
+  it('says in one line when the filters leave the chosen PR out of the selection', async () => {
+    const line = /^This pull request is not in the current selection/;
+    // #66800 is a backport, to squid: outside the default target, main.
+    let section = await timeline('#/?target=main&pr=66800');
+    expect(within(section).getByText(line)).toBeTruthy();
+    cleanup();
+    section = await timeline('#/?target=all&pr=66800');
+    expect(within(section).queryByText(line)).toBeNull();
+    cleanup();
+    // #66600 is fixture-author-f's, not fixture-author-d's.
+    section = await timeline('#/?target=all&author=fixture-author-d&pr=66600');
+    expect(within(section).getByText(line).textContent?.replace(/\s+/g, ' ').trim()).toBe(
+      'This pull request is not in the current selection: the filters leave it out, so no chart, lane or table on this page counts it.',
+    );
+    expect(await within(section).findByRole('figure', { name: 'The life of #66600' })).toBeTruthy();
   });
 });

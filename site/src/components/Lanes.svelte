@@ -6,7 +6,6 @@
   under it. Hovering a lane names its PR; choosing one opens its timeline.
 -->
 <script lang="ts">
-  import { tick } from 'svelte';
   import { TIMELINE_COLOURS as C } from '../lib/colours';
   import { periodRange } from '../lib/filters';
   import { formatCount } from '../lib/format';
@@ -19,7 +18,7 @@
     laneModel,
     lanePitch,
     laneScale,
-    shownNote,
+    lanesLine,
   } from '../lib/lanes';
   import { getPage } from '../lib/page';
   import { hashFromState } from '../lib/state';
@@ -35,9 +34,11 @@
     order?: ArrayLike<number> | undefined;
     /** How `order` is ordered, in words: "newest opened first". */
     orderName?: string;
+    /** Which PRs `order` holds, in words: "opened in the week of 2026-05-18". */
+    rowsName?: string;
   }
 
-  let { order, orderName = 'newest opened first' }: Props = $props();
+  let { order, orderName = 'newest opened first', rowsName = 'open at some point in the period' }: Props = $props();
   const { selection, view, meta } = getPage();
 
   const dataset = $derived($view.dataset);
@@ -189,10 +190,9 @@
     pointerX = e.offsetX;
   }
 
-  async function choose(number: number) {
+  // The chosen PR's section brings the reader to itself.
+  function choose(number: number) {
     selection.update((s) => ({ ...s, pr: number }));
-    await tick();
-    document.getElementById('pr')?.scrollIntoView?.({ behavior: 'smooth', block: 'start' });
   }
 
   // From the click's own place, so a tap on a touch screen, which moves no
@@ -200,13 +200,13 @@
   function onclick(e: MouseEvent) {
     const i = laneAt(e.offsetY - TOP, pitch, lanes.length);
     const lane = i === null ? undefined : lanes[i];
-    if (lane) void choose(lane.number);
+    if (lane) choose(lane.number);
   }
 
   const ENDED = { merged: 'merged', closed: 'closed unmerged', open: 'still open' } as const;
   const hrefFor = (number: number) => hashFromState({ ...$selection, pr: number }, meta);
   const summary = $derived(describeLanes(lanes, model.total, orderName));
-  const note = $derived(shownNote(lanes.length, model.total, orderName));
+  const note = $derived(lanesLine(lanes.length, model.total, rowsName, orderName));
 </script>
 
 <section id="timelines" aria-labelledby="timelines-heading">
@@ -214,7 +214,7 @@
 
   <ChartFrame
     title="Each PR’s timeline, one per row"
-    note={note ?? undefined}
+    {note}
     {summary}
     {empty}
   >
@@ -297,7 +297,7 @@
               aria-current={lane.number === $selection.pr ? 'true' : undefined}
               onclick={(e) => {
                 e.preventDefault();
-                void choose(lane.number);
+                choose(lane.number);
               }}>#{lane.number}</a
             >
           </li>

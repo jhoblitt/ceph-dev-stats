@@ -1,7 +1,7 @@
 <!--
   A person in a table cell: their GitHub handle, a link to their page there
-  when the login has the form of one, a mark when the account is a bot, and
-  a control that sets or clears the filter by them.
+  when the login has the form of one, a mark when the account is a bot, and,
+  where a filter by them applies, a control that sets or clears it.
 -->
 <script lang="ts">
   import type { Handle } from '../lib/handles';
@@ -9,14 +9,11 @@
   interface Props {
     handle: Handle;
     bot: boolean;
-    /** What the control filters by, e.g. "author"; it reads "Filter by <login> as author". */
-    role: string;
-    /** Whether the filter is set to this person now. */
-    active: boolean;
-    ontoggle: () => void;
+    /** The filter by this person, if any; its control reads "Filter by <login> as <role>". */
+    filter?: { role: string; active: boolean; ontoggle: () => void };
   }
 
-  let { handle, bot, role, active, ontoggle }: Props = $props();
+  let { handle, bot, filter }: Props = $props();
 </script>
 
 <span class="person">
@@ -30,9 +27,17 @@
   {#if bot}
     <span class="bot">bot</span>
   {/if}
-  <button type="button" class="filter" aria-pressed={active} title="Filter by {handle.text} as {role}" onclick={ontoggle}
-    ><span class="visually-hidden">Filter by {handle.text} as {role}</span><span aria-hidden="true">filter</span></button
-  >
+  {#if filter}
+    <button
+      type="button"
+      class="filter"
+      aria-pressed={filter.active}
+      title="Filter by {handle.text} as {filter.role}"
+      onclick={filter.ontoggle}
+      ><span class="visually-hidden">Filter by {handle.text} as {filter.role}</span><span aria-hidden="true">filter</span
+      ></button
+    >
+  {/if}
 </span>
 
 <style>

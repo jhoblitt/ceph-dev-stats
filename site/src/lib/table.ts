@@ -161,6 +161,24 @@ export function narrowRows(data: Dataset, rows: Uint32Array, state: TableScope):
   return rows;
 }
 
+/**
+ * The PR table's rows in the order it shows them: a selection narrowed as
+ * `narrowRows` narrows it, sorted by `sort`. Titles are read only when the
+ * sort is by title, so titles arriving reorder nothing else.
+ */
+export function tableOrder(data: Dataset, rows: Uint32Array, scope: TableScope, sort: Sort, text: RowText = NO_TEXT): Uint32Array {
+  return sortRows(data, narrowRows(data, rows, scope), sort, sort.column === 'title' ? text : NO_TEXT);
+}
+
+/** The PR table's order in words, its column's label as written: "by Opened, descending". */
+export function sortWords(sort: Sort): string {
+  const label = TABLE_COLUMNS.find((c) => c.id === sort.column)?.label ?? sort.column;
+  return `by ${label}, ${sort.descending ? 'descending' : 'ascending'}`;
+}
+
+/** The PR table's rows, in words, when no week or band narrows them. */
+export const ALL_TABLE_ROWS = 'open at some point in the period';
+
 /** What a chosen week or band narrows the table to, in words; null when nothing does. */
 export function narrowing(data: Dataset, state: TableScope): string | null {
   if (state.week === null && state.band === null) return null;
@@ -179,7 +197,7 @@ export function narrowing(data: Dataset, state: TableScope): string | null {
 export function countText(rows: number, opened: number, narrowed: string | null): string {
   const prs = `${rows === 0 ? 'no' : formatCount(rows)} PR${rows === 1 ? '' : 's'}`;
   if (narrowed !== null) return `${prs} ${narrowed}`;
-  return `${prs} open at some point in the period, ${formatCount(opened)} of them opened in it`;
+  return `${prs} ${ALL_TABLE_ROWS}, ${formatCount(opened)} of them opened in it`;
 }
 
 /** A row's cell as the table writes it; the number is drawn as a link by the table. */

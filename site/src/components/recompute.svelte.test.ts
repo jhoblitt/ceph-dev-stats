@@ -90,6 +90,9 @@ beforeEach(() => {
   timelines.prTimeline = 0;
 });
 
+/** The counts of the selection's statistics, without the lanes'. */
+const statistics = (c: typeof calls) => ({ weekly: c.weekly, backlog: c.backlog, outcomeCurve: c.outcomeCurve, select: c.select });
+
 async function rendered(hash = '') {
   const { props } = await fixturePage(hash);
   render(App, props);
@@ -117,7 +120,7 @@ describe("Velocity's and Review's statistics", () => {
     const { selection, before } = await rendered();
     selection.update((s) => ({ ...s, sort: { column: 'size', descending: true } }));
     await tick();
-    expect(calls).toEqual(before);
+    expect(statistics(calls)).toEqual(statistics(before));
   });
 
   it('are computed again when a filter changes', async () => {
@@ -131,30 +134,39 @@ describe("Velocity's and Review's statistics", () => {
   });
 });
 
-// The counts above cover the lanes' rows too: `byOpening` orders the
-// selection and `laneModel` builds a lane per PR.
+// `laneModel` builds a lane per PR. The lanes take the PR table's order, so
+// they never order the selection themselves (`byOpening`), and a new order of
+// the table rebuilds them once.
 describe("The lanes' rows", () => {
-  it('are built once on the first render', async () => {
+  it('are built once on the first render, in the PR table’s order', async () => {
     const { before } = await rendered();
-    expect(before.byOpening).toBe(1);
     expect(before.laneModel).toBe(1);
+    expect(before.byOpening).toBe(0);
   });
 
-  it('are not built again when a PR is chosen or the PR table is sorted', async () => {
-    const { selection, before } = await rendered();
+  it('are not built again when a PR is chosen', async () => {
+    // A sort other than the default, which the URL state rebuilds on every change.
+    const { selection, before } = await rendered('#/?sort=-size');
     selection.update((s) => ({ ...s, pr: 66500 }));
     await tick();
+    await new Promise((r) => setTimeout(r, 20));
+    expect(calls.laneModel).toBe(before.laneModel);
+  });
+
+  it("are built again once when the PR table's order changes, and not when the titles arrive", async () => {
+    const { selection, before } = await rendered();
     selection.update((s) => ({ ...s, sort: { column: 'size', descending: true } }));
     await tick();
-    expect(calls.byOpening).toBe(before.byOpening);
-    expect(calls.laneModel).toBe(before.laneModel);
+    // The PR table's titles load meanwhile: they do not reorder a table not sorted by title.
+    await new Promise((r) => setTimeout(r, 20));
+    expect(calls.laneModel).toBe(before.laneModel + 1);
+    expect(calls.byOpening).toBe(0);
   });
 
   it('are built again when a filter changes', async () => {
     const { selection, before } = await rendered();
     selection.update((s) => ({ ...s, filters: { ...s.filters, kind: 'feature' } }));
     await tick();
-    expect(calls.byOpening).toBe(before.byOpening + 1);
     expect(calls.laneModel).toBe(before.laneModel + 1);
   });
 });
