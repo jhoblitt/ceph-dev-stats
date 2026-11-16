@@ -238,9 +238,9 @@ describe('axisTicks', () => {
     return spans.some((s, i) => i > 0 && (s[0] as number) < ((spans[i - 1] as number[])[1] as number));
   }
 
-  // A screenful is the width given, at most DATED_EVERY: on a phone the line
-  // shows 236 pixels. The line starts at midnight, or at 10:07 so that the
-  // start's label, with its time, is long.
+  // A screenful is the width given, at most DATED_EVERY and at least
+  // DATED_LEAST. The line starts at midnight, or at 10:07 so that the start's
+  // label, with its time, is long.
   it.each([
     { available: 1000, screen: DATED_EVERY, offset: 0, begins: '00:00' },
     { available: 1000, screen: DATED_EVERY, offset: 10 * 3600 + 7 * 60, begins: '10:07' },
@@ -260,6 +260,43 @@ describe('axisTicks', () => {
     for (let i = 1; i < dated.length; i++) {
       expect((dated[i] as number) - (dated[i - 1] as number), `after ${dated[i - 1]}`).toBeLessThanOrEqual(screen + 1e-9 * screen);
     }
+    expect(overlaps(ticks)).toBe(false);
+  });
+
+  it('dates every window of a 206-pixel view onto a line too long for it', () => {
+    // The view shows the 174 pixels the line is given and a 16-pixel margin
+    // at each end. 600 marks in bursts over three days.
+    const items: AxisItem[] = [];
+    for (let b = 0; b < 30; b++) for (let i = 0; i < 20; i++) items.push({ at: start + 36420 + b * 3 * 3600 + i * 30, row: 0 });
+    const axis = timeAxis(items, { ...OPTS, available: 174 });
+    const ticks = axisTicks(axis, 72, 16);
+    const dated = ticks.filter((t) => t.dated).map((t) => t.at);
+    for (let x = -16; x + 206 <= axis.width + 16; x++) {
+      expect(dated.some((at) => at >= x && at <= x + 206), `the window from ${x}`).toBe(true);
+    }
+    expect(ticks[0]?.label).toBe('3 Aug 2026 10:07');
+    expect(overlaps(ticks)).toBe(false);
+  });
+
+  it('dates the end of a short line on a 166-pixel view where a date without its year fits', () => {
+    // Evening marks on 30 November, then 1 December's in two other rows: the
+    // line is 165 pixels, a little wider than the 134 it is given, and its end
+    // needs a date.
+    const t0 = at('2026-11-30T21:21:00Z');
+    const items: AxisItem[] = [
+      ...Array.from({ length: 9 }, (_, i) => ({ at: t0 + i * 900, row: 0 })),
+      { at: at('2026-12-01T00:36:00Z'), row: 1 },
+      { at: at('2026-12-01T00:36:00Z'), row: 1 },
+      ...Array.from({ length: 3 }, (_, i) => ({ at: at('2026-12-01T05:36:00Z') + i * 900, row: 2 })),
+    ];
+    const axis = timeAxis(items, { ...OPTS, sep: 12, available: 134 });
+    expect(axis.width).toBe(165);
+    const ticks = axisTicks(axis, 72, 16);
+    const dated = ticks.filter((t) => t.dated).map((t) => t.at);
+    for (let x = -16; x + 166 <= axis.width + 16; x++) {
+      expect(dated.some((at) => at >= x && at <= x + 166), `the window from ${x}`).toBe(true);
+    }
+    expect(ticks.find((t) => t.time >= at('2026-12-01T00:00:00Z'))?.label).toMatch(/^1 Dec/);
     expect(overlaps(ticks)).toBe(false);
   });
 
@@ -354,8 +391,11 @@ function writings(t: number): string[] {
   return [hm, mon, `${mon} ${y}`, date, `${date} ${y}`, `${date} ${hm}`, `${date} ${y} ${hm}`];
 }
 
-/** Every way a set of ticks breaks the axis's promises; empty when it keeps them. */
-function broken(axis: ReturnType<typeof timeAxis>, ticks: readonly AxisTick[]): string[] {
+/**
+ * Every way a set of ticks breaks the axis's promises; empty when it keeps them. `margin` is the room the page draws
+ * past each end of the line.
+ */
+function broken(axis: ReturnType<typeof timeAxis>, ticks: readonly AxisTick[], margin = 0): string[] {
   const out: string[] = [];
   const iso = (t: number) => new Date(t * 1000).toISOString().slice(0, 16);
   let prev: AxisTick | null = null;
@@ -384,12 +424,36 @@ function broken(axis: ReturnType<typeof timeAxis>, ticks: readonly AxisTick[]): 
   });
   if (ticks[0]?.at !== 0 || !ticks[0]?.dated) out.push('the line’s start is not dated');
   if (axis.width > axis.available + 1) {
-    const screen = Math.min(DATED_EVERY, Math.max(DATED_LEAST, axis.available));
-    const at = [...ticks.filter((t) => t.dated).map((t) => t.at), axis.width];
-    for (let i = 1; i < at.length; i++) {
-      const gap = (at[i] as number) - (at[i - 1] as number);
-      if (gap > screen + 0.01) out.push(`no dated tick for ${gap.toFixed(1)} pixels after ${(at[i - 1] as number).toFixed(1)}`);
-    }
+    // The page shows the width given and a margin past each end. Every window as wide as that view holds a dated tick:
+    // no two are further apart than the view, nor the last further from the line's end than the view less a margin.
+    // A wide page keeps its dates closer, the width given apart and at most DATED_EVERY.
+    const view = axis.available + 2 * margin;
+    const screen = Math.min(DATED_EVERY, Math.max(DATED_LEAST, axis.available), view);
+    const end = Math.min(screen, view - margin);
+    type Dated = { t: AxisTick; right: number };
+    const dated: Dated[] = ticks.flatMap((t, i) => (t.dated ? [{ t, right: (spans[i] as [number, number])[1] }] : []));
+    // Whether a date, written as briefly as it can be, fits at `at`, outside a cut, clear of the dated tick before it
+    // with a pixel to spare, so that the half-pixel steps the axis tries cannot miss it.
+    const fits = (before: Dated, at: number) => {
+      if (at <= before.t.at || at > axis.width || axis.cuts.some((c) => at > c.x0 && at < c.x1)) return false;
+      const d = new Date(axis.time(at) * 1000);
+      const year = d.getUTCFullYear() === new Date(before.t.time * 1000).getUTCFullYear() ? '' : ` ${d.getUTCFullYear()}`;
+      const w = labelWidth(`${d.getUTCDate()} ${MON[d.getUTCMonth()] as string}${year}`);
+      const left = at - w / 2 < 0 ? at : at + w / 2 > axis.width ? at - w : at - w / 2;
+      return left >= before.right + 9;
+    };
+    // Dated ticks further apart are allowed only where no date fits within reach of the one before, and then only as
+    // far as the first place past it where one does.
+    dated.forEach((before, i) => {
+      const next = dated[i + 1]?.t.at ?? axis.width;
+      const reach = i + 1 < dated.length ? screen : end;
+      if (next - before.t.at <= reach + 0.01) return;
+      const where = `${(next - before.t.at).toFixed(1)} pixels after "${before.t.label}" at ${before.t.at.toFixed(1)}, in a ${view}-pixel view`;
+      for (let at = Math.min(before.t.at + reach, axis.width); at > before.t.at; at -= 0.5)
+        if (fits(before, at)) return void out.push(`no dated tick for ${where}, though a date fits at ${at.toFixed(1)}`);
+      for (let at = before.t.at + reach; at < next - 0.5; at += 0.5)
+        if (fits(before, at)) return void out.push(`no dated tick for ${where}, though past reach one first fits at ${at.toFixed(1)}`);
+    });
   }
   return out;
 }
@@ -411,7 +475,13 @@ function strays(axis: ReturnType<typeof timeAxis>, items: readonly AxisItem[]): 
 }
 
 describe('the axis’s promises, over generated lines', () => {
-  const WIDTHS = [236, 280, 320, 600, 1000];
+  // Widths given with no margin, and views 166, 206, 221 and 236 pixels wide,
+  // the narrowest the page has been measured to show of the line, of which the
+  // line is given all but a 16-pixel margin at each end.
+  const WIDTHS = [
+    ...[236, 280, 320, 600, 1000].map((available) => ({ available, margin: 0 })),
+    ...[166, 206, 221, 236].map((view) => ({ available: view - 32, margin: 16 })),
+  ];
   const SEP = 12;
   const OPTS = { sep: SEP, breakWidth: 64 };
 
@@ -477,18 +547,23 @@ describe('the axis’s promises, over generated lines', () => {
   it('reads a time on the line at every place, rising with it, and each mark’s own time at its place', () => {
     const failures: string[] = [];
     for (const [name, items] of lines)
-      for (const available of WIDTHS)
+      for (const { available } of WIDTHS)
         for (const s of strays(timeAxis(items, { ...OPTS, available }), items).slice(0, 1)) failures.push(`${name} at ${available}: ${s}`);
     expect({ count: failures.length, first: failures.slice(0, 5) }).toEqual({ count: 0, first: [] });
   });
 
   it('labels every tick with its own time, dates every screenful, names each new year and overlaps no label', () => {
     const failures: string[] = [];
-    for (const [name, items] of lines)
-      for (const available of WIDTHS) {
+    const linesByWidth: Record<string, number> = {};
+    for (const { available, margin } of WIDTHS)
+      for (const [name, items] of lines) {
         const axis = timeAxis(items, { ...OPTS, available });
-        for (const s of broken(axis, axisTicks(axis, 72)).slice(0, 1)) failures.push(`${name} at ${available}: ${s}`);
+        const width = `${available}+2×${margin}`;
+        for (const s of broken(axis, axisTicks(axis, 72, margin), margin).slice(0, 1)) {
+          failures.push(`${name} at ${width}: ${s}`);
+          linesByWidth[width] = (linesByWidth[width] ?? 0) + 1;
+        }
       }
-    expect({ count: failures.length, first: failures.slice(0, 5) }).toEqual({ count: 0, first: [] });
+    expect({ count: failures.length, linesByWidth, first: failures.slice(0, 5) }).toEqual({ count: 0, linesByWidth: {}, first: [] });
   });
 });

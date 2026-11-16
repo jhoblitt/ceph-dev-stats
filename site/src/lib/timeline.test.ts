@@ -526,6 +526,24 @@ describe('timelineLayout', () => {
     expect(cut.labelX - labelWidth(cut.label) / 2).toBeGreaterThanOrEqual(4);
   });
 
+  it('dates every window of a 206-pixel view across the whole drawn line', () => {
+    // A first commit 182 days before the opening, cut out, then 150 comments
+    // 20 minutes apart: a line far wider than the view.
+    const t0 = OPENED;
+    const events: Event[] = Array.from({ length: 150 }, (_, k) => ({ pr: 0, at: t0 + 600 + k * 1200, kind: 'comment_other' }));
+    const merge = t0 + 51 * 3600;
+    events.push({ pr: 0, at: merge, kind: 'merged' });
+    const data = dataset([{ number: 70000, created: t0, first_commit: t0 - 182 * DAY, state: 1, closed: merge }], events);
+    const refs = events.map((e) => (e.kind === 'merged' ? SHA('b') : '9'));
+    const layout = timelineLayout(prTimeline(data, 0, table(1, refs)), 206);
+    expect(layout.cuts).toHaveLength(1);
+    expect(layout.width).toBeGreaterThan(1000);
+    const dated = layout.ticks.filter((t) => t.dated).map((t) => t.at);
+    for (let x = 0; x + 206 <= layout.width; x++) {
+      expect(dated.some((at) => at >= x && at <= x + 206), `the window from ${x}`).toBe(true);
+    }
+  });
+
   it('prints every washed closing’s real length, moving a label aside rather than dropping it', () => {
     // Five closings of an hour or two, a few minutes apart, among crowded comments.
     const t0 = OPENED;

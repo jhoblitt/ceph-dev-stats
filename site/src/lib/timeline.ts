@@ -634,7 +634,8 @@ export function timelineLayout(tl: PrTimeline, available: number): TimelineLayou
   // and gives way to a cut's.
   // A cut's far side is dated by a tick; where the start's label leaves it
   // no room, the cut's note gives the date.
-  const ticks = axisTicks(axis, 72).map((t) => ({ ...t, at: t.at + L.pad }));
+  // The page shows the line's pads too, so a screenful is that much wider than the axis.
+  const ticks = axisTicks(axis, 72, L.pad).map((t) => ({ ...t, at: t.at + L.pad }));
   // A note centred on its cut, kept inside the line.
   const cuts = axis.cuts.map((c) => {
     const dated = ticks.some((t) => t.dated && t.time === c.to);
