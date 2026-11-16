@@ -51,6 +51,12 @@ describe('parseMeta', () => {
     expect(() => parseMeta({ ...rawMeta, kinds: ['bugfix'] })).toThrow(/meta\.json.*kinds/);
   });
 
+  it.each(['unknown', 'all'])('rejects a kind whose id is %s, a choice of the Kind filter itself', (id) => {
+    const kinds = [...rawMeta.kinds, { id, name: 'Something' }];
+    expect(() => parseMeta({ ...rawMeta, kinds })).toThrow(DataError);
+    expect(() => parseMeta({ ...rawMeta, kinds })).toThrow(new RegExp(`meta\\.json.*kinds.*"${id}"`));
+  });
+
   it('rejects a time that is not a number', () => {
     expect(() => parseMeta({ ...rawMeta, fetched_through: '2026-11-15T06:00:00Z' })).toThrow(/fetched_through/);
   });

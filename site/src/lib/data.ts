@@ -3,6 +3,8 @@
 // needs, and a year's table only when the PR table asks for it. Times are
 // epoch seconds; -1 means none or unknown.
 
+import { UNKNOWN_KIND } from './filters';
+
 export interface Named {
   id: string;
   name: string;
@@ -180,6 +182,9 @@ function isNamedArray(v: unknown): v is Named[] {
   return Array.isArray(v) && v.every((n) => isRecord(n) && typeof n['id'] === 'string' && typeof n['name'] === 'string');
 }
 
+/** Words the Kind filter puts in the URL for itself, so no kind may take them as its id. */
+const RESERVED_KIND_IDS = [UNKNOWN_KIND.id, 'all'];
+
 export function parseMeta(raw: unknown, file = 'meta.json'): Meta {
   if (!isRecord(raw)) throw new DataError(file, 'is not an object');
   const field = <T>(name: string, ok: (v: unknown) => v is T, what: string): T => {
@@ -203,6 +208,10 @@ export function parseMeta(raw: unknown, file = 'meta.json'): Meta {
     event_kinds: field('event_kinds', isStringArray, 'a list of strings'),
   };
   if (!meta.disclosure.includes('none')) throw new DataError(file, '"disclosure" has no "none"');
+  const reserved = meta.kinds.find((k) => RESERVED_KIND_IDS.includes(k.id));
+  if (reserved) {
+    throw new DataError(file, `"kinds" has the id "${reserved.id}", which the Kind filter keeps for its own choice`);
+  }
   if (meta.fetched_through < meta.window_start) {
     throw new DataError(file, '"fetched_through" is before "window_start"');
   }
