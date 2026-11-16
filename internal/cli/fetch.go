@@ -33,14 +33,15 @@ GITHUB_TOKEN, in that order.`,
 			if err != nil {
 				return err
 			}
-			since, err := fetchSince(v)
+			since, isDefault, err := fetchSince(v)
 			if err != nil {
 				return err
 			}
 			client := ghapi.NewClient(v.GetString("api-url"), token)
 			return fetch.Run(cmd.Context(), client, fetch.Config{
-				CacheDir: v.GetString("cache-dir"),
-				Since:    since,
+				CacheDir:       v.GetString("cache-dir"),
+				Since:          since,
+				SinceIsDefault: isDefault,
 			})
 		},
 	}
@@ -53,16 +54,19 @@ GITHUB_TOKEN, in that order.`,
 	return cmd
 }
 
-func fetchSince(v *viper.Viper) (time.Time, error) {
+// fetchSince is where the walk starts, and whether that is the default
+// rather than what --since or --full asked for.
+func fetchSince(v *viper.Viper) (time.Time, bool, error) {
 	if v.GetBool("full") {
-		return fetch.WindowStart, nil
+		return fetch.WindowStart, false, nil
 	}
 	if s := v.GetString("since"); s != "" {
 		t, err := time.Parse(time.RFC3339, s)
 		if err != nil {
-			return time.Time{}, fmt.Errorf("parsing --since: %w", err)
+			return time.Time{}, false, fmt.Errorf("parsing --since: %w", err)
 		}
-		return t.UTC(), nil
+		return t.UTC(), false, nil
 	}
-	return fetch.DefaultSince(v.GetString("data"))
+	since, err := fetch.DefaultSince(v.GetString("data"))
+	return since, true, err
 }

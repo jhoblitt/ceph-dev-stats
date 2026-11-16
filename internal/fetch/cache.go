@@ -16,6 +16,11 @@ import (
 // deleted account as null, and shows it as its placeholder user "ghost".
 const GhostLogin = "ghost"
 
+// FormatVersion is the version of the entry format this package writes. An
+// entry of an older version is fetched again whatever its updatedAt, so a
+// change to what an entry holds reaches every cached pull request.
+const FormatVersion = 1
+
 // Actor is a pull request, comment or review author.
 type Actor struct {
 	Login    string `json:"login"`
@@ -29,21 +34,26 @@ type Label struct {
 
 // Commit is one of a pull request's commits.
 type Commit struct {
+	OID           string    `json:"oid"`
 	AuthoredDate  time.Time `json:"authoredDate"`
 	CommittedDate time.Time `json:"committedDate"`
 	Message       string    `json:"message"`
 }
 
-// Comment is a conversation comment on a pull request.
+// Comment is a conversation comment on a pull request. DatabaseID is
+// GitHub's fullDatabaseId, a BigInt kept as the JSON string GitHub sends;
+// it is zero when GitHub gave none.
 type Comment struct {
-	CreatedAt time.Time `json:"createdAt"`
-	Body      string    `json:"body"`
-	Author    *Actor    `json:"author"`
+	DatabaseID int64     `json:"fullDatabaseId,string"`
+	CreatedAt  time.Time `json:"createdAt"`
+	Body       string    `json:"body"`
+	Author     *Actor    `json:"author"`
 }
 
 // Review is a review on a pull request. SubmittedAt is nil for a pending
-// review.
+// review. DatabaseID is as Comment's.
 type Review struct {
+	DatabaseID  int64      `json:"fullDatabaseId,string"`
 	SubmittedAt *time.Time `json:"submittedAt"`
 	State       string     `json:"state"`
 	Author      *Actor     `json:"author"`
@@ -54,6 +64,21 @@ type Review struct {
 type Event struct {
 	Typename  string    `json:"__typename"`
 	CreatedAt time.Time `json:"createdAt"`
+	// URL is the event's address on GitHub, ending in #event-<id>. A
+	// ReopenedEvent has none.
+	URL string `json:"url,omitzero"`
+	// Commit is a MergedEvent's merge commit.
+	Commit *CommitRef `json:"commit,omitzero"`
+	// BeforeCommit and AfterCommit are a HeadRefForcePushedEvent's head
+	// before and after the push. GitHub gives null for a commit it no
+	// longer has.
+	BeforeCommit *CommitRef `json:"beforeCommit,omitzero"`
+	AfterCommit  *CommitRef `json:"afterCommit,omitzero"`
+}
+
+// CommitRef names a commit by its SHA.
+type CommitRef struct {
+	OID string `json:"oid"`
 }
 
 // Entry is one cached pull request, .cache/raw/<number>.json: GitHub's node
@@ -82,6 +107,9 @@ type Entry struct {
 	Reviews           []Review   `json:"reviews"`
 	TimelineItems     []Event    `json:"timelineItems"`
 	FetchedAt         time.Time  `json:"fetchedAt"`
+	// FormatVersion is the FormatVersion of the fetch that wrote the
+	// entry, and zero in an entry written before entries carried one.
+	FormatVersion int `json:"formatVersion"`
 }
 
 // Meta is .cache/meta.json, written at the end of a complete walk.
@@ -138,6 +166,27 @@ func cachedEntries(cacheDir string) ([]string, error) {
 		}
 	}
 	return paths, nil
+}
+
+// staleEntries counts the cache's entries written in an older FormatVersion.
+func staleEntries(cacheDir string) (int, error) {
+	paths, err := cachedEntries(cacheDir)
+	if err != nil {
+		return 0, err
+	}
+	stale := 0
+	for _, p := range paths {
+		var v struct {
+			FormatVersion int `json:"formatVersion"`
+		}
+		if err := ReadJSON(p, &v); err != nil {
+			return 0, err
+		}
+		if v.FormatVersion < FormatVersion {
+			stale++
+		}
+	}
+	return stale, nil
 }
 
 // ReadJSON decodes the JSON file at path into v. A missing file is an error

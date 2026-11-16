@@ -57,12 +57,31 @@ var _ = Describe("queries", func() {
 		}
 	})
 
-	It("selects every connection on a listed pull request, with createdAt on each event type", func() {
+	It("selects every connection on a listed pull request", func() {
 		for _, c := range ghapi.Connections {
 			Expect(ghapi.PullRequests.Text).To(ContainSubstring(string(c)+"(first: $nested"), "connection %s", c)
 		}
-		for _, ev := range []string{"ReadyForReviewEvent", "ConvertToDraftEvent", "HeadRefForcePushedEvent", "ClosedEvent", "ReopenedEvent", "MergedEvent"} {
-			Expect(ghapi.PullRequests.Text).To(ContainSubstring("... on "+ev+" { createdAt }"), "event %s", ev)
+	})
+
+	DescribeTable("selects the fields of a node, link fields included, in the list and in its connection's further pages",
+		func(c ghapi.Connection, selection string) {
+			Expect(ghapi.PullRequests.Text).To(ContainSubstring(selection), "PullRequests")
+			Expect(ghapi.ConnectionPage(c).Text).To(ContainSubstring(selection), "%s", ghapi.ConnectionPage(c).Name)
+		},
+		Entry("a commit's oid", ghapi.Commits, "nodes { commit { oid authoredDate committedDate message } }"),
+		Entry("a comment's fullDatabaseId", ghapi.Comments, "nodes { fullDatabaseId createdAt body author { login __typename } }"),
+		Entry("a review's fullDatabaseId", ghapi.Reviews, "nodes { fullDatabaseId submittedAt state author { login __typename } }"),
+		Entry("a ready event's url", ghapi.TimelineItems, "... on ReadyForReviewEvent { createdAt url }"),
+		Entry("a draft event's url", ghapi.TimelineItems, "... on ConvertToDraftEvent { createdAt url }"),
+		Entry("a force-push's commits before and after", ghapi.TimelineItems, "... on HeadRefForcePushedEvent { createdAt beforeCommit { oid } afterCommit { oid } }"),
+		Entry("a close's url", ghapi.TimelineItems, "... on ClosedEvent { createdAt url }"),
+		Entry("a reopening without a url, which GitHub does not have", ghapi.TimelineItems, "... on ReopenedEvent { createdAt }"),
+		Entry("a merge's url and merge commit", ghapi.TimelineItems, "... on MergedEvent { createdAt url commit { oid } }"),
+	)
+
+	It("asks for no databaseId, which GitHub deprecates for 64-bit ids", func() {
+		for _, q := range all() {
+			Expect(q.Text).NotTo(MatchRegexp(`\bdatabaseId\b`), "query %s", q.Name)
 		}
 	})
 
