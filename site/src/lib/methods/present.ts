@@ -9,7 +9,6 @@ import { formatCount, formatDays, formatShare } from '../format';
 import { HORIZONS, MIN_FOLLOWED } from '../llm';
 import { REVIEWS_RECORDED_FROM } from '../review';
 import { openedIn } from '../select';
-import { COMPARE_WEEKS } from '../stats/capacity';
 import { MIN_PRS } from '../stats/people';
 import { RECENT_MONTHS, recentFilters } from '../state';
 import {
@@ -180,8 +179,6 @@ export const INLINE_FIGURES: Record<string, Figure<string>> = {
     show: (_m, d) => (d.viewGroups.disclosed.openedInPeriod === null ? '–' : formatShare(d.viewGroups.disclosed.openedInPeriod)),
   },
   'const.reviewsRecordedFrom': constant(dayOf(REVIEWS_RECORDED_FROM)),
-  'const.compareWeeks': constant(formatCount(COMPARE_WEEKS)),
-  'const.compareNeeded': constant(formatCount(2 * COMPARE_WEEKS)),
   'people.authors': count((d) => d.people.authors),
   'people.botAuthors': count((d) => d.people.botAuthors),
   'people.reviewers': count((d) => d.people.reviewers),

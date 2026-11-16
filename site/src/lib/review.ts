@@ -20,17 +20,13 @@ import { type Filters, type Target, dayOf, periodRange } from './filters';
 import { bucketName, formatCount, formatDays, formatMean, formatShare } from './format';
 import { formatDate } from './timeline-axis';
 import type { Step } from './stats/buckets';
-import { COMPARE_WEEKS, type Capacity, type WindowMean, compareEnds } from './stats/capacity';
+import type { Capacity } from './stats/capacity';
 import type { CommandUse } from './stats/commands';
 import { type Curve, type Outcome, type Quantile, SPAN_OUTCOMES, type Span, spanQuantile } from './stats/curve';
 import type { ReviewLoad } from './stats/reviewers';
 import type { WaitingSeries, Weekly } from './stats/weekly';
 
 const plural = (n: number, noun: string) => `${formatCount(n)} ${noun}${n === 1 ? '' : 's'}`;
-
-const WORDS = ['no', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten'];
-/** A small count in words, as a sentence says it; a larger one in figures. */
-const inWords = (n: number) => WORDS[n] ?? formatCount(n);
 
 /** A ratio or a count, exactly: whole numbers as counts, else two decimals. */
 export function formatRatio(v: number): string {
@@ -121,52 +117,7 @@ export function capacityNothing(c: Capacity, partial: readonly (Coverage | null)
   return null;
 }
 
-/** One ratio's first four and last four complete buckets, as a sentence without its full stop. */
-function compareSentence(label: string, cmp: { first: WindowMean; last: WindowMean }, reason: string, step: Step): string {
-  const part = (w: WindowMean, where: string) => {
-    if (w.mean === null) return `none in the ${where}, ${reason} in all ${formatCount(w.weeks)}`;
-    const left = w.missing > 0 ? ` (${plural(w.missing, step)} with ${reason} left out)` : '';
-    return `${formatRatio(w.mean)} in the ${where}${left}`;
-  };
-  const n = inWords(COMPARE_WEEKS);
-  return `${label}, a ${step} on average: ${part(cmp.first, `first ${n} full ${step}s`)}, ${part(cmp.last, `last ${n}`)}`;
-}
-
-/** The PRs waiting for a first response at the end of the first and the last complete bucket, and the change. */
-function waitingSentence(c: Capacity, complete: readonly boolean[]): string | null {
-  const whole = c.waiting.filter((_, i) => complete[i]);
-  if (whole.length < 2) return null;
-  const [first, last] = [whole[0] as number, whole.at(-1) as number];
-  const change = last > first ? `${formatCount(last - first)} more` : last < first ? `${formatCount(first - last)} fewer` : 'no change';
-  return (
-    `PRs waiting for a first response: ${formatCount(first)} at the end of the first full ${c.step}, ` +
-    `${formatCount(last)} at the end of the last, ${change}.`
-  );
-}
-
-/**
- * The answer in words: each ratio's mean over the first four and the last
- * four complete buckets, or that there are too few complete buckets; and the
- * PRs waiting for a first response at the end of the first and the last.
- */
-export function capacitySentences(c: Capacity, partial: readonly (Coverage | null)[]): string[] {
-  const complete = c.week.map((_, i) => (partial[i] ?? null) === null);
-  const perReviewer = compareEnds(c.openedPerReviewer, complete);
-  const perOpened = compareEnds(c.reviewsPerOpened, complete);
-  const waiting = waitingSentence(c, complete);
-  const ratios =
-    perReviewer === null || perOpened === null
-      ? [
-          `Too few full ${c.step}s to compare the first ${inWords(COMPARE_WEEKS)} with the last ${inWords(COMPARE_WEEKS)}: ${formatCount(complete.filter(Boolean).length)} of the ${formatCount(2 * COMPARE_WEEKS)} needed.`,
-        ]
-      : [
-          `${compareSentence('PRs opened per person giving reviews', perReviewer, NO_ONE_REVIEWING, c.step)}.`,
-          `${compareSentence('Human reviews per PR opened', perOpened, NO_PRS_OPENED, c.step)}.`,
-        ];
-  return waiting === null ? ratios : [...ratios, waiting];
-}
-
-/** The capacity chart's text alternative: the people giving reviews, the answer, the gaps and the partial buckets. */
+/** The capacity chart's text alternative: the people giving reviews, the gaps and the partial buckets. */
 export function describeCapacity(c: Capacity, partial: readonly (Coverage | null)[]): string {
   if (c.week.length === 0) return '';
   const out = [
@@ -176,7 +127,6 @@ export function describeCapacity(c: Capacity, partial: readonly (Coverage | null
   if (whole.length > 0) {
     out.push(`People giving reviews: from ${formatCount(Math.min(...whole))} to ${formatCount(Math.max(...whole))} a full ${c.step}.`);
   }
-  out.push(...capacitySentences(c, partial));
   const gaps = (values: readonly (number | null)[], reason: string) => {
     const n = values.filter((v) => v === null).length;
     return n > 0 ? [`${reason.charAt(0).toUpperCase()}${reason.slice(1)} in ${plural(n, c.step)}.`] : [];

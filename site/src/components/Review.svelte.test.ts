@@ -248,30 +248,13 @@ describe('Review', () => {
     ]);
   });
 
-  it('says under the title what the reviews-per-PR panel divides, and gives the answer in words beneath the chart', async () => {
+  it('says under the title what the reviews-per-PR panel divides', async () => {
     render(App, (await fixturePage('')).props);
     const f = figure(TITLES[0]!);
     expect(f.querySelector('.note')?.textContent).toBe(
       '"Human reviews per PR opened" compares two flows of the same week, not one group of PRs followed over time: ' +
         'the human reviews done that week, on any selected PR, against the PRs opened that week.',
     );
-    const answer = [...f.querySelectorAll('.answer p')].map((p) => p.textContent);
-    expect(answer).toEqual([
-      'PRs opened per person giving reviews, a week on average: 1 in the first four full weeks (2 weeks with no one giving reviews left out), ' +
-        'none in the last four, no one giving reviews in all 4.',
-      'Human reviews per PR opened, a week on average: 0.25 in the first four full weeks (2 weeks with no PRs opened left out), ' +
-        'none in the last four, no PRs opened in all 4.',
-      'PRs waiting for a first response: 1 at the end of the first full week, 0 at the end of the last, 1 fewer.',
-    ]);
-    for (const a of answer) expect(f.querySelector('.visually-hidden')?.textContent).toContain(a);
-  });
-
-  it('says there are too few full weeks to compare in a short period', async () => {
-    render(App, (await fixturePage('#/?to=2026-06-30')).props);
-    expect([...figure(TITLES[0]!).querySelectorAll('.answer p')].map((p) => p.textContent)).toEqual([
-      'Too few full weeks to compare the first four with the last four: 6 of the 8 needed.',
-      'PRs waiting for a first response: 1 at the end of the first full week, 0 at the end of the last, 1 fewer.',
-    ]);
   });
 
   it('leaves a gap where a ratio has no divisor, and says why', async () => {

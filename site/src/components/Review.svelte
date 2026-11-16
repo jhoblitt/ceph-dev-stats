@@ -18,7 +18,6 @@
     capacityNote,
     capacityNothing,
     capacityPanels,
-    capacitySentences,
     commandFigures,
     commandSummary,
     commandsModel,
@@ -195,13 +194,6 @@
     legend={capacityLegend(capacityChart)}
     table={bucketTable(capacityChart, formatRatio)}
   >
-    {#snippet figures()}
-      <div class="answer">
-        {#each capacitySentences(capacityCounts, capacityPartial) as sentence (sentence)}
-          <p>{sentence}</p>
-        {/each}
-      </div>
-    {/snippet}
     <BucketChart
       model={capacityChart}
       format={formatRatio}
@@ -341,14 +333,6 @@
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(min(100%, 26rem), 1fr));
     gap: var(--space-6) var(--space-5);
-  }
-
-  .answer {
-    margin-top: var(--space-3);
-  }
-
-  .answer p {
-    margin: 0 0 var(--space-1);
   }
 
   .quantiles,

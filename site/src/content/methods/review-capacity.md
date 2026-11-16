@@ -13,11 +13,9 @@ The Review section's first chart sets the human review done each week against th
 
 The moment is the end of the week, or the end of the period or the time the data runs to when either comes first. A pull request is out of draft at that moment when its latest "marked ready" or "converted to draft" event at or before then is a "marked ready", or, with neither, when it was opened ready. So a pull request never made ready never waits, and one put back into draft stops waiting until it is marked ready again. One closed without a response stops waiting while it is closed and waits again if it is reopened. Once its first human response has come it no longer waits. A response made before the pull request was first marked ready counts as made at that moment, so a pull request answered before it was first ready never waits.
 
-## Weeks, and the sentences under the chart
+## Weeks
 
 Weeks are ISO weeks, as in [Outcomes over time](#outcomes), and a period longer than 53 weeks is shown by calendar month. A week cut short by the period or by the time the data runs to is marked as partial; in it each ratio divides two partial counts.
-
-Under the chart, a sentence compares each ratio's mean over the first {{const.compareWeeks}} complete weeks with its mean over the last {{const.compareWeeks}}; over a period longer than 53 weeks these are months. A week with no value is left out of its mean, and the sentence says how many were. With fewer than {{const.compareNeeded}} complete weeks or months it says there are too few to compare. Another sentence gives the pull requests waiting for a first response at the end of the first complete week or month and of the last, and the change between them; with fewer than two complete ones it is not given.
 
 ## What it cannot show
 
