@@ -35,6 +35,18 @@ environment variable.
   to the window start, listing every pull request in the repository's
   history. It reads the GitHub token from
   `CEPHSTATS_GITHUB_TOKEN`, `GH_TOKEN` or `GITHUB_TOKEN`, in that order.
+  Only for a pull request whose author's account was deleted, which GitHub
+  gives as no author at all, it also reads the name git records for each
+  commit's author and committer, and not the address git records with
+  it; the commit messages it reads for every pull request still carry
+  their `Signed-off-by:` addresses, and stay in the cache. Before caching a
+  name it removes control and format characters and collapses its
+  whitespace, and it drops a name that holds an `@`, since git's name is
+  free text and such a name may be an address. Until the cache's
+  `meta.json` records that every such pull request in the cache has them,
+  `fetch` looks through the cache for those cached without them, as a
+  cache written before this was, and reads their names too; a walk that
+  writes `meta.json` then records it.
 - `extract` turns the cached pull requests into the committed records under
   `data/`, rewriting only the files whose content changes. Every run
   re-derives each record from its cached entry in the current format.

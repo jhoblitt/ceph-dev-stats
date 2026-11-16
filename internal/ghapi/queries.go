@@ -116,6 +116,41 @@ var Counts = Query{Name: "Counts", Text: `query Counts($owner: String!, $name: S
 }
 `}
 
+// commitNames selects a page of commits with the name git records for each
+// commit's author and committer, and not their addresses or accounts.
+func commitNames(args string) string {
+	return `commits(` + args + `) {
+        pageInfo { hasNextPage endCursor }
+        nodes { commit { oid author { name } committer { name } } }
+      }`
+}
+
+// CommitNames asks for the first $first commits of n pull requests in one
+// request, each with its author's and committer's names: alias p<i> is the
+// pull request numbered by variable n<i>. Variables: owner, name, first,
+// n0 to n<n-1>.
+func CommitNames(n int) Query {
+	var vars, fields strings.Builder
+	for i := range n {
+		fmt.Fprintf(&vars, ", $n%d: Int!", i)
+		fmt.Fprintf(&fields, "    p%d: pullRequest(number: $n%d) {\n      %s\n    }\n", i, i, commitNames("first: $first"))
+	}
+	return Query{Name: "CommitNames", Text: "query CommitNames($owner: String!, $name: String!, $first: Int!" + vars.String() + ") {\n  " +
+		rateLimitFields + "\n  repository(owner: $owner, name: $name) {\n" + fields.String() + "  }\n}\n"}
+}
+
+// CommitNamesPage asks for a further page of one pull request's commits as
+// CommitNames selects them. Variables: owner, name, number, first, after.
+var CommitNamesPage = Query{Name: "CommitNamesPage", Text: `query CommitNamesPage($owner: String!, $name: String!, $number: Int!, $first: Int!, $after: String) {
+  ` + rateLimitFields + `
+  repository(owner: $owner, name: $name) {
+    pullRequest(number: $number) {
+      ` + commitNames("first: $first, after: $after") + `
+    }
+  }
+}
+`}
+
 // AuthorBaselines asks for n search counts in one request: alias a<i>
 // answers the search in variable q<i>.
 func AuthorBaselines(n int) Query {

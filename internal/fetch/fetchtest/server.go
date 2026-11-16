@@ -52,9 +52,11 @@ type Reply struct {
 	Body   string
 }
 
-// Server answers PullRequests, the connection pages, Counts and
-// AuthorBaselines from the pull requests it holds. Cursors are offsets;
-// lists are ordered by updatedAt then number, both descending.
+// Server answers PullRequests, the connection pages, Counts,
+// AuthorBaselines, CommitNames and CommitNamesPage from the pull requests it
+// holds. Cursors are offsets; lists are ordered by updatedAt then number,
+// both descending. A held pull request's CommitNames are its commits' names
+// as GitHub keeps them, which only the names queries return.
 type Server struct {
 	*httptest.Server
 
@@ -225,6 +227,31 @@ func (s *Server) answer(r Request) (map[string]any, error) {
 			}
 			out["a"+strconv.Itoa(i)] = map[string]any{"issueCount": s.priorPRs[m[1]]}
 		}
+	case ghapi.CommitNames(0).Name:
+		repo := map[string]any{}
+		for i := 0; ; i++ {
+			n := r.Int("n" + strconv.Itoa(i))
+			if n < 0 {
+				return map[string]any{"repository": repo}, nil
+			}
+			pr, ok := s.prs[n]
+			if !ok {
+				return nil, fmt.Errorf("no pull request %d", n)
+			}
+			repo["p"+strconv.Itoa(i)] = map[string]any{"commits": page(nameNodes(pr), 0, r.Int("first"))}
+		}
+	case ghapi.CommitNamesPage.Name:
+		pr, ok := s.prs[r.Int("number")]
+		if !ok {
+			return nil, fmt.Errorf("no pull request %d", r.Int("number"))
+		}
+		start, err := offset(r.String("after"))
+		if err != nil {
+			return nil, err
+		}
+		return map[string]any{"repository": map[string]any{"pullRequest": map[string]any{
+			"commits": page(nameNodes(pr), start, r.Int("first")),
+		}}}, nil
 	}
 	i := slices.IndexFunc(ghapi.Connections, func(c ghapi.Connection) bool {
 		return r.Operation == ghapi.ConnectionPage(c).Name
@@ -313,6 +340,24 @@ func connectionNodes(pr *fetch.Entry, c ghapi.Connection) []any {
 		for _, ev := range pr.TimelineItems {
 			out = append(out, ev)
 		}
+	}
+	return out
+}
+
+// nameNodes are pr's commits as the names queries select them: from
+// pr.CommitNames when it is set, and otherwise pr's commits with null names.
+func nameNodes(pr *fetch.Entry) []any {
+	var out []any
+	if pr.CommitNames == nil {
+		for _, c := range pr.Commits {
+			out = append(out, map[string]any{"commit": map[string]any{"oid": c.OID, "author": nil, "committer": nil}})
+		}
+		return out
+	}
+	for _, c := range pr.CommitNames.Commits {
+		out = append(out, map[string]any{"commit": map[string]any{
+			"oid": c.OID, "author": map[string]any{"name": c.Author}, "committer": map[string]any{"name": c.Committer},
+		}})
 	}
 	return out
 }
