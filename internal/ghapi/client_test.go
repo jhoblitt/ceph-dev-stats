@@ -21,6 +21,8 @@ type reply struct {
 	status int
 	header map[string]string
 	body   string
+	// hangUp closes the connection without answering.
+	hangUp bool
 }
 
 type received struct {
@@ -53,6 +55,14 @@ func (s *scripted) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	rep := s.replies[min(n, len(s.replies)-1)]
 	s.mu.Unlock()
 
+	if rep.hangUp {
+		hj, ok := w.(http.Hijacker)
+		Expect(ok).To(BeTrue(), "%T cannot hang up", w)
+		conn, _, err := hj.Hijack()
+		Expect(err).NotTo(HaveOccurred())
+		Expect(conn.Close()).To(Succeed())
+		return
+	}
 	for k, v := range rep.header {
 		w.Header().Set(k, v)
 	}
@@ -87,12 +97,14 @@ var _ = Describe("Client", func() {
 		server = httptest.NewServer(handler)
 		DeferCleanup(server.Close)
 		attempts = nil
-		client = ghapi.NewClient(server.URL, token,
+		var err error
+		client, err = ghapi.NewClient(server.URL, token,
 			ghapi.WithHTTPClient(server.Client()),
 			ghapi.WithBackoff(func(_ context.Context, attempt int) error {
 				attempts = append(attempts, attempt)
 				return nil
 			}))
+		Expect(err).NotTo(HaveOccurred())
 	})
 
 	do := func() (map[string]any, error) {
@@ -156,11 +168,13 @@ var _ = Describe("Client", func() {
 	It("stops when the backoff fails", func() {
 		handler.script(reply{status: 502})
 		canceled := errors.New("canceled")
-		client = ghapi.NewClient(server.URL, token,
+		var err error
+		client, err = ghapi.NewClient(server.URL, token,
 			ghapi.WithHTTPClient(server.Client()),
 			ghapi.WithBackoff(func(context.Context, int) error { return canceled }))
+		Expect(err).NotTo(HaveOccurred())
 
-		_, err := do()
+		_, err = do()
 
 		Expect(err).To(MatchError(canceled))
 		Expect(handler.received()).To(HaveLen(1))
@@ -194,6 +208,51 @@ var _ = Describe("Client", func() {
 		}),
 	)
 
+	It("gives up with ErrUnavailable after the server hangs up on three attempts", func() {
+		handler.script(reply{hangUp: true})
+
+		_, err := do()
+
+		Expect(err).To(MatchError(ghapi.ErrUnavailable))
+		Expect(handler.received()).To(HaveLen(3))
+		Expect(attempts).To(Equal([]int{1, 2}))
+	})
+
+	It("gives up with ErrUnavailable after three bodies that are not JSON", func() {
+		handler.script(reply{status: 200, body: "<html>ok</html>"})
+
+		_, err := do()
+
+		Expect(err).To(MatchError(ghapi.ErrUnavailable))
+		Expect(err).To(MatchError(ContainSubstring("malformed response")))
+		Expect(handler.received()).To(HaveLen(3))
+	})
+
+	It("returns context.Canceled for a context canceled before the request, without a backoff", func() {
+		handler.script(reply{status: 200, body: `{"data":{"viewer":{"login":"octo"}}}`})
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+
+		var out map[string]any
+		err := client.Do(ctx, probe, nil, &out)
+
+		Expect(err).To(MatchError(context.Canceled))
+		Expect(attempts).To(BeEmpty())
+		Expect(handler.received()).To(BeEmpty())
+	})
+
+	It("reports an exhausted rate limit without a reset header as resetting at an unknown time", func() {
+		handler.script(reply{status: 403, header: map[string]string{"x-ratelimit-remaining": "0"}})
+
+		_, err := do()
+
+		rl, ok := errors.AsType[*ghapi.RateLimitError](err)
+		Expect(ok).To(BeTrue(), "error %v is not a RateLimitError", err)
+		Expect(rl.Reset).To(BeZero())
+		Expect(err.Error()).To(ContainSubstring("reset time unknown"))
+		Expect(handler.received()).To(HaveLen(1))
+	})
+
 	It("fails on any other GraphQL error, naming its message, without retrying", func() {
 		handler.script(reply{status: 200, body: `{"errors":[{"type":"NOT_FOUND","message":"Could not resolve to a Repository"}]}`})
 
@@ -213,4 +272,39 @@ var _ = Describe("Client", func() {
 		Expect(err.Error()).NotTo(ContainSubstring(token))
 		Expect(handler.received()).To(HaveLen(1))
 	})
+})
+
+var _ = Describe("NewClient", func() {
+	DescribeTable("refuses an endpoint that would expose the token, without echoing its user or password",
+		func(endpoint, why string) {
+			c, err := ghapi.NewClient(endpoint, token)
+
+			Expect(err).To(MatchError(ContainSubstring(why)))
+			Expect(c).To(BeNil())
+			for _, secret := range []string{token, "octo", "pa55", "%zz"} {
+				Expect(err.Error()).NotTo(ContainSubstring(secret))
+			}
+		},
+		Entry("http to a host that is not loopback", "http://example.org/graphql", "https"),
+		Entry("http to a name that only begins like localhost", "http://localhost.example.org/graphql", "https"),
+		Entry("a user and password", "https://octo:pa55@api.github.com/graphql", "user or password"),
+		Entry("a user alone, as a token would be", "https://octo@api.github.com/graphql", "user or password"),
+		Entry("a user and password in a URL that does not parse", "https://octo:pa55%zz@api.github.com/graphql", "parsing"),
+		Entry("a URL without a user that does not parse, with the parse error", "http://[::1", "parsing API URL: missing ']' in host"),
+		Entry("a fragment", "https://api.github.com/graphql#frag", "fragment"),
+		Entry("no host", "https:///graphql", "host"),
+	)
+
+	DescribeTable("accepts an endpoint the token may travel to",
+		func(endpoint string) {
+			c, err := ghapi.NewClient(endpoint, token)
+
+			Expect(err).NotTo(HaveOccurred())
+			Expect(c).NotTo(BeNil())
+		},
+		Entry("the default endpoint", ghapi.DefaultEndpoint),
+		Entry("http to localhost", "http://localhost:8080/graphql"),
+		Entry("http to an address in 127.0.0.0/8", "http://127.3.4.5:8080/graphql"),
+		Entry("http to ::1", "http://[::1]:8080/graphql"),
+	)
 })

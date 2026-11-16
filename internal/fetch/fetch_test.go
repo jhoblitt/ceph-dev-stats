@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io/fs"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -15,6 +16,7 @@ import (
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	"github.com/onsi/gomega/types"
 
 	"github.com/jhoblitt/ceph-dev-stats/internal/fetch"
 	"github.com/jhoblitt/ceph-dev-stats/internal/fetch/fetchtest"
@@ -81,6 +83,8 @@ var _ = Describe("Run", func() {
 		logs     *bytes.Buffer
 		// defaultSince marks run's since as the default, not the operator's.
 		defaultSince bool
+		// defaultSinceAt is run's Config.DefaultSince.
+		defaultSinceAt time.Time
 	)
 
 	BeforeEach(func() {
@@ -89,6 +93,7 @@ var _ = Describe("Run", func() {
 		waits = nil
 		logs = &bytes.Buffer{}
 		defaultSince = false
+		defaultSinceAt = time.Time{}
 	})
 
 	serve := func(prs ...fetch.Entry) {
@@ -98,17 +103,19 @@ var _ = Describe("Run", func() {
 
 	run := func(since time.Time) error {
 		logger := slog.New(slog.NewJSONHandler(logs, &slog.HandlerOptions{Level: slog.LevelDebug}))
-		client := ghapi.NewClient(server.URL, token,
+		client, err := ghapi.NewClient(server.URL, token,
 			ghapi.WithHTTPClient(server.Client()),
 			ghapi.WithLogger(logger),
 			ghapi.WithBackoff(func(_ context.Context, attempt int) error {
 				waits = append(waits, attempt)
 				return nil
 			}))
+		Expect(err).NotTo(HaveOccurred())
 		return fetch.Run(context.Background(), client, fetch.Config{
 			CacheDir:       cacheDir,
 			Since:          since,
 			SinceIsDefault: defaultSince,
+			DefaultSince:   defaultSinceAt,
 			PageSize:       pageSize,
 			NestedPageSize: 2,
 			Logger:         logger,
@@ -142,6 +149,20 @@ var _ = Describe("Run", func() {
 			}
 		}
 		return firsts
+	}
+
+	// logged returns the log records with message msg.
+	logged := func(msg string) []map[string]any {
+		GinkgoHelper()
+		var out []map[string]any
+		for line := range bytes.Lines(logs.Bytes()) {
+			var m map[string]any
+			Expect(json.Unmarshal(line, &m)).To(Succeed(), "log line %s", line)
+			if m["msg"] == msg {
+				out = append(out, m)
+			}
+		}
+		return out
 	}
 
 	nestedFor := func(c ghapi.Connection, number int) []string {
@@ -313,20 +334,6 @@ var _ = Describe("Run", func() {
 	Context("when the cache holds an entry of an older format that the since would not reach", func() {
 		var since time.Time
 
-		// logged returns the log records with message msg.
-		logged := func(msg string) []map[string]any {
-			GinkgoHelper()
-			var out []map[string]any
-			for line := range bytes.Lines(logs.Bytes()) {
-				var m map[string]any
-				Expect(json.Unmarshal(line, &m)).To(Succeed(), "log line %s", line)
-				if m["msg"] == msg {
-					out = append(out, m)
-				}
-			}
-			return out
-		}
-
 		BeforeEach(func() {
 			since = at(5)
 			old, recent := pr(1, 1, "CLOSED"), pr(9, 9, "CLOSED")
@@ -390,6 +397,54 @@ var _ = Describe("Run", func() {
 
 		Expect(listed(false)).To(Equal([]int{2, 2}), "phase 1 list requests")
 		Expect(rawFiles()).To(ConsistOf("3.json", "4.json", "5.json"))
+	})
+
+	Describe("meta.json, the coverage mark", func() {
+		metaPath := func() string { return filepath.Join(cacheDir, fetch.MetaFile) }
+
+		BeforeEach(func() {
+			serve(pr(9, 9, "CLOSED"), pr(1, 1, "CLOSED"))
+			defaultSinceAt = at(5)
+		})
+
+		It("is left byte-identical by a walk from a since later than the default, which saves its entries and warns once why", func() {
+			const old = `{"walk_started":"2026-10-01T00:00:00Z","opened_in_window":1,"open":0}` + "\n"
+			Expect(os.WriteFile(metaPath(), []byte(old), 0o600)).To(Succeed())
+
+			Expect(run(at(6))).To(Succeed())
+
+			got, err := os.ReadFile(metaPath())
+			Expect(err).NotTo(HaveOccurred())
+			Expect(string(got)).To(Equal(old))
+			Expect(rawFiles()).To(ConsistOf("9.json"))
+			Expect(logged("coverage mark not advanced")).To(HaveExactElements(And(
+				HaveKeyWithValue("level", "WARN"),
+				HaveKeyWithValue("reason", ContainSubstring("later than the default since")),
+				HaveKeyWithValue("since", "2026-11-01T06:00:00Z"),
+				HaveKeyWithValue("default_since", "2026-11-01T05:00:00Z"),
+			)), "log:\n%s", logs.String())
+		})
+
+		It("is not created by a walk from a since later than the default", func() {
+			Expect(run(at(6))).To(Succeed())
+
+			Expect(metaPath()).NotTo(BeAnExistingFile())
+			Expect(rawFiles()).To(ConsistOf("9.json"))
+		})
+
+		DescribeTable("is written by a walk that covers the default range",
+			func(since, defaultAt time.Time) {
+				defaultSinceAt = defaultAt
+
+				Expect(run(since)).To(Succeed())
+
+				Expect(readJSON(metaPath())).To(HaveKeyWithValue("walk_started", "2026-11-15T12:00:00Z"))
+				Expect(logged("coverage mark not advanced")).To(BeEmpty())
+			},
+			Entry("since at the default", at(5), at(5)),
+			Entry("since before the default", at(4), at(5)),
+			Entry("no default, as for --full, whatever the since", at(6), time.Time{}),
+		)
 	})
 
 	It("caches a PR listed twice once, at the later updatedAt, and skips one listed twice unchanged", func() {
@@ -509,6 +564,137 @@ var _ = Describe("Run", func() {
 		Expect(entry(3).Number).To(Equal(3))
 		Expect(entry(2).Number).To(Equal(2))
 		Expect(filepath.Join(cacheDir, "meta.json")).NotTo(BeAnExistingFile())
+	})
+
+	isRateLimit := func(err error) bool {
+		rl, ok := errors.AsType[*ghapi.RateLimitError](err)
+		return ok && rl.Reset.Equal(time.Date(2026, 11, 15, 13, 0, 0, 0, time.UTC))
+	}
+	rateLimited := func() *fetchtest.Reply {
+		return &fetchtest.Reply{Status: 403, Header: map[string]string{
+			"x-ratelimit-remaining": "0", "x-ratelimit-reset": "1794747600",
+		}}
+	}
+
+	DescribeTable("saves no entry for a PR whose nested page fails, keeps those before it, and writes no meta.json",
+		func(rep fetchtest.Reply, match types.GomegaMatcher) {
+			failing := pr(2, 2, "CLOSED")
+			failing.Comments = comments(3)
+			serve(pr(9, 9, "CLOSED"), failing)
+			server.Intercept(func(_ int, r fetchtest.Request) *fetchtest.Reply {
+				if r.Operation == ghapi.ConnectionPage(ghapi.Comments).Name {
+					return &rep
+				}
+				return nil
+			})
+
+			err := run(fetch.WindowStart)
+
+			Expect(err).To(match)
+			Expect(rawFiles()).To(ConsistOf("9.json"), "PR 2 is not saved, nor any temporary file")
+			Expect(filepath.Join(cacheDir, fetch.MetaFile)).NotTo(BeAnExistingFile())
+		},
+		Entry("a 503 on every attempt", fetchtest.Reply{Status: 503},
+			And(MatchError(ghapi.ErrUnavailable), MatchError(ContainSubstring("pull request 2")))),
+		Entry("a spent rate limit", *rateLimited(),
+			MatchError(isRateLimit, "a *ghapi.RateLimitError resetting at 2026-11-15T13:00:00Z")),
+		Entry("a reply without the connection's key", fetchtest.Reply{Status: 200, Body: `{"data":{"repository":{"pullRequest":{}}}}`},
+			And(
+				MatchError(And(ContainSubstring("pull request 2"), ContainSubstring("comments"))),
+				Not(MatchError(ghapi.ErrUnavailable)),
+			)),
+		Entry("a reply whose connection is null", fetchtest.Reply{Status: 200, Body: `{"data":{"repository":{"pullRequest":{"comments":null}}}}`},
+			And(
+				MatchError(And(ContainSubstring("pull request 2"), ContainSubstring("comments"))),
+				Not(MatchError(ghapi.ErrUnavailable)),
+			)),
+	)
+
+	DescribeTable("is an error naming the PR and the connection when a listed PR lacks one, and saves nothing",
+		func(labels string) {
+			serveLinksPage(func(s string) string {
+				return strings.Replace(s, `"labels": {"pageInfo": {"hasNextPage": false, "endCursor": null}, "nodes": []},`, labels, 1)
+			})
+
+			err := run(fetch.WindowStart)
+
+			Expect(err).To(MatchError(And(ContainSubstring("pull request 69877"), ContainSubstring("labels"))))
+			Expect(err).NotTo(MatchError(ghapi.ErrUnavailable))
+			_, rerr := fetch.ReadEntry(cacheDir, 69877)
+			Expect(rerr).To(MatchError(fs.ErrNotExist), "no entry for PR 69877")
+			Expect(filepath.Join(cacheDir, fetch.MetaFile)).NotTo(BeAnExistingFile())
+		},
+		Entry("labels missing", ``),
+		Entry("labels null", `"labels": null,`),
+	)
+
+	DescribeTable("is an error naming the author, and writes no baselines for the batch, when an answer is not a count",
+		func(answer string) {
+			bob := pr(2, 2, "CLOSED")
+			bob.Author = user("bob")
+			serve(pr(1, 1, "CLOSED"), bob)
+			server.Intercept(func(_ int, r fetchtest.Request) *fetchtest.Reply {
+				if r.Operation == ghapi.AuthorBaselines(0).Name {
+					return &fetchtest.Reply{Status: 200, Body: `{"data":{"a0":{"issueCount":3},"a1":` + answer + `}}`}
+				}
+				return nil
+			})
+
+			err := run(fetch.WindowStart)
+
+			Expect(err).To(MatchError(And(ContainSubstring("counting prior pull requests"), ContainSubstring("bob"))))
+			Expect(filepath.Join(cacheDir, fetch.AuthorsFile)).NotTo(BeAnExistingFile())
+			Expect(filepath.Join(cacheDir, fetch.MetaFile)).NotTo(BeAnExistingFile())
+		},
+		Entry("a null alias", `null`),
+		Entry("an alias without issueCount", `{}`),
+	)
+
+	DescribeTable("is an error naming the connection when a list page lacks it, and writes nothing",
+		func(body string) {
+			serve(pr(1, 1, "CLOSED"))
+			server.Intercept(func(_ int, r fetchtest.Request) *fetchtest.Reply {
+				if r.Operation == ghapi.PullRequests.Name {
+					return &fetchtest.Reply{Status: 200, Body: body}
+				}
+				return nil
+			})
+
+			err := run(fetch.WindowStart)
+
+			Expect(err).To(MatchError(ContainSubstring("pullRequests")))
+			Expect(err).NotTo(MatchError(ghapi.ErrUnavailable))
+			Expect(filepath.Join(cacheDir, fetch.RawDir)).NotTo(BeAnExistingFile(), "no entry is written")
+			Expect(filepath.Join(cacheDir, fetch.MetaFile)).NotTo(BeAnExistingFile())
+		},
+		Entry("without repository", `{"data":{}}`),
+		Entry("without pullRequests", `{"data":{"repository":{}}}`),
+	)
+
+	It("keeps the author baselines already written when a rate limit ends the run between batches, and writes no meta.json", func() {
+		var prs []fetch.Entry
+		for n := range 27 {
+			p := pr(n+1, n+1, "CLOSED")
+			p.Author = user(fmt.Sprintf("dev%02d", n))
+			prs = append(prs, p)
+		}
+		serve(prs...)
+		server.Intercept(func(_ int, r fetchtest.Request) *fetchtest.Reply {
+			if r.Operation == ghapi.AuthorBaselines(0).Name && len(server.Operations(r.Operation)) == 2 {
+				return rateLimited()
+			}
+			return nil
+		})
+
+		err := run(fetch.WindowStart)
+
+		Expect(err).To(MatchError(isRateLimit, "a *ghapi.RateLimitError resetting at 2026-11-15T13:00:00Z"))
+		Expect(server.Operations(ghapi.AuthorBaselines(0).Name)).To(HaveLen(2))
+		authors := readJSON(filepath.Join(cacheDir, fetch.AuthorsFile))
+		Expect(authors).To(HaveLen(25), "the first batch is kept")
+		Expect(authors).To(HaveKey("dev00"))
+		Expect(authors).NotTo(HaveKey("dev26"))
+		Expect(filepath.Join(cacheDir, fetch.MetaFile)).NotTo(BeAnExistingFile())
 	})
 
 	It("keeps the token out of every log line and every cache file", func() {

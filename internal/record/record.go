@@ -37,8 +37,12 @@ const (
 	ReviewDismissed        = "dismissed"
 )
 
-// Record is one pull request as committed. Times are UTC to the second,
-// lists are in time order, and every list is empty rather than null.
+// Record is one pull request as committed. Times are UTC to the second.
+// Events, Reviews and Comments are in time order, Labels in name order,
+// Commits.List in GitHub's order and each Disclosure list in order of first
+// appearance. Labels, Events, Reviews, Comments and the Disclosure lists are
+// empty rather than null; Commits.List is left out when nil, and KindHints
+// when the pull request gives no hint.
 type Record struct {
 	Number      int       `json:"number"`
 	Updated     time.Time `json:"updated"`
@@ -116,8 +120,9 @@ type Review struct {
 }
 
 // Comment is a conversation comment. ID is GitHub's database id, zero when
-// the cache did not have it. Text is kept only for a comment that is a
-// single line of at most 80 characters after trimming, and is empty
+// the cache did not have it. Text is kept only for a comment that, after
+// trimming, is a single line of at most 80 characters with no "@" in it,
+// since a mention or an e-mail address names a person; it is empty
 // otherwise.
 type Comment struct {
 	At   time.Time `json:"at"`
