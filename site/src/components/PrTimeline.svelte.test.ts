@@ -29,18 +29,22 @@ const OPENED = at('2026-08-03T09:00:00Z');
 const hour = (h: number) => OPENED + h * 3600;
 const KINDS = [...rawMeta.event_kinds, 'review_author'];
 
-/** Every event kind on one PR, an hour apart, with the ref each address is built from. */
-const EVERY: { kind: string; ref: string; sub?: number; name: string; href: string | null }[] = [
-  { kind: 'comment_other', ref: '101', name: 'Comment by another person', href: `${PR}#issuecomment-101` },
-  { kind: 'comment_author', ref: '102', name: 'Comment by the author', href: `${PR}#issuecomment-102` },
-  { kind: 'command_author', ref: '103', sub: 0, name: 'Bot command by the author: jenkins test', href: `${PR}#issuecomment-103` },
+// #67300's author is the fixture's person 0, fixture-author-e; the comment
+// and reviews by others name persons 1 to 4.
+const AUTHOR = 'fixture-author-e, the author';
+
+/** Every event kind on one PR, an hour apart, with the ref each address is built from and who made it. */
+const EVERY: { kind: string; ref: string; sub?: number; actor?: number; name: string; href: string | null }[] = [
+  { kind: 'comment_other', ref: '101', actor: 1, name: 'Comment by another person (fixture-author-f)', href: `${PR}#issuecomment-101` },
+  { kind: 'comment_author', ref: '102', name: `Comment by the author (${AUTHOR})`, href: `${PR}#issuecomment-102` },
+  { kind: 'command_author', ref: '103', sub: 0, name: `Bot command by the author: jenkins test (${AUTHOR})`, href: `${PR}#issuecomment-103` },
   { kind: 'command_other', ref: '104', sub: 1, name: 'Bot command by another person: /config check ok', href: `${PR}#issuecomment-104` },
   { kind: 'bot_account', ref: '105', name: 'Comment by a bot account', href: `${PR}#issuecomment-105` },
-  { kind: 'review_approved', ref: '201', name: 'Review approving', href: `${PR}#pullrequestreview-201` },
-  { kind: 'review_changes', ref: '202', name: 'Review requesting changes', href: `${PR}#pullrequestreview-202` },
-  { kind: 'review_commented', ref: '203', name: 'Review commenting', href: `${PR}#pullrequestreview-203` },
+  { kind: 'review_approved', ref: '201', actor: 2, name: 'Review approving (fixture-author-a)', href: `${PR}#pullrequestreview-201` },
+  { kind: 'review_changes', ref: '202', actor: 3, name: 'Review requesting changes (fixture-author-i)', href: `${PR}#pullrequestreview-202` },
+  { kind: 'review_commented', ref: '203', actor: 4, name: 'Review commenting (fixture-reviewer-k)', href: `${PR}#pullrequestreview-203` },
   { kind: 'bot_review', ref: '204', name: 'Review by a bot', href: `${PR}#pullrequestreview-204` },
-  { kind: 'review_author', ref: '205', name: 'Reply by the author in a review thread', href: `${PR}#pullrequestreview-205` },
+  { kind: 'review_author', ref: '205', name: `Reply by the author in a review thread (${AUTHOR})`, href: `${PR}#pullrequestreview-205` },
   { kind: 'draft', ref: '301', name: 'Converted to draft', href: `${PR}#event-301` },
   { kind: 'ready', ref: '302', name: 'Marked ready for review', href: `${PR}#event-302` },
   { kind: 'force_push', ref: SHA('a'), name: 'Force-push', href: `https://github.com/ceph/ceph/commit/${SHA('a')}` },
@@ -87,7 +91,7 @@ function withEveryKind(): Record<string, unknown> {
     at: EVERY.map((_, i) => hour(i + 1)),
     kind: EVERY.map((e) => KINDS.indexOf(e.kind)),
     sub: EVERY.map((e) => e.sub ?? -1),
-    actor: EVERY.map(() => -1),
+    actor: EVERY.map((e) => e.actor ?? -1),
   });
   const table = append(rawTable2026, {
     titles: ['mgr: a PR with every event'],
@@ -120,7 +124,7 @@ describe('PrTimeline', () => {
     const named = marks.map((m) => m.getAttribute('aria-label') ?? '');
     const expected = [
       'First commit',
-      'Opened',
+      `Opened (${AUTHOR})`,
       ...EVERY.slice(0, 12).map((e) => e.name),
       'Last commit',
       ...EVERY.slice(12).map((e) => e.name),
@@ -129,13 +133,77 @@ describe('PrTimeline', () => {
 
     const events = marks.filter((m) => !/^(First commit|Opened|Last commit)/.test(m.getAttribute('aria-label') ?? ''));
     expect(events.map((m) => m.getAttribute('href'))).toEqual(EVERY.map((e) => e.href));
-    expect(named[2]).toBe('Comment by another person, 3 Aug 2026 10:00 UTC');
+    expect(named[2]).toBe('Comment by another person (fixture-author-f), 3 Aug 2026 10:00 UTC');
     expect(named[named.length - 4]).toBe('Force-push, 3 Aug 2026 23:00 UTC, address not recorded');
     for (const m of marks.filter((m) => m.hasAttribute('href'))) {
       expect(m.getAttribute('target')).toBe('_blank');
       expect(m.getAttribute('rel')).toBe('noopener noreferrer');
     }
     expect(within(section).getByText('Closed and reopened 1 time: for 1 hour.')).toBeTruthy();
+  });
+
+  it('says who made each mark in the events table, each person linked to GitHub, the author and bots said so', async () => {
+    const section = await timeline('#/?target=all&pr=67300', withEveryKind());
+    const table = await within(section).findByRole('table');
+    const heads = within(table)
+      .getAllByRole('columnheader')
+      .map((h) => h.textContent);
+    expect(heads).toEqual(['When (UTC)', 'What', 'Who', 'On GitHub']);
+    const who = (what: string) => {
+      const row = within(table).getByRole('rowheader', { name: what }).closest('tr') as HTMLElement;
+      return row.querySelector('td.who') as HTMLElement;
+    };
+    const other = who('Review approving');
+    expect(other.textContent?.replace(/\s+/g, ' ').trim()).toBe('fixture-author-a');
+    expect(within(other).getByRole('link', { name: 'fixture-author-a on GitHub, opens in a new tab' }).getAttribute('href')).toBe(
+      'https://github.com/fixture-author-a',
+    );
+    // The handle is an inline box: the space inside it before the comma is not drawn.
+    expect(who('Comment by the author').textContent?.replace(/\s+/g, ' ').replace(' ,', ',').trim()).toBe(
+      'fixture-author-e, the author',
+    );
+    expect(who('Comment by a bot account').textContent?.trim()).toBe('a bot');
+    expect(who('Bot command by another person: /config check ok').textContent?.trim()).toBe('');
+    expect(within(table).queryAllByRole('button', { name: /^Filter by/ })).toHaveLength(0);
+  });
+
+  it('does not take another person’s comment for the author’s when both are deleted accounts', async () => {
+    const files = withEveryKind();
+    const ghost = rawMeta.people.length;
+    const prs = files['prs-2026.json'] as Columns;
+    const events = files['events-2026.json'] as Columns;
+    const comment = EVERY.findIndex((e) => e.kind === 'comment_other');
+    const first = (events['pr'] as number[]).length - EVERY.length;
+    const author = (prs['author'] as number[]).map((a, i, all) => (i === all.length - 1 ? ghost : a));
+    const actor = (events['actor'] as number[]).map((a, i) => (i === first + comment ? ghost : a));
+    const section = await timeline('#/?target=all&pr=67300', {
+      ...files,
+      'meta.json': { ...(files['meta.json'] as object), people: [...rawMeta.people, 'ghost'] },
+      'prs-2026.json': { ...prs, author },
+      'events-2026.json': { ...events, actor },
+    });
+    const group = await within(section).findByRole('group', { name: 'The marks on the line, in time order' });
+    expect(within(group).getByRole('link', { name: /^Comment by another person/ }).getAttribute('aria-label')).toBe(
+      'Comment by another person (deleted account), 3 Aug 2026 10:00 UTC',
+    );
+    const row = within(await within(section).findByRole('table')).getByRole('rowheader', { name: 'Comment by another person' });
+    expect(row.closest('tr')?.querySelector('td.who')?.textContent?.trim()).toBe('deleted account');
+    expect(within(group).getByRole('link', { name: /^Opened/ }).getAttribute('aria-label')).toMatch(/^Opened \(deleted account, the author\)/);
+  });
+
+  it('says who made a mark when it is hovered or focused', async () => {
+    const section = await timeline('#/?target=all&pr=67300', withEveryKind());
+    const group = await within(section).findByRole('group', { name: 'The marks on the line, in time order' });
+    const mark = within(group).getByRole('link', { name: /^Review commenting \(fixture-reviewer-k\)/ });
+    await fireEvent.focus(mark);
+    expect(section.querySelector('.tip-who')?.textContent).toBe('by fixture-reviewer-k');
+    await fireEvent.blur(mark);
+    const own = within(group).getByRole('link', { name: /^Comment by the author/ });
+    await fireEvent.pointerEnter(own);
+    expect(section.querySelector('.tip-who')?.textContent).toBe(`by ${AUTHOR}`);
+    await fireEvent.pointerLeave(own);
+    await fireEvent.pointerEnter(within(group).getByRole('link', { name: /^Review by a bot/ }));
+    expect(section.querySelector('.tip-who')?.textContent).toBe('by a bot');
   });
 
   it('takes the marks as one stop for the keyboard, the arrow keys moving along them in time order', async () => {
@@ -162,7 +230,7 @@ describe('PrTimeline', () => {
   it('names each link of the events table for what it opens', async () => {
     const section = await timeline('#/?target=all&pr=67300', withEveryKind());
     const table = await within(section).findByRole('table');
-    expect(within(table).getByRole('link', { name: 'Review approving, 3 Aug 2026 15:00 UTC, on GitHub' }).getAttribute('href')).toBe(
+    expect(within(table).getByRole('link', { name: 'Review approving (fixture-author-a), 3 Aug 2026 15:00 UTC, on GitHub' }).getAttribute('href')).toBe(
       `${PR}#pullrequestreview-201`,
     );
     expect(within(table).queryAllByRole('link', { name: 'open' })).toHaveLength(0);

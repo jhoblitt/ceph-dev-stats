@@ -8,6 +8,7 @@ import { TIMELINE_COLOURS as C } from './colours';
 import { type Commit, type Dataset, PR_STATE, type TableYear, locateEvent, locateRow } from './data';
 import { DAY } from './filters';
 import { formatCount, formatDays } from './format';
+import { type Handle, isBot, personHandle } from './handles';
 import { commitUrl, eventUrl, prUrl } from './links';
 import { spanTitle } from './review';
 import {
@@ -90,13 +91,25 @@ export interface TimelineMark {
   href: string | null;
   /** The dataset event it draws; null for a point taken from the PR's columns. */
   event: number | null;
-  /** Who acted, written into the mark's name and tooltip; filled in by a later task, null until then. */
-  who: string | null;
+  /** Who acted, as far as the data says; null when it names no one. */
+  who: MarkWho | null;
   /**
    * For a close the PR was reopened from, and for that reopening: how long it
    * stayed closed, as written ("under a minute", "30 days"); else null.
    */
   closedFor: string | null;
+}
+
+/**
+ * Who made a mark: a person by GitHub handle, the PR's author among them, or
+ * a bot account, which the data names no one for.
+ */
+export type MarkWho = { by: 'person'; handle: Handle; author: boolean; bot: boolean } | { by: 'bot' };
+
+/** Who made a mark, in words: the handle's text, saying when it is the author's or a bot account's; or "a bot". */
+export function whoText(who: MarkWho): string {
+  if (who.by === 'bot') return 'a bot';
+  return `${who.handle.text}${who.author ? ', the author' : ''}${who.bot ? ', a bot account' : ''}`;
 }
 
 export type SpanKey = 'firstCommitToOpened' | 'openedToLastCommit' | 'afterLastCommit';
@@ -191,11 +204,21 @@ export function markWhat(m: TimelineMark): string {
   return markStyle(m.kind).label + (m.detail === null ? '' : `: ${m.detail}`);
 }
 
-/** A mark's accessible name: what it is, who acted when that is known, and when. */
+/**
+ * A mark's accessible name: what it is, who made it when the data says, and
+ * when. A bot's mark already says so in what it is.
+ */
 export function markName(m: TimelineMark): string {
-  const who = m.who === null ? '' : ` by ${m.who}`;
+  const who = m.who === null || m.who.by === 'bot' ? '' : ` (${whoText(m.who)})`;
   return `${markWhat(m)}${who}, ${formatMoment(m.at)}${m.href === null ? ', address not recorded' : ''}`;
 }
+
+/** The event kinds made by the person an event's `actor` names. */
+const BY_ACTOR = ['comment_other', 'review_approved', 'review_changes', 'review_commented'];
+/** The event kinds made by the PR's author, which carry no actor. */
+const BY_AUTHOR = ['comment_author', 'command_author', 'review_author'];
+/** The event kinds made by a bot account, which carry no actor either. */
+const BY_BOT = ['bot_account', 'bot_review'];
 
 const DISCLOSURE_WORDS: Readonly<Record<string, string>> = {
   none: 'not disclosed',
@@ -229,13 +252,32 @@ export function prTimeline(data: Dataset, row: number, table: TableYear): PrTime
   const state = p.state[row] as number;
   const commitsUrl = `${url}/commits`;
 
+  const authorIndex = p.author[row] as number;
+  // Whether a mark is the author's follows from its kind, never from
+  // comparing indexes: every deleted account shares the one `ghost` index,
+  // and an event that names an actor is by the data's rule not the author's.
+  const person = (index: number, author: boolean): MarkWho => ({
+    by: 'person',
+    handle: personHandle(meta, index),
+    author,
+    bot: isBot(meta, index),
+  });
+  // A bot command by someone other than the author, and every lifecycle
+  // event but the opening, name no one: the data does not record who.
+  const whoMade = (kind: string, e: number): MarkWho | null => {
+    if (BY_AUTHOR.includes(kind)) return person(authorIndex, true);
+    if (BY_BOT.includes(kind)) return { by: 'bot' };
+    const actor = data.events.actor[e] as number;
+    return BY_ACTOR.includes(kind) && actor >= 0 ? person(actor, false) : null;
+  };
+
   const derived = (kind: string, at: number, href: string | null): TimelineMark => ({
     kind,
     at,
     detail: null,
     href,
     event: null,
-    who: null,
+    who: kind === 'opened' ? person(authorIndex, true) : null,
     closedFor: null,
   });
   const commitAt = (field: 1 | 2, t: number) => {
@@ -269,7 +311,7 @@ export function prTimeline(data: Dataset, row: number, table: TableYear): PrTime
       detail: isCommand ? (meta.commands[sub]?.name ?? null) : null,
       href: eventUrl(meta.repo, number, kind, ref),
       event: e,
-      who: null,
+      who: whoMade(kind, e),
       closedFor: null,
     };
     marks.push(mark);

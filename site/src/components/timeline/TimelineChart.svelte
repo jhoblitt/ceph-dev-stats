@@ -1,7 +1,7 @@
 <!--
   One PR's timeline: its legend, the line with every mark, each mark a link
   to its page on GitHub, the three spans beneath, the commits, and the events
-  as a table. Marks are reached by keyboard as one stop: the arrow keys move
+  as a table, each with who made it where the data says. Marks are reached by keyboard as one stop: the arrow keys move
   along them in time order, Enter opens one. The line scrolls sideways when
   its marks need more room than the page has.
 -->
@@ -17,9 +17,11 @@
     reopenedText,
     timelineLayout,
     timelineLegend,
+    whoText,
   } from '../../lib/timeline';
   import { formatDayMonth, formatMoment } from '../../lib/timeline-axis';
   import { focusSibling, measureWidth } from '../charts/measure';
+  import Person from '../Person.svelte';
   import Glyph from './Glyph.svelte';
 
   interface Props {
@@ -265,7 +267,7 @@
           <svg width="16" height="16" viewBox="-8 -8 16 16"><Glyph glyph={tip.m.style.glyph} colour={tip.m.style.colour} r={L.r} /></svg>
           {markWhat(tip.m.mark)}
         </p>
-        {#if tip.m.mark.who !== null}<p>by {tip.m.mark.who}</p>{/if}
+        {#if tip.m.mark.who !== null}<p class="tip-who">by {whoText(tip.m.mark.who)}</p>{/if}
         <p class="tip-when">{formatMoment(tip.m.mark.at)}</p>
         {#if tip.m.mark.href === null}<p class="tip-when">address not recorded</p>{/if}
       </div>
@@ -312,13 +314,20 @@
       <table>
         <caption class="visually-hidden">The events of #{tl.number}, in time order</caption>
         <thead>
-          <tr><th scope="col">When (UTC)</th><th scope="col">What</th><th scope="col">On GitHub</th></tr>
+          <tr><th scope="col">When (UTC)</th><th scope="col">What</th><th scope="col">Who</th><th scope="col">On GitHub</th></tr>
         </thead>
         <tbody>
           {#each layout.marks as m, i (i)}
             <tr>
               <td>{formatMoment(m.mark.at).replace(' UTC', '')}</td>
               <th scope="row">{markWhat(m.mark)}</th>
+              <td class="who">
+                {#if m.mark.who?.by === 'person'}
+                  <Person handle={m.mark.who.handle} bot={m.mark.who.bot} />{#if m.mark.who.author}, the author{/if}
+                {:else if m.mark.who?.by === 'bot'}
+                  a bot
+                {/if}
+              </td>
               <td>
                 {#if m.mark.href !== null}
                   <a href={m.mark.href} target="_blank" rel="noopener noreferrer" aria-label="{markName(m.mark)}, on GitHub">open</a>

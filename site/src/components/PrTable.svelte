@@ -200,9 +200,7 @@
                       <Person
                         {handle}
                         bot={isBot(dataset.meta, person)}
-                        role="author"
-                        active={filters.author === handle.login}
-                        ontoggle={() => byAuthor(handle.login)}
+                        filter={{ role: 'author', active: filters.author === handle.login, ontoggle: () => byAuthor(handle.login) }}
                       />
                     </td>
                   {:else}
