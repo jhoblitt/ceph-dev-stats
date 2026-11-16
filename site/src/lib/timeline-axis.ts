@@ -313,7 +313,7 @@ const MONDAY = 4 * DAY;
 
 /** A line wider than the page has a dated tick at least this often, so no screenful lacks a date. */
 export const DATED_EVERY = 900;
-/** The narrowest screenful the dating holds for: the line's width on a 390-pixel phone. */
+/** A screenful is at least this wide where the page shows that much of the line, as a 390-pixel phone does. */
 export const DATED_LEAST = 236;
 
 function monthStarts(from: number, to: number, every: number): number[] {
@@ -356,21 +356,36 @@ const WIDEST = { dateClock: labelWidth('13 Oct 2026 18:05'), date: labelWidth('1
  * at least `minGap` pixels long at the linear scale. None falls inside a cut.
  *
  * The line's start always has a tick giving its full date, year and, on a
- * line of hours or minutes, time of day. After it a tick names its day where
- * the day changes and its year where the year changes. The far side of each
- * cut is dated too where the label before it leaves room; the layout
- * otherwise gives the date in the cut's note. On a line wider than the page,
- * every window as wide as the page shows (at most `DATED_EVERY` pixels, down
- * to `DATED_LEAST`) holds a dated tick: where the round times leave a
+ * line of hours or minutes, time of day, unless on a line wider than the page
+ * that time leaves no room for a date a screenful on. After it a tick names
+ * its day where the day changes and its year where the year changes. The far
+ * side of each cut is dated too where the label before it leaves room; the
+ * layout otherwise gives the date in the cut's note.
+ *
+ * On a line wider than the page, every window as wide as the page shows of it
+ * holds a dated tick wherever a date fits: where the round times leave a
  * screenful undated, a tick is added as far along as its label fits, giving
- * the date and time there, or the date alone.
+ * the date and time there, or the date alone. The page shows the width the
+ * line was given and `margin` past each end, so the line's last screenful
+ * reaches a margin less far. A screenful is the width given, at most
+ * `DATED_EVERY` and at least `DATED_LEAST`, but no wider than the page shows.
+ *
+ * Where no date fits within a screenful of the dated tick before, the next is
+ * the cut's far side: a date a screenful on that falls in a cut goes back to
+ * the cut's near side, 64 pixels sooner, and may not clear the label before.
+ * After the start's "13 Oct 2026", 79 pixels from its tick, a date with its
+ * year needs 8 pixels more and half its own 79, so on a view narrower than
+ * 191 pixels the page can show up to 191 pixels of line between the start's
+ * tick and the next dated one. After any other dated tick, whose label
+ * reaches at most 61 pixels past it, that needs a view narrower than 173
+ * pixels and a date naming another year than the label before.
  *
  * The ticks are made in one pass along the line, and each is labelled once,
  * from its own time, when it is placed. A placed tick is never moved, and
  * the only one ever taken back is a time of day, which names neither a day
  * nor a year, so no label after it depends on it.
  */
-export function axisTicks(axis: TimeAxis, minGap: number): AxisTick[] {
+export function axisTicks(axis: TimeAxis, minGap: number, margin = 0): AxisTick[] {
   const { from, to, scale } = axis;
   let times: number[] = [];
   let unit: 'clock' | 'day' | 'month' = 'day';
@@ -389,8 +404,23 @@ export function axisTicks(axis: TimeAxis, minGap: number): AxisTick[] {
   }
   const clocked = (t: number) => unit === 'clock' && t % DAY !== 0;
   const scrolls = axis.width > axis.available + 1;
-  // A screenful is the width the line was given, at most DATED_EVERY.
-  const every = Math.min(DATED_EVERY, Math.max(DATED_LEAST, axis.available));
+  const view = axis.available + 2 * margin;
+  const every = Math.min(DATED_EVERY, Math.max(DATED_LEAST, axis.available), view);
+  // The window at the line's end reaches only a margin past it.
+  const last = Math.min(every, view - margin);
+  // Where the dated tick after the start goes when nothing else is in its
+  // way: a screenful on, or the cut's near side when that falls in a cut.
+  const firstFill = (() => {
+    const at = Math.min(every, axis.width);
+    return axis.cuts.find((c) => at > c.x0 && at < c.x1)?.x0 ?? at;
+  })();
+  // The start gives its time of day where a date with its year still fits
+  // after it there.
+  const startClock = (() => {
+    if (!clocked(from)) return false;
+    const room = firstFill + WIDEST.date / 2 > axis.width ? firstFill - WIDEST.date : firstFill - WIDEST.date / 2;
+    return !scrolls || labelWidth(writeTick(from, 'dateClock', true)) + 8 <= room;
+  })();
 
   const make = (at: number, time: number, form: Form, withYear: boolean): AxisTick => {
     const label = writeTick(time, form, withYear);
@@ -402,7 +432,7 @@ export function axisTicks(axis: TimeAxis, minGap: number): AxisTick[] {
   const right = (t: AxisTick) => left(t) + labelWidth(t.label);
   const clear = (a: AxisTick, b: AxisTick) => right(a) + 8 <= left(b);
 
-  const ticks: AxisTick[] = [make(axis.x(from), from, clocked(from) ? 'dateClock' : 'date', true)];
+  const ticks: AxisTick[] = [make(axis.x(from), from, startClock ? 'dateClock' : 'date', true)];
   let dated = ticks[0] as AxisTick;
   const push = (t: AxisTick) => {
     ticks.push(t);
@@ -437,8 +467,8 @@ export function axisTicks(axis: TimeAxis, minGap: number): AxisTick[] {
   // then written from the time there; the room left after it is reckoned
   // with the labels after it at their widest. Where it cannot fit, it gives
   // up `next`'s room, then the times of day before it give way, then the far
-  // sides' times of day, then their room.
-  const fill = (next: AxisTick | null): AxisTick | null => {
+  // sides' times of day, then their room, and then it moves back, or else on.
+  const fill = (next: AxisTick | null, until: number): AxisTick | null => {
     const levels = [
       ...(next === null ? [] : [{ next, keep: 'widest' as const }]),
       ...(['widest', 'shortest', 'none'] as const).map((keep) => ({ next: null, keep })),
@@ -447,12 +477,24 @@ export function axisTicks(axis: TimeAxis, minGap: number): AxisTick[] {
       for (;;) {
         const prev = ticks.at(-1) as AxisTick;
         const after = [...(level.next === null ? [] : [level.next]), ...farAhead(level.keep, dated)];
+        let reach = 0;
         for (const form of ['dateClock', 'date'] as const) {
           let at = Math.min(dated.at + every, axis.width, ...after.map((t) => left(t) - 8 - WIDEST[form] / 2));
           const cut = axis.cuts.find((c) => at > c.x0 && at < c.x1);
           if (cut) at = cut.x0;
+          reach = at;
           const tick = datedTick(at, axis.time(at), form);
           if (clear(prev, tick) && after.every((t) => clear(tick, t))) return tick;
+        }
+        // Last of all, the furthest place back from there that a date fits:
+        // an earlier one can be shorter, without a year the later names, or,
+        // near the line's end, centred rather than ending at its tick. Failing
+        // that, the nearest place on, short of `until`.
+        if (prev.dated && level === levels.at(-1)) {
+          const date = (at: number) => datedTick(at, axis.time(at), 'date');
+          const fits = (at: number) => !axis.cuts.some((c) => at > c.x0 && at < c.x1) && clear(prev, date(at));
+          for (let at = reach - 0.5; at > prev.at; at -= 0.5) if (fits(at)) return date(at);
+          for (let at = reach + 0.5; at < until && at <= axis.width; at += 0.5) if (fits(at)) return date(at);
         }
         if (prev.dated) break;
         ticks.pop();
@@ -467,8 +509,8 @@ export function axisTicks(axis: TimeAxis, minGap: number): AxisTick[] {
   );
   for (const c of [...queue, null]) {
     const until = c === null ? axis.width : c.at;
-    while (scrolls && until - dated.at > every) {
-      const tick = fill(c === null || c.far ? null : round(c.at, c.time));
+    while (scrolls && until - dated.at > (c === null ? last : every)) {
+      const tick = fill(c === null || c.far ? null : round(c.at, c.time), c === null ? Infinity : c.at);
       if (tick === null) break;
       push(tick);
     }
