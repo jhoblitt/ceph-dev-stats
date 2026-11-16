@@ -24,7 +24,11 @@ GITHUB_TOKEN, in that order.
 
 A --since later than the default skips pull requests the next default walk
 would otherwise trust as walked, so it leaves the cache's meta.json, the
-coverage mark, as it was.`,
+coverage mark, as it was.
+
+A --refetch walk that stops early keeps the entries it replaced but does
+not resume: run again with --refetch, it downloads every pull request in
+its range again; without it, only those updated since they were cached.`,
 		Args: cobra.NoArgs,
 		PreRunE: func(*cobra.Command, []string) error {
 			if v.GetBool("full") && v.GetString("since") != "" {
@@ -42,6 +46,7 @@ coverage mark, as it was.`,
 				return err
 			}
 			cfg.CacheDir = v.GetString("cache-dir")
+			cfg.Refetch = v.GetBool("refetch")
 			client, err := ghapi.NewClient(v.GetString("api-url"), token)
 			if err != nil {
 				return err
@@ -52,6 +57,7 @@ coverage mark, as it was.`,
 	f := cmd.Flags()
 	f.String("since", "", "walk back to pull requests updated at this RFC 3339 time; default a day before the data directory's fetched_through, or, with no meta.json there, the window start, when ceph/ceph was created (CEPHSTATS_SINCE)")
 	f.Bool("full", false, "walk back to the window start, when ceph/ceph was created, listing every pull request (CEPHSTATS_FULL)")
+	f.Bool("refetch", false, "fetch again each pull request the walk lists, every one updated since --since or its default (the window start with --full) and every open one, though cached at the same updatedAt, re-downloading each of them (CEPHSTATS_REFETCH)")
 	f.String("cache-dir", ".cache", "raw cache directory (CEPHSTATS_CACHE_DIR)")
 	f.String("data", "data", "committed data directory, read for meta.json (CEPHSTATS_DATA)")
 	f.String("api-url", ghapi.DefaultEndpoint, "GitHub GraphQL endpoint (CEPHSTATS_API_URL)")

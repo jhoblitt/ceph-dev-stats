@@ -92,6 +92,8 @@ var _ = Describe("Run", func() {
 		defaultSinceAt time.Time
 		// window is run's Config.WindowStart; zero takes the default.
 		window time.Time
+		// refetch is run's Config.Refetch.
+		refetch bool
 	)
 
 	BeforeEach(func() {
@@ -102,6 +104,7 @@ var _ = Describe("Run", func() {
 		defaultSince = false
 		defaultSinceAt = time.Time{}
 		window = time.Date(2026, 5, 15, 0, 0, 0, 0, time.UTC)
+		refetch = false
 	})
 
 	serve := func(prs ...fetch.Entry) {
@@ -125,6 +128,7 @@ var _ = Describe("Run", func() {
 			Since:          since,
 			SinceIsDefault: defaultSince,
 			DefaultSince:   defaultSinceAt,
+			Refetch:        refetch,
 			PageSize:       pageSize,
 			NestedPageSize: 2,
 			Logger:         logger,
@@ -893,6 +897,67 @@ var _ = Describe("Run", func() {
 		}
 		Expect(ops).To(HaveEach(BeElementOf(ghapi.PullRequests.Name, ghapi.Counts.Name, ghapi.SearchCount.Name)))
 		Expect(os.ReadFile(filepath.Join(cacheDir, "raw", "3.json"))).To(Equal(before))
+	})
+
+	Describe("a later run over a cache that holds every PR", func() {
+		BeforeEach(func() {
+			changed, unchanged, open := pr(2, 2, "CLOSED"), pr(3, 3, "CLOSED"), pr(4, 4, "OPEN")
+			changed.Comments, unchanged.Comments, open.Comments = comments(3), comments(3), comments(3)
+			serve(changed, unchanged, open)
+			Expect(run(fetch.WindowStart)).To(Succeed())
+			server.Update(2, func(e *fetch.Entry) {
+				e.UpdatedAt = at(6)
+				e.Title = "retitled at a later updatedAt"
+			})
+			for _, n := range []int{3, 4} {
+				server.Update(n, func(e *fetch.Entry) { e.Title = "retitled without moving updatedAt" })
+			}
+		})
+
+		DescribeTable("fetches a PR updated since it was cached, and one cached at the same updatedAt only when refetching, once in a run though listed twice",
+			func(again bool, downloads int) {
+				refetch = again
+
+				Expect(run(fetch.WindowStart)).To(Succeed())
+
+				Expect(nestedFor(ghapi.Comments, 2)).To(HaveLen(2), "PR 2, updated, is downloaded by both runs")
+				Expect(entry(2).Title).To(Equal("retitled at a later updatedAt"))
+				for _, n := range []int{3, 4} {
+					title := "pr " + strconv.Itoa(n)
+					if again {
+						title = "retitled without moving updatedAt"
+					}
+					Expect(nestedFor(ghapi.Comments, n)).To(HaveLen(downloads), "PR %d's downloads over both runs", n)
+					Expect(entry(n).Title).To(Equal(title), "PR %d", n)
+				}
+			},
+			Entry("without refetching, keeping each unchanged entry as it was", false, 1),
+			Entry("refetching, replacing each, the open one listed by both phases once", true, 2),
+		)
+
+		It("downloads every PR in range again when a refetching run is repeated, rather than resuming", func() {
+			refetch = true
+			Expect(run(fetch.WindowStart)).To(Succeed())
+
+			Expect(run(fetch.WindowStart)).To(Succeed())
+
+			Expect(nestedFor(ghapi.Comments, 3)).To(HaveLen(3))
+		})
+
+		It("keeps an entry cached at a later updatedAt than the listing gives, though refetching", func() {
+			path := filepath.Join(cacheDir, "raw", "3.json")
+			e := readJSON(path)
+			e["updatedAt"] = at(10).Format(time.RFC3339)
+			b, err := json.Marshal(e)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(os.WriteFile(path, b, 0o600)).To(Succeed())
+			refetch = true
+
+			Expect(run(fetch.WindowStart)).To(Succeed())
+
+			Expect(nestedFor(ghapi.Comments, 3)).To(HaveLen(1))
+			Expect(entry(3).UpdatedAt).To(Equal(at(10)))
+		})
 	})
 
 	It("retries two empty responses and then succeeds at the same page size", func() {

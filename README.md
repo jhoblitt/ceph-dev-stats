@@ -33,7 +33,8 @@ environment variable.
   2011-09-01, the day ceph/ceph was created, when there is none or its
   `window_start` is later), and every one still open. `--full` walks back
   to the window start, listing every pull request in the repository's
-  history. It reads the GitHub token from
+  history. `--refetch` fetches again every pull request the walk lists,
+  even one cached at the same `updatedAt`. It reads the GitHub token from
   `CEPHSTATS_GITHUB_TOKEN`, `GH_TOKEN` or `GITHUB_TOKEN`, in that order.
   Only for a pull request whose author's account was deleted, which GitHub
   gives as no author at all, it also reads the name git records for each
@@ -192,29 +193,31 @@ So neither sees a change GitHub makes without moving `updatedAt`. One such
 change has been seen: GitHub began returning the commit of an old
 force-push without touching the pull request. Comparing a refreshed cache
 with a walk into an empty one, over 6,270 pull requests, found it once,
-and it changed only that event's link. Only fetching afresh picks such a
-change up: move the cache aside and walk the window into an empty one.
+and it changed only that event's link. `--refetch`, which
+`make data-refresh` takes from `CEPHSTATS_REFETCH=true`, picks such a
+change up: it fetches again every pull request the walk lists, though
+cached at the same `updatedAt`, and replaces its entry, and `extract` then
+re-derives its record. With `--full` that is every pull request since the
+window start:
 
 ```sh
-mv .cache .cache.old
-CEPHSTATS_FULL=true make data-refresh
+CEPHSTATS_FULL=true CEPHSTATS_REFETCH=true make data-refresh
 ```
 
-Over the six-month window that walk took about 28 minutes for 6,270 pull
-requests; the whole history is roughly twelve times as many. If it stops,
-run `CEPHSTATS_FULL=true make data-refresh` again, without the `mv`: it
-resumes into the same cache, skipping what it already fetched. To give it
-up instead, `rm -rf .cache` and `mv .cache.old .cache` put the old cache
-back.
+Over the six-month window a walk that fetched every pull request took about
+28 minutes for 6,270 of them; the whole history is roughly twelve times as
+many. If it stops, the entries it replaced stay, but it does not resume:
+run again with `CEPHSTATS_REFETCH=true`, it fetches every pull request
+again; without it, only those updated since they were cached, and the rest
+keep the entries they had.
 
-A fresh walk is also a refresh, so every pull request updated since the
-last commit of `data/`, or during the hours of the walk, changes its record
-anyway. What only a fresh walk finds is a record that changed while its
+A refetch is also a refresh, so every pull request updated since the last
+commit of `data/`, or during the hours of the walk, changes its record
+anyway. What only a refetch finds is a record that changed while its
 `updated` time did not: in each month file `git diff --stat data/prs`
 lists, compare the committed version (`git show
 HEAD:data/prs/<month>.jsonl`) with the new one for the records whose
-`updated` is the same in both. Either way the new cache replaces the old
-one, and `.cache.old` can be removed.
+`updated` is the same in both.
 
 ## Publishing
 
