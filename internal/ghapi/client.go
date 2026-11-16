@@ -47,7 +47,7 @@ type Query struct {
 	Text string
 }
 
-// Client sends GraphQL queries to one endpoint, one at a time.
+// Client sends GraphQL queries to one endpoint.
 type Client struct {
 	endpoint string
 	token    string
