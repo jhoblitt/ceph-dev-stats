@@ -5,9 +5,11 @@ import rawMeta from './__fixtures__/data/meta.json';
 import prs2025 from './__fixtures__/data/prs-2025.json';
 import prs2026 from './__fixtures__/data/prs-2026.json';
 import { combine, parseMeta, parseYear } from './data';
-import type { Filters } from './filters';
-import { openedIn, select } from './select';
+import { type Filters, dayOf, dayStart, periodRange } from './filters';
+import { openedIn, openedInBucket, select } from './select';
 import { defaultFilters } from './state';
+import { all, at, dataset } from './stats/testing';
+import { weekly } from './stats/weekly';
 
 const meta = parseMeta(rawMeta);
 const data = combine(meta, [parseYear(2025, prs2025, events2025), parseYear(2026, prs2026, events2026)]);
@@ -56,6 +58,47 @@ describe('select', () => {
 
   it('selects nothing for a component meta does not name', () => {
     expect(rows({ component: 'no-such-component' })).toEqual([]);
+  });
+});
+
+describe('openedInBucket', () => {
+  const period = periodRange(every);
+  const selected = select(data, every);
+  const day = (d: string) => dayStart(d) as number;
+
+  it('gives the selected rows opened in the window during a week', () => {
+    // #66500 opened 2026-05-18 10:00 and #66510 2026-05-20 12:00.
+    expect([...openedInBucket(data, selected, period, day('2026-05-18'))]).toEqual([3, 4]);
+    expect([...openedInBucket(data, select(data, { ...every, size: 'le10' }), period, day('2026-05-18'))]).toEqual([4]);
+  });
+
+  it('agrees with the weekly count of PRs opened, bucket by bucket', () => {
+    const opened = weekly(data, selected, period, 'opened');
+    expect(opened.week.length).toBeGreaterThan(20);
+    opened.week.forEach((week, i) => {
+      const count = (opened.values['disclosed']?.[i] ?? 0) + (opened.values['not-disclosed']?.[i] ?? 0);
+      expect(openedInBucket(data, selected, period, week).length, dayOf(week)).toBe(count);
+    });
+  });
+
+  it('gives no rows for a day that does not start a bucket of the period', () => {
+    expect([...openedInBucket(data, selected, period, day('2026-05-19'))]).toEqual([]);
+    expect([...openedInBucket(data, selected, period, day('2027-01-04'))]).toEqual([]);
+  });
+
+  it('takes a month over a period beyond 53 weeks', () => {
+    const long = dataset(
+      [
+        { created: at('2025-05-31T23:59:59Z') },
+        { created: at('2025-06-01T00:00:00Z') },
+        { created: at('2025-06-30T23:59:59Z'), in_window: 0 },
+        { created: at('2025-07-01T00:00:00Z') },
+      ],
+      [],
+    );
+    const months = { start: at('2025-05-15T00:00:00Z'), end: at('2026-07-01T00:00:00Z') };
+    expect([...openedInBucket(long, all(long), months, at('2025-06-01T00:00:00Z'))]).toEqual([1]);
+    expect([...openedInBucket(long, all(long), months, at('2025-06-02T00:00:00Z'))]).toEqual([]);
   });
 });
 

@@ -3,7 +3,7 @@
 
 import type { Dataset } from './data';
 import { type Filters, SIZE_BANDS, STANDING_BANDS, periodRange } from './filters';
-import type { Period } from './stats/buckets';
+import { type Period, bucketOf, buckets } from './stats/buckets';
 
 /**
  * The rows the filters select, ascending. The period keeps every PR active in
@@ -56,4 +56,18 @@ export function openedIn(data: Dataset, rows: Uint32Array, period: Period): Uint
     const created = p.created[r] as number;
     return p.in_window[r] === 1 && created >= period.start && created < period.end;
   });
+}
+
+/**
+ * The rows of a selection opened in the window during the bucket that starts
+ * at `bucket`, a week or a month by the period's step: the PRs behind a bar
+ * of the weekly `opened` series. No rows when `bucket` starts none of the
+ * period's buckets.
+ */
+export function openedInBucket(data: Dataset, rows: Uint32Array, period: Period, bucket: number): Uint32Array {
+  const b = buckets(period);
+  const w = b.starts.indexOf(bucket);
+  if (w === -1) return new Uint32Array(0);
+  const p = data.prs;
+  return rows.filter((r) => p.in_window[r] === 1 && bucketOf(b, p.created[r] as number) === w);
 }
