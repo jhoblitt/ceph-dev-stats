@@ -38,6 +38,7 @@ type CheckInput struct {
 
 // Check classifies the records and writes reports for whoever tunes the
 // tables to out: the candidates behind the problems below, the
+// neighboring candidates that match a phrase only when joined, the
 // description and commit-prose candidates that match no phrase, the short
 // comments by people that match no command, the accounts not typed bots
 // with the most comments, and the base branches, each most frequent first.
@@ -104,6 +105,13 @@ func Check(in CheckInput, out io.Writer) error {
 	fmt.Fprintln(out, counts)
 	report(out, "Trailers with an unlisted key and no ignore entry", unknownKey.lines(), 0)
 	report(out, "Counted disclosures that match no family", noFamily.lines(), 0)
+	joined := map[string][]int{}
+	for i := range prs {
+		for _, text := range joinedOnly(t, &prs[i]) {
+			joined[text] = append(joined[text], prs[i].Number)
+		}
+	}
+	hint(out, joined, in.Top)
 	report(out, "Description and commit-prose candidates that match no phrase", unmatched, in.Top)
 	comments, accounts, bases := map[string]int{}, map[string]int{}, map[string]int{}
 	for i := range in.Records {
@@ -126,6 +134,47 @@ func Check(in CheckInput, out io.Writer) error {
 	report(out, "Accounts with the most comments, not typed bots by GitHub", accounts, in.Top)
 	report(out, "Base branches", bases, 0)
 	return errors.Join(errs...)
+}
+
+// joinedOnly are the texts, each once, of p's neighboring description or
+// commit-prose candidates, joined by a space, that match a phrase when
+// neither line counts alone or is ignored: perhaps a disclosure wrapped
+// across a line break. They never count. A record's candidate lists hold
+// only possible disclosures, de-duplicated, and commit prose runs on across
+// commits, so neighboring candidates are often not neighboring lines.
+func joinedOnly(t *tables.Tables, p *PR) []string {
+	var out []string
+	seen := map[string]bool{}
+	for i := 1; i < len(p.Candidates); i++ {
+		a, b := p.Candidates[i-1], p.Candidates[i]
+		if a.From != b.From || a.From == FromTrailers || a.Class != "" || b.Class != "" || a.Ignored || b.Ignored {
+			continue
+		}
+		if text := a.Text + " " + b.Text; !seen[text] && t.Tools.Phrase(text) {
+			seen[text] = true
+			out = append(out, text)
+		}
+	}
+	return out
+}
+
+// hint writes the joined texts, the pull requests on most first, then by
+// text, at most top of them when top is above zero.
+func hint(out io.Writer, joined map[string][]int, top int) {
+	keys := slices.SortedFunc(maps.Keys(joined), func(a, b string) int {
+		return cmp.Or(cmp.Compare(len(joined[b]), len(joined[a])), cmp.Compare(a, b))
+	})
+	fmt.Fprintf(out, "Neighboring candidates that match a phrase only when joined: %d\n", len(keys))
+	if len(keys) > 0 {
+		fmt.Fprintf(out, "    For a real disclosure, add a phrase to %s that one of its lines matches alone.\n", tables.ToolsFile)
+	}
+	for i, k := range keys {
+		if top > 0 && i == top {
+			fmt.Fprintf(out, "    and %d more\n", len(keys)-top)
+			break
+		}
+		fmt.Fprintf(out, "    %s (%s)\n", k, prList(joined[k]))
+	}
 }
 
 // problems are the candidate lines with one kind of problem, grouped by the

@@ -21,11 +21,14 @@ var _ = Describe("check", func() {
 	var (
 		stdout  *bytes.Buffer
 		dataDir string
+		// commitProse is the commit prose writeData gives its record.
+		commitProse []string
 	)
 
 	BeforeEach(func() {
 		stdout = &bytes.Buffer{}
 		dataDir = GinkgoT().TempDir()
+		commitProse = []string{}
 		for _, name := range []string{tables.ToolsFile, tables.BotsFile, tables.CommandsFile, tables.LabelsFile, tables.KindsFile} {
 			b, err := os.ReadFile(filepath.Join("..", "..", "data", name))
 			Expect(err).NotTo(HaveOccurred())
@@ -55,7 +58,7 @@ var _ = Describe("check", func() {
 				{At: opened, By: "alice", Text: "jenkins test make check"},
 				{At: opened, By: "bob", Text: "LGTM"},
 			},
-			Disclosure: record.Disclosure{Trailers: trailers},
+			Disclosure: record.Disclosure{Trailers: trailers, CommitProse: commitProse},
 			KindHints:  &record.KindHints{Tickets: []int{90000}},
 		}})
 		Expect(err).NotTo(HaveOccurred())
@@ -152,6 +155,25 @@ var _ = Describe("check", func() {
 		Entry("an unknown trailer key", "Co-developed-by: Claude Dupont <claude.dupont@example.com>"),
 		Entry("a trailer with no family", "Assisted-by: Jean Dupont <jean.dupont@example.com>"),
 	)
+
+	Describe("two commits' lines that match a phrase only when joined", func() {
+		BeforeEach(func() {
+			commitProse = []string{"Addressed review comments from Copilot", "Wrote unit tests for the LLM gateway"}
+			writeData("Bug")
+		})
+
+		It("are a hint with --report, and not a problem", func() {
+			Expect(run("--report")).To(Succeed())
+			Expect(stdout.String()).To(ContainSubstring("Neighboring candidates that match a phrase only when joined: 1\n"))
+			Expect(stdout.String()).To(ContainSubstring(
+				"    Addressed review comments from Copilot Wrote unit tests for the LLM gateway (#7)\n"))
+		})
+
+		It("are not mentioned without --report", func() {
+			Expect(run()).To(Succeed())
+			Expect(stdout.String()).To(BeEmpty())
+		})
+	})
 
 	It("prints only its problems on failure without --report", func() {
 		writeData("Weird")

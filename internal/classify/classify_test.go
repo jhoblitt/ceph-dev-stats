@@ -1,6 +1,8 @@
 package classify_test
 
 import (
+	"os"
+	"path/filepath"
 	"slices"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -194,6 +196,37 @@ var _ = Describe("Records", func() {
 				record.Disclosure{Trailers: []string{"Assisted-by: Cursor (Claude 4)"}},
 				classify.DisclosureTrailer, []string{"cursor"}),
 		)
+
+		DescribeTable("comes from single lines only, never from neighboring lines that match a phrase when joined",
+			func(d record.Disclosure, class string, families []string) {
+				r := pr(1)
+				r.Disclosure = d
+				got := one(r)
+				Expect(got.Disclosure).To(Equal(class))
+				Expect(got.Families).To(Equal(families))
+			},
+			Entry("in the description",
+				record.Disclosure{Description: []string{"The unit tests were generated", "with an LLM and then reviewed."}},
+				classify.DisclosureNone, nil),
+			Entry("in the commit prose",
+				record.Disclosure{CommitProse: []string{"Docs assisted", "by Gemini."}},
+				classify.DisclosureNone, nil),
+			Entry("beside a line that counts alone, whose family is kept",
+				record.Disclosure{Description: []string{"Assisted by an LLM", "Address Claude review comments"}},
+				classify.DisclosureDescription, []string{"unspecified"}),
+		)
+
+		It("stays none for two commits' lines that the data's tables would match only when joined", func() {
+			b, err := os.ReadFile(filepath.Join("..", "..", "data", tables.ToolsFile))
+			Expect(err).NotTo(HaveOccurred())
+			t = loadTables(map[string]string{tables.ToolsFile: string(b)})
+			r := pr(1)
+			r.Disclosure.CommitProse = []string{"Addressed review comments from Copilot", "Wrote unit tests for the LLM gateway"}
+			Expect(t.Tools.Phrase(r.Disclosure.CommitProse[0]+" "+r.Disclosure.CommitProse[1])).To(BeTrue(), "the joined lines match a phrase")
+			got := one(r)
+			Expect(got.Disclosure).To(Equal(classify.DisclosureNone))
+			Expect(got.Families).To(BeEmpty())
+		})
 
 		It("gives the verdict on every candidate", func() {
 			r := pr(1)

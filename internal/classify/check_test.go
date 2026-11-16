@@ -77,6 +77,7 @@ var _ = Describe("Check", func() {
 		Expect(out.String()).To(Equal(`Counts: 2 opened in the window (GitHub: 2), 1 open (GitHub: 1)
 Trailers with an unlisted key and no ignore entry: 0
 Counted disclosures that match no family: 0
+Neighboring candidates that match a phrase only when joined: 0
 Description and commit-prose candidates that match no phrase: 2
       2  Address Claude review comments
       1  GPT partition table
@@ -98,11 +99,32 @@ Base branches: 2
 		Expect(out.String()).To(Equal(`Counts: no meta.json to compare with
 Trailers with an unlisted key and no ignore entry: 0
 Counted disclosures that match no family: 0
+Neighboring candidates that match a phrase only when joined: 0
 Description and commit-prose candidates that match no phrase: 0
 Short comments by people that match no command: 0
 Accounts with the most comments, not typed bots by GitHub: 0
 Base branches: 0
 `))
+	})
+
+	It("hints at neighboring candidates that match a phrase only when joined, without failing", func() {
+		in.Records[1].Disclosure.Description = []string{"Docs assisted", "by Gemini."}
+		in.Records[2].Disclosure.Description = []string{"Docs assisted", "by Gemini."}
+		in.Records[2].Disclosure.CommitProse = []string{"Docs assisted", "by Gemini."}
+		Expect(classify.Check(in, out)).To(Succeed())
+		Expect(out.String()).To(ContainSubstring(`Neighboring candidates that match a phrase only when joined: 1
+    For a real disclosure, add a phrase to tools.yaml that one of its lines matches alone.
+    Docs assisted by Gemini. (#2, #3)
+Description`))
+	})
+
+	It("hints at no pair with an ignored line, a line that counts alone, or lines of two sources", func() {
+		in.Records[0].Disclosure.Description = []string{"Docs assisted"}
+		in.Records[0].Disclosure.CommitProse = []string{"by Gemini."}
+		in.Records[1].Disclosure.Description = []string{"Docs assisted", "by Gemini, said nobody"}
+		in.Records[2].Disclosure.CommitProse = []string{"Assisted by an LLM", "by Gemini."}
+		Expect(classify.Check(in, out)).To(Succeed())
+		Expect(out.String()).To(ContainSubstring("Neighboring candidates that match a phrase only when joined: 0\n"))
 	})
 
 	It("cuts each report at the top entries", func() {

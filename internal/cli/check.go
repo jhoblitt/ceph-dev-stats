@@ -32,10 +32,12 @@ can name a person, so a problem with one names its trailer key, how many
 lines and which pull requests, and never quotes the line.
 
 With --report it also prints, without failing, the candidate lines behind
-those problems and what the tables do not yet match, most frequent first,
-for whoever edits them. The reports quote lines and rank accounts by
-comment count, so they are printed only when asked for and never in CI.
-Records, meta.json and tickets.json are each optional.`,
+those problems, neighboring candidates that match a disclosure phrase only
+when joined (never counted; a real one needs a phrase of its own), and
+what the tables do not yet match, most frequent first, for whoever edits
+them. The reports quote lines and rank accounts by comment count, so they
+are printed only when asked for and never in CI. Records, meta.json and
+tickets.json are each optional.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			in, err := checkInput(v.GetString("data"))
