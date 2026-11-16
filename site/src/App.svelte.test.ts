@@ -102,6 +102,24 @@ describe('App', () => {
     expect(screen.getByRole('region', { name: 'Velocity' }).classList.contains('stale')).toBe(false);
   });
 
+  it('says, while an earlier start’s years load, which period the figures below are still for', async () => {
+    const earlier = withEarlierYear();
+    const twoYears = parseMeta(earlier['meta.json']);
+    const held: (() => void)[] = [];
+    const hold = (f: Fetch): Fetch => (url) =>
+      url.includes('-2025') ? new Promise((go) => held.push(() => go(f(url)))) : f(url);
+    render(App, (await page('', earlier, twoYears, hold)).props);
+    const status = () => screen.getByText((_, el) => el?.classList.contains('loading') === true);
+
+    await fireEvent.click(screen.getByRole('button', { name: 'All, from 1 Jan 2025' }));
+    await waitFor(() => expect(held.length).toBeGreaterThan(0));
+    expect(status().textContent).toBe(
+      'Loading the data for this period; everything below is still for 2026-05-15 to 2026-11-15, with the filters then chosen.',
+    );
+    for (const go of held.splice(0)) go();
+    await waitFor(() => expect(status().textContent).toBe(''));
+  });
+
   describe('trying a year that failed again', () => {
     const earlier = withEarlierYear();
     const twoYears = parseMeta(earlier['meta.json']);

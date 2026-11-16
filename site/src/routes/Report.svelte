@@ -38,12 +38,14 @@
       ? 'Try again fetches what failed.'
       : 'A file arrived but could not be read, so trying again would not help; reloading the page after the data is next published may.',
   );
-  // The lanes name their rows in the PR table's own words for them.
-  // A period whose years failed to load is never shown over the rest: the
-  // sections keep the last period that loaded whole, and say which.
+  // A period is never shown over fewer years than it needs: while its years
+  // load, or after one failed, the sections keep the last period that loaded
+  // whole, and the line says which.
   const status = $derived(
     $data.loading
-      ? 'Loading the data for this period…'
+      ? $view.pending && !$view.first
+        ? `Loading the data for this period; everything below is still for ${$view.filters.from} to ${$view.filters.to}, with the filters then chosen.`
+        : 'Loading the data for this period…'
       : $view.pending
         ? `The data for the period chosen could not be loaded, so everything below is still for ${$view.filters.from} to ${$view.filters.to}, with the filters then chosen. ${remedy}`
         : $data.retry.state === 'succeeded'
@@ -65,6 +67,7 @@
   const tryAgain = () => {
     if (!retrying) data.retry();
   };
+  // The lanes name their rows in the PR table's own words for them.
   const laneRowsName = $derived(
     narrowing($view.dataset, { filters: $view.filters, week, band }) ?? ALL_TABLE_ROWS,
   );
