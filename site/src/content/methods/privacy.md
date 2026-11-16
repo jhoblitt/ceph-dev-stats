@@ -30,7 +30,7 @@ The rules above read lines, not meaning. A person's name or address can still ap
 
 - in a line that holds no `Co-authored-by` key and whose only addresses are tools', for example a description line that thanks someone by name and also mentions a tool;
 - in a `Co-authored-by` line, before the key or in the place of the tool's name: a name there is not looked for, only addresses, a second key and the separators;
-- in a line that starts with one of the never-kept keys written any other way, such as with nothing after the colon but text, a space before it, other white space after it (a non-breaking space or a vertical tab, say), a hyphen or colon that is not ASCII, or a list marker before the key, when the rest of the line makes it a candidate;
+- in a line that starts with one of the never-kept keys written any other way, such as with nothing after the colon but text, a space before it, other white space after it (a non-breaking space or a vertical tab, say), a hyphen or colon that is not ASCII, an invisible character such as a zero-width space before the key or inside it, which is not white space and is not trimmed, or a list marker before the key, when the rest of the line makes it a candidate;
 - in a trailer of another key that carries no address, such as an `Assisted-by` line that names a person beside a tool;
 - as an address written so as not to look like one: with a space before the `@` and none after it, which reads as a mention; written out with "at"; or encoded other than as `%40`;
 - as a mention of another person's login, such as one that thanks them, in a kept line;

@@ -1,0 +1,29 @@
+# The People tables
+
+The People section has two tables over the current filters: the Authors table, of who opened the selected pull requests and what those pull requests came to, and the Reviewers table, of who reviewed or commented on them. A person is named by their GitHub login and nothing else. Ordering a table by a column orders people by that count or median; people with the same value are ordered by their login, a deleted account by the words "deleted account", and people with no median to show come last whichever way the column is ordered; a count of pull requests, commits or lines is not a measure of anyone's contribution, and the tables are not one.
+
+On the report's default view, the {{view.prs}} pull requests on main open at some point in the window as of {{asOf}}, the Authors table lists {{people.authors}} people, with {{people.botAuthors}} bot accounts not shown, and the Reviewers table lists {{people.reviewers}}.
+
+## The Authors table
+
+- **Which pull requests.** A person's row counts the selected pull requests they opened in the window during the period: the same pull requests the counts of pull requests opened and the outcome curves use. A pull request they opened before the period is not in their row, even when it was still open in the period.
+- **Opened, merged, closed unmerged and still open** are those pull requests by their state at the last fetch.
+- **Commits and lines** are those of the pull requests the person opened, not of the commits the person wrote: the data records each pull request's commits, but not who wrote each one. So a backport's commits and lines count for whoever opened the backport, though the work in them is the original's; the Target filter keeps original work on `main` apart from backports.
+- **Lines** are each pull request's whole diff, lines added plus lines deleted, as GitHub counts them. One large change can dominate a total: on the default view, the largest single pull request is {{people.largestLines}} lines, {{people.largestShare}} of all the lines the Authors table counts with bot accounts not shown.
+- **Disclosing LLM use** is the share of the person's pull requests that disclose in any of the [forms](#disclosure).
+- **The medians** are read from the outcome curves over the person's pull requests, as the Review section's are: the time from ready for review to the first human response, which leaves out drafts never made ready, and the time from opening to merging. Each gives the number of pull requests behind it. With fewer than {{const.minPrs}} it is "too few"; otherwise it is a time, "not yet known" or "not reached", as described in [Outcomes over time](#outcomes). On the default view, {{people.authorsTooFew}} of the {{people.authors}} authors have too few pull requests for a median to merge.
+
+## The Reviewers table
+
+- **What counts.** Only what a person did during the period on selected pull requests they did not open. Nothing a person does on their own pull requests counts: neither their comments on them nor their replies in review threads.
+- **Reviews** are counted by verdict: approving, requesting changes, or commenting; a review later dismissed counts as commenting. **Comments** are conversation comments outside a review that are not bot commands, such as a posted test result. Comments and reviews from bot accounts, and bot commands from anyone, never count.
+- **PRs reviewed or commented on** counts each pull request once when the person made at least one such review or comment on it during the period, before or after it closed. Choosing the person as the Reviewer filter keeps exactly those pull requests.
+- **First responses** counts the pull requests whose first human response was this person's, when it came during the period and before the pull request was finally merged or closed: a response made while it was closed, before it was reopened, still counts. A pull request never made ready for review has no first response, so it counts for no one.
+- **The median to their first response** is, over the pull requests where this person's first comment or review came during the period and before the pull request was finally merged or closed, the time from the pull request being ready for review to that comment or review. One made before the pull request was ready counts as no time, and pull requests never made ready are left out. Since each of these times happened, it is a plain median of them, not one read from a curve. With fewer than {{const.minPrs}} it is "too few".
+- Someone who reviews without leaving a review or a comment the data records, such as an approval given another way, is not seen here.
+
+## Bot accounts and deleted accounts
+
+An account is a bot account when GitHub types it as one or `data/bots.yaml` lists it, as in [People and bots](#people). Both tables leave bot accounts out until "Show bot accounts" is ticked. The Reviewers table never lists one: the data keeps no login for a bot's comment or review.
+
+Every deleted account shares one login, so the tables show deleted accounts together as one row, "deleted account", with no link. Unlike the rest of the site, the Reviewers table takes a comment or review by a deleted account on a pull request opened by a deleted account for the author's own and leaves it out; when that comment was the pull request's first response, the table credits the first response to the next person who commented or reviewed, when that came during the period.

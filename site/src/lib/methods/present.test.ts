@@ -67,12 +67,30 @@ describe('inline figures on the fixture', () => {
     ['refs.forcePushShareWithoutCommit', '0%'],
     ['refs.merges', '6'],
     ['refs.mergesWithoutCommit', '0'],
+    ['const.minPrs', '5'],
+    ['const.horizons', '7, 30 and 90'],
+    ['const.minFollowed', '30'],
+    ['const.topAuthors', '3'],
+    ['view.prs', '9'],
+    // Rows 0 and 2, both not disclosing.
+    ['view.openedBefore', '2'],
+    ['view.notDisclosedInWindow', '67%'],
+    ['view.disclosedInWindow', '100%'],
+    ['const.compareWeeks', '4'],
+    ['const.compareNeeded', '8'],
+    ['people.authors', '6'],
+    ['people.botAuthors', '0'],
+    ['people.reviewers', '5'],
+    ['people.authorsTooFew', '6'],
+    ['people.largestLines', '2,200'],
+    // 2,200 of 3,694.
+    ['people.largestShare', '60%'],
   ])('%s is %s', (name, expected) => {
     expect(value(name)).toBe(expected);
   });
 
   it('has a spec above for every inline figure', () => {
-    expect(Object.keys(INLINE_FIGURES).length).toBe(27);
+    expect(Object.keys(INLINE_FIGURES).length).toBe(43);
   });
 });
 
@@ -112,6 +130,7 @@ describe('table figures on the fixture', () => {
       'table.kindSources',
       'table.disclosureForms',
       'table.families',
+      'table.disclosureGroups',
       'table.eventRefs',
     ]);
   });
@@ -149,6 +168,27 @@ describe('table figures on the fixture', () => {
       ['GitHub Copilot', '1', '0', '1'],
       ['unspecified', '0', '1', '1'],
     ]);
+  });
+
+  it('sets side by side the two groups the LLM-use section compares on the default view', () => {
+    // Rows 3, 4, 5, 6, 8, 9 and 10: main, opened in the window.
+    expect(model('table.disclosureGroups')).toEqual({
+      caption:
+        "The 7 pull requests on main opened in the window, those the LLM-use section compares on the report's default view, by disclosure, as of 2026-11-15",
+      head: ['', 'not disclosed', 'disclosed'],
+      rows: [
+        ['pull requests', '4', '3'],
+        ['median lines changed', '70', '90'],
+        ['median time since opened, at the last fetch', '153 days', '102 days'],
+        ["opened by the group's 3 most active authors", '75%', '100%'],
+        ['kind: bug fix', '0%', '33%'],
+        ['kind: feature', '50%', '33%'],
+        ['kind: cleanup', '25%', '0%'],
+        ['kind: documentation', '25%', '0%'],
+        ['kind: other', '0%', '33%'],
+        ['kind: unknown', '0%', '0%'],
+      ],
+    });
   });
 
   it('counts the events with no address of their own', () => {

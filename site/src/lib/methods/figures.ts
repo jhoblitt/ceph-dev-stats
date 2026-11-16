@@ -4,10 +4,13 @@
 // differ in kind; event counts take only the events inside the window.
 
 import { type Dataset, type Meta, type TableYear, locateEvent, locateRow } from '../data';
-import { periodRange } from '../filters';
-import { select } from '../select';
+import { DAY, periodRange } from '../filters';
+import { isBot } from '../handles';
+import { openedIn, select } from '../select';
 import { defaultFilters } from '../state';
 import type { Period } from '../stats/buckets';
+import { nearestRank } from '../stats/measures';
+import { authorRows, reviewerRows } from '../stats/people';
 
 /** A count of PRs on main and on every other branch. */
 export interface Split {
@@ -200,3 +203,106 @@ export function eventRefs(data: Dataset, tables: ReadonlyMap<number, TableYear>,
   });
   return kinds.flatMap((kind, k) => ((events[k] as number) > 0 ? [{ kind, events: events[k] as number, missing: missing[k] as number }] : []));
 }
+
+/** The report's default view: PRs on main open at some point in the window. */
+export function defaultRows(data: Dataset): Uint32Array {
+  return select(data, defaultFilters(data.meta));
+}
+
+export interface PeopleFigures {
+  /** Rows of the Authors table, bot accounts left out as the page leaves them out by default. */
+  authors: number;
+  /** Bot accounts among the authors, which the table hides until asked. */
+  botAuthors: number;
+  /** Rows of the Reviewers table, bot accounts left out. */
+  reviewers: number;
+  /** Authors shown whose median to merge rests on too few PRs to be given. */
+  authorsTooFew: number;
+  /** The lines changed by the largest PR the Authors table counts, bot accounts not shown. */
+  largestLines: number;
+  /** Its share of all the lines changed the Authors table counts, bot accounts not shown; null with none. */
+  largestShare: number | null;
+}
+
+/** What the People tables show for `rows` over the whole window, computed as they compute it. */
+export function peopleFigures(data: Dataset, rows: Uint32Array): PeopleFigures {
+  const period = windowPeriod(data.meta);
+  const opened = openedIn(data, rows, period);
+  const authors = authorRows(data, opened);
+  const reviewers = reviewerRows(data, rows, period);
+  const human = <R extends { person: number }>(list: readonly R[]) => list.filter((r) => !isBot(data.meta, r.person));
+  const p = data.prs;
+  let largestLines = 0;
+  let total = 0;
+  for (const r of opened) {
+    if (isBot(data.meta, p.author[r] as number)) continue;
+    const lines = (p.additions[r] as number) + (p.deletions[r] as number);
+    total += lines;
+    largestLines = Math.max(largestLines, lines);
+  }
+  return {
+    authors: human(authors).length,
+    botAuthors: authors.length - human(authors).length,
+    reviewers: human(reviewers).length,
+    authorsTooFew: human(authors).filter((a) => a.merge.state === 'tooFew').length,
+    largestLines,
+    largestShare: total === 0 ? null : largestLines / total,
+  };
+}
+
+/** How many of a group's most active authors its concentration is measured over. */
+export const TOP_AUTHORS = 3;
+
+export interface GroupProfile {
+  prs: number;
+  /** The share opened in the window; the rest were opened before it. */
+  openedInWindow: number | null;
+  /** Lines added plus deleted, a nearest-rank median. */
+  medianLines: number | null;
+  /** Days from opening to the last fetch, a nearest-rank median. */
+  medianAgeDays: number | null;
+  /** The share opened by the group's `TOP_AUTHORS` most active authors. */
+  topAuthors: number | null;
+  /** The share of each kind, by meta's kind id, and `unknown`. */
+  kinds: Record<string, number> | null;
+}
+
+function profile(data: Dataset, rows: Uint32Array): GroupProfile {
+  const n = rows.length;
+  if (n === 0) return { prs: 0, openedInWindow: null, medianLines: null, medianAgeDays: null, topAuthors: null, kinds: null };
+  const p = data.prs;
+  const meta = data.meta;
+  let inWindow = 0;
+  const lines = new Float64Array(n);
+  const ages = new Float64Array(n);
+  const byAuthor = new Map<number, number>();
+  const kinds: Record<string, number> = Object.fromEntries([...meta.kinds.map((k) => k.id), 'unknown'].map((k) => [k, 0]));
+  rows.forEach((r, i) => {
+    if (p.in_window[r] === 1) inWindow++;
+    lines[i] = (p.additions[r] as number) + (p.deletions[r] as number);
+    ages[i] = (meta.fetched_through - (p.created[r] as number)) / DAY;
+    const author = p.author[r] as number;
+    byAuthor.set(author, (byAuthor.get(author) ?? 0) + 1);
+    const kind = meta.kinds[p.kind[r] as number]?.id ?? 'unknown';
+    kinds[kind] = (kinds[kind] as number) + 1;
+  });
+  const top = [...byAuthor.values()].sort((a, b) => b - a).slice(0, TOP_AUTHORS);
+  return {
+    prs: n,
+    openedInWindow: inWindow / n,
+    medianLines: nearestRank(lines.sort(), 0.5),
+    medianAgeDays: nearestRank(ages.sort(), 0.5),
+    topAuthors: top.reduce((a, b) => a + b, 0) / n,
+    kinds: Object.fromEntries(Object.entries(kinds).map(([k, c]) => [k, c / n])),
+  };
+}
+
+/** The PRs that do not disclose and those that do, each described by what differs between them besides disclosure. */
+export function disclosureGroups(data: Dataset, rows: Uint32Array): { notDisclosed: GroupProfile; disclosed: GroupProfile } {
+  const none = data.meta.disclosure.indexOf('none');
+  return {
+    notDisclosed: profile(data, rows.filter((r) => data.prs.disclosure[r] === none)),
+    disclosed: profile(data, rows.filter((r) => data.prs.disclosure[r] !== none)),
+  };
+}
+

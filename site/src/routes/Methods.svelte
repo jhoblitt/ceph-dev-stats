@@ -2,10 +2,12 @@
   How every figure on the site is arrived at. The prose is Markdown under
   src/content/methods/, shown at once; the figures in it are computed from
   the data when the page is shown, the ones that need the table files only
-  once those load, and a load that fails leaves the prose as it is.
+  once those load, and a load that fails leaves the prose as it is. The
+  address can name a section, which the page moves to when it opens and
+  whenever the section named changes.
 -->
 <script lang="ts">
-  import { onMount } from 'svelte';
+  import { onMount, tick } from 'svelte';
   import { type DataError, type TableYear } from '../lib/data';
   import { dayOf } from '../lib/filters';
   import Prose from '../lib/methods/Prose.svelte';
@@ -20,7 +22,7 @@
   } from '../lib/methods/present';
   import { sections } from '../lib/methods/sections';
   import { getPage } from '../lib/page';
-  import { routeHash } from '../lib/state';
+  import { sectionHash } from '../lib/state';
 
   const { meta, loader, selection } = getPage();
   const all = sections();
@@ -28,7 +30,7 @@
   let data = $state<Loadable<DataFigures>>({ state: 'loading' });
   let tables = $state<Loadable<TableFigures>>({ state: 'loading' });
 
-  const here = $derived(routeHash($selection, 'methods', meta));
+  const href = (id: string) => sectionHash($selection, id, meta);
   const inline = (name: string) => inlineView(name, meta, data, tables);
   const table = (name: string) => tableView(name, meta, data, tables);
 
@@ -61,18 +63,53 @@
     };
   });
 
+  // Where the page last moved to, and the scroll position it left there, so
+  // that figures loading above it can be made up for unless the reader has
+  // scrolled since.
+  let landed: { id: string; y: number } | null = null;
+
   function jump(id: string) {
     const target = document.getElementById(id);
     if (!target) return;
     target.scrollIntoView({ block: 'start' });
     target.focus({ preventScroll: true });
+    landed = { id, y: window.scrollY };
   }
 
-  function follow(event: MouseEvent, id: string) {
-    // A plain #id would replace the hash that holds the route and filters.
+  // A link to a section is a real address, so it can be copied or opened in
+  // a new tab; followed here, it moves to the section through the URL state.
+  function go(event: MouseEvent, id: string) {
+    if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
     event.preventDefault();
-    jump(id);
+    if ($selection.section === id) jump(id);
+    else selection.update((s) => ({ ...s, section: id }));
   }
+
+  let heading: HTMLElement;
+  // The section the page last moved to; not reactive, so moving does not rerun the effect.
+  let shownSection: string | null = null;
+
+  // The app leaves the scroll alone when the route changes to an address
+  // naming a section, so the page moves there without racing it.
+  $effect(() => {
+    const id = $selection.section;
+    const previous = shownSection;
+    shownSection = id;
+    if (id !== null) {
+      void tick().then(() => jump(id));
+    } else if (previous !== null) {
+      // Back to the page itself, as a fresh load of it would show it.
+      landed = null;
+      window.scrollTo(0, 0);
+      heading.focus({ preventScroll: true });
+    }
+  });
+
+  const settled = $derived(data.state !== 'loading' && tables.state !== 'loading');
+  $effect(() => {
+    if (!settled || landed === null || Math.abs(window.scrollY - landed.y) > 1) return;
+    document.getElementById(landed.id)?.scrollIntoView({ block: 'start' });
+  });
 
   const failures = $derived(
     [data, tables].flatMap((l) => (l.state === 'error' ? [l.message] : [])).filter((m, i, a) => a.indexOf(m) === i),
@@ -81,7 +118,7 @@
 
 <article class="methods">
   <header>
-    <h1>Methods</h1>
+    <h1 bind:this={heading} tabindex="-1">Methods</h1>
     <p>
       How each figure on this site is arrived at, and what it cannot show. The figures on this page are computed in
       your browser from the same data as the report, as of {dayOf(meta.fetched_through)}.
@@ -100,13 +137,13 @@
     <h2 id="methods-contents">Contents</h2>
     <ol>
       {#each all as section (section.id)}
-        <li><a href={here} data-target={section.id} onclick={(e) => follow(e, section.id)}>{section.title}</a></li>
+        <li><a href={href(section.id)} data-target={section.id} onclick={(e) => go(e, section.id)}>{section.title}</a></li>
       {/each}
     </ol>
   </nav>
 
   {#each all as section (section.id)}
-    <Prose {section} {inline} {table} {here} {jump} />
+    <Prose {section} {inline} {table} {href} {go} />
   {/each}
 </article>
 
@@ -130,6 +167,10 @@
 
   h1 {
     margin: 0;
+  }
+
+  h1:focus {
+    outline: none;
   }
 
   .notice {

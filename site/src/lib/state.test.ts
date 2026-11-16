@@ -10,6 +10,7 @@ import {
   hashFromState,
   parseHash,
   routeHash,
+  sectionHash,
   stateFromHash,
 } from './state';
 
@@ -39,6 +40,7 @@ const defaults: AppState = {
   authorSort: { column: 'opened', descending: true },
   reviewerSort: { column: 'prs', descending: true },
   bots: false,
+  section: null,
 };
 
 function withFilters(patch: Partial<AppState['filters']>): AppState {
@@ -79,6 +81,7 @@ describe('round trip through the hash', () => {
     authorSort: { column: 'lines', descending: true },
     reviewerSort: { column: 'response', descending: false },
     bots: true,
+    section: 'disclosure',
   };
 
   it('preserves every field at once', () => {
@@ -172,8 +175,8 @@ describe('round trip through the hash', () => {
     expect(hashFromState(defaults, meta)).toMatch(/^#\/\?/);
   });
 
-  it('keeps the filters and selection when changing page', () => {
-    expect(stateFromHash(routeHash(full, 'report', meta), meta)).toEqual({ ...full, route: 'report' });
+  it('keeps the filters and selection when changing page, and leaves a methods section behind', () => {
+    expect(stateFromHash(routeHash(full, 'report', meta), meta)).toEqual({ ...full, route: 'report', section: null });
   });
 });
 
@@ -397,5 +400,48 @@ describe('createStateStore', () => {
     expect(get(store)).toEqual({ ...withFilters({ target: 'backports' }), route: 'methods' });
     store.destroy();
     expect(f.listening()).toBe(false);
+  });
+});
+
+describe('a section of the methods page', () => {
+  it('reads a section of the methods page and writes it back last', () => {
+    const state = stateFromHash('#/methods?target=main&section=disclosure', meta);
+    expect(state).toEqual({ ...defaults, route: 'methods', section: 'disclosure' });
+    expect(hashFromState(state, meta)).toBe('#/methods?target=main&section=disclosure');
+  });
+
+  it('reads a subheading of a section too', () => {
+    expect(stateFromHash('#/methods?section=privacy-what-is-withheld', meta).section).toBe('privacy-what-is-withheld');
+  });
+
+  it.each([
+    ['an id no section has', '#/methods?section=nowhere'],
+    ['an empty id', '#/methods?section='],
+    ['an id named like a prototype key', '#/methods?section=__proto__'],
+    ['an anchor written with its hash', '#/methods?section=%23disclosure'],
+    ['a section on the report', '#/?section=disclosure'],
+  ])('takes %s as none', (_name, hash) => {
+    expect(stateFromHash(hash, meta).section).toBeNull();
+  });
+
+  it('never writes a section on the report', () => {
+    expect(hashFromState({ ...defaults, section: 'disclosure' }, meta)).toBe('#/?target=main');
+  });
+
+  it('builds the address of a section, keeping the filters', () => {
+    const state = { ...withFilters({ target: 'all', kind: 'docs' }), pr: 66600 };
+    expect(sectionHash(state, 'commands', meta)).toBe('#/methods?target=all&kind=docs&pr=66600&section=commands');
+    expect(stateFromHash(sectionHash(state, 'commands', meta), meta)).toEqual({ ...state, route: 'methods', section: 'commands' });
+  });
+
+  it.each([
+    '#/?target=main',
+    '#/methods?target=main',
+    '#/?target=backports&from=2026-06-01&kind=docs&pr=66600&sort=size',
+    '#/methods?target=all&author=fixture-author-a&bots=show',
+  ])('reads the address %s as it did before there were sections', (hash) => {
+    const state = stateFromHash(hash, meta);
+    expect(state.section).toBeNull();
+    expect(hashFromState(state, meta)).toBe(hash);
   });
 });

@@ -22,3 +22,5 @@ The data also holds {{prs.closedBeforeWindow}} pull requests that GitHub updated
 - **Disclosure**: "disclosed" is any of the forms in [Disclosure of LLM use](#disclosure).
 - **Exclude drafts**: leaves out the pull requests that are drafts now, not those that were drafts once.
 - **Reopened**: keeps the pull requests reopened at least once.
+- **Author**: keeps the pull requests a login opened.
+- **Reviewer**: keeps the pull requests a login reviewed or commented on during the period, other than their own: see [The People tables](#people-tables).

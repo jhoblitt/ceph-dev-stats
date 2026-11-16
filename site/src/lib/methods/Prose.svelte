@@ -10,22 +10,16 @@
     section: Section;
     inline: (name: string) => View<string>;
     table: (name: string) => View<TableModel>;
-    /** The address of this page, for a link to a section on it. */
-    here: string;
-    /** Moves to the section or subheading with this id. */
-    jump: (id: string) => void;
+    /** The address of a section or subheading of this page. */
+    href: (id: string) => string;
+    /** Follows a link to the section or subheading with this id. */
+    go: (event: MouseEvent, id: string) => void;
   }
 
-  let { section, inline, table, here, jump }: Props = $props();
+  let { section, inline, table, href, go }: Props = $props();
 
   // Only an https address leaves the page; any other is drawn as its text.
-  const isExternal = (href: string) => /^https:\/\/[^\s]+$/.test(href);
-
-  function follow(event: MouseEvent, id: string) {
-    // A plain #id would replace the hash that holds the route and filters.
-    event.preventDefault();
-    jump(id);
-  }
+  const isExternal = (address: string) => /^https:\/\/[^\s]+$/.test(address);
 </script>
 
 {#snippet figure(name: string)}
@@ -45,8 +39,8 @@
       >{:else if node.type === 'em'}<em>{@render nodes(node.children)}</em
       >{:else if node.type === 'strong'}<strong>{@render nodes(node.children)}</strong
       >{:else if node.type === 'figure'}{@render figure(node.name)}{:else if node.href.startsWith('#')}<a
-        href={here}
-        onclick={(e) => follow(e, node.href.slice(1))}>{@render nodes(node.children)}</a
+        href={href(node.href.slice(1))}
+        onclick={(e) => go(e, node.href.slice(1))}>{@render nodes(node.children)}</a
       >{:else if isExternal(node.href)}<a href={node.href}>{@render nodes(node.children)}</a
       >{:else}{@render nodes(node.children)}{/if}
   {/each}

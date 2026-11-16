@@ -19,13 +19,17 @@ import type { Named } from './data';
 import { type Target, dayOf } from './filters';
 import { bucketName, formatCount, formatDays, formatMean, formatShare } from './format';
 import type { Step } from './stats/buckets';
-import { type Capacity, type WindowMean, compareEnds } from './stats/capacity';
+import { COMPARE_WEEKS, type Capacity, type WindowMean, compareEnds } from './stats/capacity';
 import type { CommandUse } from './stats/commands';
 import { type Curve, type Outcome, type Quantile, SPAN_OUTCOMES, type Span, spanQuantile } from './stats/curve';
 import type { ReviewLoad } from './stats/reviewers';
 import type { WaitingSeries, Weekly } from './stats/weekly';
 
 const plural = (n: number, noun: string) => `${formatCount(n)} ${noun}${n === 1 ? '' : 's'}`;
+
+const WORDS = ['no', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten'];
+/** A small count in words, as a sentence says it; a larger one in figures. */
+const inWords = (n: number) => WORDS[n] ?? formatCount(n);
 
 /** A ratio or a count, exactly: whole numbers as counts, else two decimals. */
 export function formatRatio(v: number): string {
@@ -123,7 +127,8 @@ function compareSentence(label: string, cmp: { first: WindowMean; last: WindowMe
     const left = w.missing > 0 ? ` (${plural(w.missing, step)} with ${reason} left out)` : '';
     return `${formatRatio(w.mean)} in the ${where}${left}`;
   };
-  return `${label}, a ${step} on average: ${part(cmp.first, `first four full ${step}s`)}, ${part(cmp.last, 'last four')}`;
+  const n = inWords(COMPARE_WEEKS);
+  return `${label}, a ${step} on average: ${part(cmp.first, `first ${n} full ${step}s`)}, ${part(cmp.last, `last ${n}`)}`;
 }
 
 /** The PRs waiting for a first response at the end of the first and the last complete bucket, and the change. */
@@ -151,7 +156,7 @@ export function capacitySentences(c: Capacity, partial: readonly (Coverage | nul
   const ratios =
     perReviewer === null || perOpened === null
       ? [
-          `Too few full ${c.step}s to compare the first four with the last four: ${formatCount(complete.filter(Boolean).length)} of the 8 needed.`,
+          `Too few full ${c.step}s to compare the first ${inWords(COMPARE_WEEKS)} with the last ${inWords(COMPARE_WEEKS)}: ${formatCount(complete.filter(Boolean).length)} of the ${formatCount(2 * COMPARE_WEEKS)} needed.`,
         ]
       : [
           `${compareSentence('PRs opened per person giving reviews', perReviewer, NO_ONE_REVIEWING, c.step)}.`,
