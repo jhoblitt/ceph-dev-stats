@@ -475,6 +475,9 @@ function strays(axis: ReturnType<typeof timeAxis>, items: readonly AxisItem[]): 
 }
 
 describe('the axis’s promises, over generated lines', () => {
+  // Exhaustive over generated lines and widths; a loaded CI runner has taken more than the default five seconds.
+  const SLOW = 30_000;
+
   // Widths given with no margin, and views 166, 206, 221 and 236 pixels wide,
   // the narrowest the page has been measured to show of the line, of which the
   // line is given all but a 16-pixel margin at each end.
@@ -550,7 +553,7 @@ describe('the axis’s promises, over generated lines', () => {
       for (const { available } of WIDTHS)
         for (const s of strays(timeAxis(items, { ...OPTS, available }), items).slice(0, 1)) failures.push(`${name} at ${available}: ${s}`);
     expect({ count: failures.length, first: failures.slice(0, 5) }).toEqual({ count: 0, first: [] });
-  });
+  }, SLOW);
 
   it('labels every tick with its own time, dates every screenful, names each new year and overlaps no label', () => {
     const failures: string[] = [];
@@ -565,5 +568,5 @@ describe('the axis’s promises, over generated lines', () => {
         }
       }
     expect({ count: failures.length, linesByWidth, first: failures.slice(0, 5) }).toEqual({ count: 0, linesByWidth: {}, first: [] });
-  });
+  }, SLOW);
 });
