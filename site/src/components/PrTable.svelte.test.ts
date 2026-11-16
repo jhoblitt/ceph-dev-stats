@@ -3,7 +3,7 @@ import { fireEvent, render, screen, waitFor, within } from '@testing-library/sve
 import { get } from 'svelte/store';
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import App from '../App.svelte';
-import { BASE, fixtureFetch, withEarlierYear } from '../lib/__fixtures__/fetch';
+import { BASE, fixtureFetch, withEarlierYear, withYears } from '../lib/__fixtures__/fetch';
 import { memoryLocation, meta } from '../lib/__fixtures__/page';
 import { DataLoader, type Meta, parseMeta } from '../lib/data';
 import { createDataStore, createViewStore, yearsForState } from '../lib/page';
@@ -280,6 +280,99 @@ describe('PrTable', () => {
     render(App, (await page('#/?component=cephfs&kind=docs')).props);
     expect(region().getByText('no PRs match')).toBeTruthy();
     expect(region().queryByRole('table')).toBeNull();
+  });
+});
+
+// Seven years of files, 2020 to 2026, and a period over all of them. Under
+// the default order, newest opened first, the table lists 2026's nine rows,
+// then 2025's thirty, then 2024's, and so on back. Without a ResizeObserver
+// the table's window is 480px high: rows of 40px, 12 in view and 8 more
+// either side, so the first 20 rows are drawn.
+describe('the title files the PR table fetches', () => {
+  const years = withYears(2020, 30);
+  const seven = parseMeta(years['meta.json']);
+  const ALL = '#/?from=2020-01-01';
+  const titleFiles = (requested: string[]) =>
+    requested.filter((u) => u.includes('table-')).map((u) => u.slice(BASE.length));
+  async function scrollTo(row: number) {
+    const box = region().getByRole('region', { name: 'Pull requests, scrollable' });
+    box.scrollTop = row * 40;
+    await fireEvent.scroll(box);
+  }
+
+  it('are those of the years of the rows drawn, under an order that reads no title', async () => {
+    const { props, requested } = await page(ALL, years, seven);
+    render(App, props);
+    await waitFor(() => expect(within(table()).getByText('copy 10 of 2025')).toBeTruthy());
+    // Rows 0 to 19: 2026's nine and the first eleven of 2025.
+    expect(listed().slice(0, 20).map((n) => (n >= 64000 ? 2026 : 2020 + Math.floor((n - 10000) / 1000)))).toEqual([
+      ...Array<number>(9).fill(2026),
+      ...Array<number>(11).fill(2025),
+    ]);
+    await waitFor(() => expect(table().getAttribute('aria-busy')).toBe('false'));
+    expect(titleFiles(requested).sort()).toEqual(['table-2025.json', 'table-2026.json']);
+  });
+
+  it('are every year’s under the title order, which reads them all', async () => {
+    const { props, requested } = await page(ALL, years, seven);
+    render(App, props);
+    await waitFor(() => expect(titleFiles(requested)).toHaveLength(2));
+    await fireEvent.click(within(table()).getByRole('button', { name: /^Title/ }));
+    await waitFor(() => expect(table().getAttribute('aria-busy')).toBe('false'));
+    expect(titleFiles(requested).sort()).toEqual([2020, 2021, 2022, 2023, 2024, 2025, 2026].map((y) => `table-${y}.json`));
+    expect(listed()[0]).toBe(10000);
+  });
+
+  it('take in a new year’s file as the rows move to it, fetching none already held', async () => {
+    const { props, requested } = await page(ALL, years, seven);
+    render(App, props);
+    await waitFor(() => expect(table().getAttribute('aria-busy')).toBe('false'));
+    // Rows 22 to 49: 2025's and 2024's.
+    await scrollTo(30);
+    await waitFor(() => expect(within(table()).getByText('copy 5 of 2024')).toBeTruthy());
+    expect(titleFiles(requested).sort()).toEqual(['table-2024.json', 'table-2025.json', 'table-2026.json']);
+    // Back to the top: nothing new.
+    await scrollTo(0);
+    await waitFor(() => expect(table().getAttribute('aria-busy')).toBe('false'));
+    expect(titleFiles(requested)).toHaveLength(3);
+  });
+
+  it('show a row of a year whose file is loading without its title, and fill it in when it arrives', async () => {
+    const waiting: (() => void)[] = [];
+    const base = fixtureFetch(years);
+    const fetch = (url: string) =>
+      url.endsWith('table-2024.json') ? new Promise<Response>((go) => waiting.push(() => go(base.fetch(url)))) : base.fetch(url);
+    const loc = memoryLocation(ALL);
+    const selection = createStateStore(seven, loc);
+    const loader = new DataLoader(seven, BASE, fetch);
+    const ys = yearsForState(seven, get(selection));
+    const store = createDataStore(loader, selection, ys, await loader.load(ys));
+    render(App, { props: { page: { meta: seven, selection, data: store, view: createViewStore(selection, store), loader } } });
+    await waitFor(() => expect(table().getAttribute('aria-busy')).toBe('false'));
+    await scrollTo(30);
+    await waitFor(() => expect(waiting).toHaveLength(1));
+    expect(table().getAttribute('aria-busy')).toBe('true');
+    expect(region().getByText('Loading the titles of the PRs finished in 2024…')).toBeTruthy();
+    expect(within(table()).getByRole('button', { name: 'Show #14005' })).toBeTruthy();
+    for (const go of waiting.splice(0)) go();
+    await waitFor(() => expect(within(table()).getByRole('button', { name: 'copy 5 of 2024' })).toBeTruthy());
+    expect(region().queryByText(/^Loading the titles/)).toBeNull();
+  });
+
+  it('say which year’s file could not be fetched while its rows are drawn', async () => {
+    const { props } = await page(ALL, { ...years, 'table-2024.json': undefined }, seven);
+    render(App, props);
+    await waitFor(() => expect(table().getAttribute('aria-busy')).toBe('false'));
+    expect(region().queryByText(/could not be loaded/)).toBeNull();
+    await scrollTo(30);
+    await waitFor(() =>
+      expect(region().getByText(/The titles of the PRs finished in 2024 could not be loaded \(table-2024\.json: HTTP 404/)).toBeTruthy(),
+    );
+    expect(within(table()).getByRole('button', { name: 'Show #14005' })).toBeTruthy();
+    expect(within(table()).getByText('copy 20 of 2025')).toBeTruthy();
+    // Back among rows that need no 2024 title, the note goes with them.
+    await scrollTo(0);
+    await waitFor(() => expect(region().queryByText(/could not be loaded/)).toBeNull());
   });
 });
 

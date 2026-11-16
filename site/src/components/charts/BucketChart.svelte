@@ -25,17 +25,16 @@
     readoutText,
   } from '../../lib/charts';
   import { COLOURS } from '../../lib/colours';
-  import { bucketTick } from '../../lib/format';
   import {
     HOUR,
     type Tick,
     barPath,
+    bucketTicks,
     durationTicks,
     endLabels,
     logDays,
     markerPath,
     spaceTicks,
-    tickStride,
   } from '../../lib/plot';
   import AxisX from './AxisX.svelte';
   import AxisY from './AxisY.svelte';
@@ -198,12 +197,9 @@
   const column = (i: number) => (x(i) as number) - (x.step() - x.bandwidth()) / 2;
 
   const selectedIndex = $derived(selected === null ? -1 : model.buckets.indexOf(selected));
-  const xTicks: Tick[] = $derived.by(() => {
-    const stride = tickStride(x.step(), 52);
-    return model.buckets.flatMap((start, i) =>
-      i % stride === 0 ? [{ at: centre(i), label: bucketTick(start, model.step), strong: i === selectedIndex }] : [],
-    );
-  });
+  const xTicks: Tick[] = $derived(
+    bucketTicks(model.buckets, model.step, centre).map(({ i, label }) => ({ at: centre(i), label, strong: i === selectedIndex })),
+  );
 
   // Each panel's stacks from the baseline up; a 2px gap of surface separates
   // a segment from the one under it, and only the top one has a rounded end.

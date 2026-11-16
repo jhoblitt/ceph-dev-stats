@@ -66,3 +66,12 @@ export function bucketName(start: number, step: Step): string {
   const d = new Date(start * 1000);
   return `${MONTH_NAMES[d.getUTCMonth()] as string} ${d.getUTCFullYear()}`;
 }
+
+/**
+ * A bucket as a sentence names it after a preposition: "in the week of
+ * 2026-05-18", but "in June 2026".
+ */
+export function bucketPhrase(start: number, step: Step): string {
+  const name = bucketName(start, step);
+  return step === 'week' ? `the ${name}` : name;
+}

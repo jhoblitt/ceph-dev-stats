@@ -120,6 +120,36 @@ describe('App', () => {
     await waitFor(() => expect(status().textContent).toBe(''));
   });
 
+  it('marks every section busy and says it is recomputing before a large recompute, then shows its result', async () => {
+    const loc = memoryLocation('');
+    const selection = createStateStore(meta, loc);
+    const loader = new DataLoader(meta, BASE, fixtureFetch().fetch);
+    const years = firstYears(meta, get(selection));
+    const data = createDataStore(loader, selection, years, await loader.load(years));
+    const jobs: (() => void)[] = [];
+    // The fixture's 12 rows count as large; the recompute waits for the spec, where the page waits for a paint.
+    const view = createViewStore(selection, data, { large: 1, defer: (job) => (jobs.push(job), () => {}) });
+    render(App, { props: { page: { meta, selection, data, view, loader } } });
+    const status = () => document.querySelector('p.loading') as HTMLElement;
+    const velocity = () => screen.getByRole('region', { name: 'Velocity' });
+    const count = () => within(screen.getByRole('region', { name: /^Pull requests$/ })).getByRole('status').textContent;
+    const before = count();
+
+    await fireEvent.click(screen.getByRole('radio', { name: 'all' }));
+    expect(status().textContent).toBe(
+      'Recomputing the figures for the filters chosen; everything below is still for the filters chosen before.',
+    );
+    expect(velocity().getAttribute('aria-busy')).toBe('true');
+    expect(velocity().classList.contains('stale')).toBe(true);
+    expect(count()).toBe(before);
+
+    jobs.splice(0).forEach((job) => job());
+    await waitFor(() => expect(status().textContent).toBe(''));
+    expect(velocity().getAttribute('aria-busy')).toBeNull();
+    expect(velocity().classList.contains('stale')).toBe(false);
+    expect(count()).not.toBe(before);
+  });
+
   describe('trying a year that failed again', () => {
     const earlier = withEarlierYear();
     const twoYears = parseMeta(earlier['meta.json']);

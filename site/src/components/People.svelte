@@ -25,10 +25,11 @@
   const meta = $derived(dataset.meta);
   const filters = $derived($view.filters);
   const period = $derived(periodRange(filters));
-  const empty = $derived($view.rows.length === 0);
+  const rows = $derived($view.rows);
+  const empty = $derived(rows.length === 0);
 
-  const authors = $derived(authorRows(dataset, openedIn(dataset, $view.rows, period)));
-  const reviewers = $derived(reviewerRows(dataset, $view.rows, period));
+  const authors = $derived(authorRows(dataset, openedIn(dataset, rows, period)));
+  const reviewers = $derived(reviewerRows(dataset, rows, period));
 
   // Choosing a PR or another table's order leaves these orders, and so the rows, alone.
   const keepAuthorSort = keepEqual<Sort<AuthorColumn>>(sameSort);

@@ -4,7 +4,7 @@
 
 import { type Dataset, type KindSource, type Named, PR_STATE, type TableYear, locateRow } from './data';
 import { AGE_BANDS, DAY, dayOf, dayStart, periodRange } from './filters';
-import { bucketName, formatCount, formatDays } from './format';
+import { bucketPhrase, formatCount, formatDays } from './format';
 import { type Handle, personHandle } from './handles';
 import { openedInBucket, select } from './select';
 import type { Sort, SortColumn } from './sort';
@@ -183,10 +183,10 @@ export const ALL_TABLE_ROWS = 'open at some point in the period';
 export function narrowing(data: Dataset, state: TableScope): string | null {
   if (state.week === null && state.band === null) return null;
   const step = buckets(periodRange(state.filters)).step;
-  const bucket = bucketName(bandBucket(state), step);
-  if (state.band === null) return `opened in the ${bucket}`;
+  const bucket = bucketPhrase(bandBucket(state), step);
+  if (state.band === null) return `opened in ${bucket}`;
   const band = AGE_BANDS.find((b) => b.id === state.band)?.label as string;
-  return `open at the end of the ${bucket}, aged ${band}`;
+  return `open at the end of ${bucket}, aged ${band}`;
 }
 
 /**

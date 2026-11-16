@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { DOT_KIND, describeDots, dotLayout, dotReadout, dots, dotsTable, indexDots, nearestDot, project } from './dots';
 import { periodRange } from './filters';
-import { HOUR } from './plot';
+import { HOUR, LABEL_GAP, glyphWidth } from './plot';
 import { openedIn, select } from './select';
 import { defaultFilters } from './state';
 import { META, at, dataset, fixture, random } from './stats/testing';
@@ -78,6 +78,24 @@ describe('dotLayout', () => {
   it('ticks the weeks across a short period', () => {
     const short = dotLayout({ start: at('2026-06-01T00:00:00Z'), end: at('2026-06-29T00:00:00Z') }, 10, 640, 360);
     expect(short.xTicks.map((t) => t.label)).toEqual(['1 Jun', '8 Jun', '15 Jun', '22 Jun']);
+  });
+
+  it('ticks a period of years on a calendar grid, a year’s on January, its labels apart', () => {
+    const whole = { start: at('2011-09-01T00:00:00Z'), end: at('2026-11-16T00:00:00Z') };
+    const wide = dotLayout(whole, 166, 1054, 360);
+    expect(wide.xTicks.map((t) => t.label)).toEqual(Array.from({ length: 15 }, (_, k) => String(2012 + k)));
+    expect(wide.xTicks[0]?.at).toBeCloseTo(wide.x(at('2012-01-01T00:00:00Z')), 9);
+    const two = dotLayout({ start: at('2024-11-16T00:00:00Z'), end: at('2026-11-16T00:00:00Z') }, 166, 1054, 360);
+    // December 2024 is a month from January, too close to name it beside it.
+    expect(two.xTicks.map((t) => t.label)).toEqual(['2025', 'Apr', 'Jul', 'Oct', '2026', 'Apr', 'Jul', 'Oct']);
+    for (const width of [320, 515, 800, 1054, 1600]) {
+      const l = dotLayout(whole, 166, width, 360);
+      l.xTicks.slice(1).forEach((t, i) => {
+        const prev = l.xTicks[i] as { at: number; label: string };
+        const gap = t.at - prev.at - (glyphWidth(t.label) + glyphWidth(prev.label)) / 2;
+        expect(gap, `${width}px: ${prev.label} | ${t.label}`).toBeGreaterThanOrEqual(LABEL_GAP);
+      });
+    }
   });
 });
 

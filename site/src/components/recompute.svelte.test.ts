@@ -4,10 +4,42 @@
 import { render } from '@testing-library/svelte';
 import { tick } from 'svelte';
 import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { get } from 'svelte/store';
 import App from '../App.svelte';
-import { fixturePage } from '../lib/__fixtures__/page';
+import { BASE, fixtureFetch } from '../lib/__fixtures__/fetch';
+import { fixturePage, memoryLocation, meta } from '../lib/__fixtures__/page';
+import { DataLoader } from '../lib/data';
+import { createDataStore, createViewStore, firstYears } from '../lib/page';
+import { createStateStore } from '../lib/state';
 
 const calls = vi.hoisted(() => ({ weekly: 0, backlog: 0, outcomeCurve: 0, select: 0, byOpening: 0, laneModel: 0 }));
+const more = vi.hoisted(() => ({ authorRows: 0, reviewerRows: 0, tableOrder: 0 }));
+
+vi.mock('../lib/stats/people', async (original) => {
+  const m = await original<typeof import('../lib/stats/people')>();
+  return {
+    ...m,
+    authorRows: (...args: Parameters<typeof m.authorRows>) => {
+      more.authorRows++;
+      return m.authorRows(...args);
+    },
+    reviewerRows: (...args: Parameters<typeof m.reviewerRows>) => {
+      more.reviewerRows++;
+      return m.reviewerRows(...args);
+    },
+  };
+});
+
+vi.mock('../lib/table', async (original) => {
+  const m = await original<typeof import('../lib/table')>();
+  return {
+    ...m,
+    tableOrder: (...args: Parameters<typeof m.tableOrder>) => {
+      more.tableOrder++;
+      return m.tableOrder(...args);
+    },
+  };
+});
 const timelines = vi.hoisted(() => ({ prTimeline: 0 }));
 
 vi.mock('../lib/lanes', async (original) => {
@@ -87,6 +119,7 @@ beforeAll(() => {
 
 beforeEach(() => {
   calls.weekly = calls.backlog = calls.outcomeCurve = calls.select = calls.byOpening = calls.laneModel = 0;
+  more.authorRows = more.reviewerRows = more.tableOrder = 0;
   timelines.prTimeline = 0;
 });
 
@@ -183,5 +216,41 @@ describe("The chosen PR's timeline", () => {
     expect(timelines.prTimeline).toBe(first);
     selection.update((s) => ({ ...s, pr: 66600 }));
     await vi.waitFor(() => expect(timelines.prTimeline).toBeGreaterThan(first));
+  });
+});
+
+// Before a large recompute the view hands out a busy state with the figures
+// it shows; that state must compute nothing, or the click waits on the work
+// it is meant to announce, and the work is done twice.
+describe('The busy state before a large recompute', () => {
+  it('computes no statistic, no lane and no order, and the recompute then computes each', async () => {
+    const loc = memoryLocation('');
+    const selection = createStateStore(meta, loc);
+    const loader = new DataLoader(meta, BASE, fixtureFetch().fetch);
+    const years = firstYears(meta, get(selection));
+    const data = createDataStore(loader, selection, years, await loader.load(years));
+    const jobs: (() => void)[] = [];
+    const view = createViewStore(selection, data, { large: 1, defer: (job) => (jobs.push(job), () => {}) });
+    render(App, { props: { page: { meta, selection, data, view, loader } } });
+    await tick();
+    const before = { ...calls, ...more };
+    expect(before.authorRows).toBeGreaterThan(0);
+    expect(before.tableOrder).toBeGreaterThan(0);
+
+    selection.update((s) => ({ ...s, filters: { ...s.filters, target: 'all' } }));
+    await tick();
+    expect(get(view).recomputing).toBe(true);
+    expect({ ...calls, ...more }).toEqual(before);
+
+    jobs.splice(0).forEach((job) => job());
+    await tick();
+    const after = { ...calls, ...more };
+    expect(after.select).toBe(before.select + 1);
+    expect(after.weekly).toBeGreaterThan(before.weekly);
+    expect(after.authorRows).toBe(before.authorRows + 1);
+    expect(after.reviewerRows).toBe(before.reviewerRows + 1);
+    // The table orders its rows, and the lanes take the same order.
+    expect(after.tableOrder).toBe(before.tableOrder + 2);
+    expect(after.laneModel).toBe(before.laneModel + 1);
   });
 });

@@ -61,7 +61,43 @@ export interface View {
    * years, and `rows` is empty. Always `pending` too.
    */
   first: boolean;
+  /**
+   * The reader's filters can be computed, over a dataset large enough that
+   * doing so holds the page up; the figures are still those of `filters`
+   * until the page has painted this and recomputed.
+   */
+  recomputing: boolean;
 }
+
+/**
+ * The dataset size from which a recompute is announced before it runs. The
+ * default period, six months, loads at most the previous year's file and
+ * half of the current one's: 13,602 rows on the data of 2026-11-16, which
+ * took 126 ms to recompute on a desktop, and a two-year period's 19,684
+ * took 167 ms. Below this size a recompute runs at once, unannounced, so
+ * the default view never flashes a busy state.
+ */
+export const LARGE_DATASET = 15_000;
+
+/** Runs `job` once the page has painted what it shows now; returns what cancels it. */
+export type Defer = (job: () => void) => () => void;
+
+/**
+ * Runs `job` in a task after the next frame: a frame's callbacks run
+ * before it is painted, and a task queued from one runs after.
+ */
+export const afterPaint: Defer = (job) => {
+  if (typeof requestAnimationFrame !== 'function') {
+    const timer = setTimeout(job, 0);
+    return () => clearTimeout(timer);
+  }
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const frame = requestAnimationFrame(() => (timer = setTimeout(job, 0)));
+  return () => {
+    cancelAnimationFrame(frame);
+    clearTimeout(timer);
+  };
+};
 
 export const [getPage, setPage] = createContext<Page>();
 
@@ -138,12 +174,12 @@ export function createDataStore(
  * load runs that may bring the years that failed.
  */
 export function sectionsStale(view: View, data: DataState): boolean {
-  return view.pending || (data.loading && data.errors.length > 0);
+  return view.pending || view.recomputing || (data.loading && data.errors.length > 0);
 }
 
-/** Whether a section is about to change: it is stale and a load runs. */
+/** Whether a section is about to change: it is recomputing, or stale while a load runs. */
 export function sectionsBusy(view: View, data: DataState): boolean {
-  return data.loading && sectionsStale(view, data);
+  return view.recomputing || (data.loading && sectionsStale(view, data));
 }
 
 const sameYears = (a: readonly number[], b: readonly number[]) => a.length === b.length && a.every((y, i) => y === b[i]);
@@ -165,10 +201,16 @@ const yearsOf = (data: Dataset) => data.years.map((s) => s.year);
  * alert then names it. Until the first figures can be shown the view is
  * pending with nothing to show, as when the report is reached from another
  * route and its years are still loading.
+ *
+ * Over a dataset of `large` rows or more, a change that can be computed is
+ * first handed out as `recomputing`, the figures kept, and computed only
+ * once `defer` runs, after the page has painted that; any change before
+ * then decides afresh, so only the latest is ever computed or shown.
  */
 export function createViewStore(
   selection: Readable<AppState>,
   data: Readable<DataState>,
+  { large = LARGE_DATASET, defer = afterPaint }: { large?: number; defer?: Defer } = {},
 ): Readable<View> & { destroy(): void } {
   const keep = keepEqual(sameFilters);
   let state = get(selection);
@@ -181,8 +223,16 @@ export function createViewStore(
     rows: select(dataset, filters),
     pending: false,
     first: false,
+    recomputing: false,
   });
-  let current: View = { dataset, filters: keep(state.filters), rows: new Uint32Array(0), pending: true, first: true };
+  let current: View = {
+    dataset,
+    filters: keep(state.filters),
+    rows: new Uint32Array(0),
+    pending: true,
+    first: true,
+    recomputing: false,
+  };
 
   const ready = (filters: Filters) => {
     const have = yearsOf(dataset);
@@ -196,13 +246,33 @@ export function createViewStore(
   if (ready(current.filters)) current = view(current.filters);
   const inner = writable(current);
 
-  const update = () => {
-    const filters = keep(state.filters);
-    if (!current.pending && current.filters === filters && current.dataset === dataset) return;
-    if (ready(filters)) current = view(filters);
-    else if (!current.pending) current = { ...current, pending: true };
-    else return;
+  const show = (next: View) => {
+    current = next;
     inner.set(current);
+  };
+  let cancel: (() => void) | null = null;
+  const update = () => {
+    cancel?.();
+    cancel = null;
+    // Filters put back as shown while a recompute waits are the shown ones.
+    const filters = sameFilters(current.filters, state.filters) ? current.filters : keep(state.filters);
+    if (!current.pending && current.filters === filters && current.dataset === dataset) {
+      if (current.recomputing) show({ ...current, recomputing: false });
+      return;
+    }
+    if (!ready(filters)) {
+      if (!current.pending || current.recomputing) show({ ...current, pending: true, recomputing: false });
+      return;
+    }
+    if (dataset.size < large) {
+      show(view(filters));
+      return;
+    }
+    if (!current.recomputing) show({ ...current, recomputing: true });
+    cancel = defer(() => {
+      cancel = null;
+      show(view(filters));
+    });
   };
   const stopState = selection.subscribe((s) => {
     state = s;
@@ -216,6 +286,8 @@ export function createViewStore(
   return {
     subscribe: inner.subscribe,
     destroy: () => {
+      cancel?.();
+      cancel = null;
       stopState();
       stopData();
     },

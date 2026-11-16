@@ -2,8 +2,9 @@
   The PRs behind the page: the current selection, narrowed by a chosen week
   or band, one row each, sortable by any column, the order kept in the URL.
   Only the rows in view are drawn, so the full history stays quick. Titles
-  come from each year's table file, fetched the first time the table is on
-  screen, and only for the years its rows need. A row's title chooses that
+  come from each year's table file, fetched once the table is on screen and
+  only for the years of the rows drawn, or of every row when the order is by
+  title. A row's title chooses that
   PR; its number links to it on GitHub, and its author's handle to theirs,
   beside a control that filters by that author. The chosen PR's summary and
   timeline are a section of their own, above this one.
@@ -57,11 +58,6 @@
   const tables = loads.map;
   const request = (year: number) => loads.request(year);
 
-  const needed = $derived(shown ? yearsOfRows(dataset, rows) : []);
-  $effect(() => {
-    for (const y of needed) request(y);
-  });
-
   const text = $derived(rowText(dataset, tables));
   // The lanes list the same rows in this order (Report.svelte).
   const ordered = $derived(tableOrder(dataset, selected, { filters, week, band }, sort, text));
@@ -86,6 +82,16 @@
   }
   const win = $derived(windowRows(scrollTop, viewport > 0 ? viewport : 480, ROW, ordered.length, 8));
   const visible = $derived(Array.from(ordered.subarray(win.start, win.end)));
+
+  // A year's file holds the titles of the rows that came from it, so the rows
+  // drawn need only their own years'; an order by title reads every row's.
+  const keepYears = keepEqual<number[]>((a, b) => a.length === b.length && a.every((y, i) => y === b[i]));
+  const needed = $derived(
+    shown ? keepYears(yearsOfRows(dataset, sort.column === 'title' ? rows : ordered.subarray(win.start, win.end))) : [],
+  );
+  $effect(() => {
+    for (const y of needed) request(y);
+  });
 
   const repo = $derived(dataset.meta.repo);
   const choose = (pr: number) => selection.update((s) => ({ ...s, pr }));

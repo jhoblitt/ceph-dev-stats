@@ -9,8 +9,8 @@
   import { scaleBand, scaleLinear } from 'd3-scale';
   import { area, line } from 'd3-shape';
   import { type AreaModel, areaReadout } from '../../lib/charts';
-  import { bucketName, bucketTick, formatCount } from '../../lib/format';
-  import { type Tick, tickStride } from '../../lib/plot';
+  import { bucketName, formatCount } from '../../lib/format';
+  import { type Tick, bucketTicks } from '../../lib/plot';
   import AxisX from './AxisX.svelte';
   import AxisY from './AxisY.svelte';
   import Tooltip from './Tooltip.svelte';
@@ -65,14 +65,10 @@
   );
   const selectedIndex = $derived(selected.bucket === null ? -1 : model.buckets.indexOf(selected.bucket));
   const selectedLayer = $derived(model.layers.findIndex((l) => l.key === selected.key));
-  const xTicks: Tick[] = $derived.by(() => {
-    const stride = tickStride(x.step(), 52);
-    return model.buckets.flatMap((start, i) =>
-      i % stride === 0
-        ? [{ at: (x(i) as number) + x.bandwidth() / 2, label: bucketTick(start, model.step), strong: i === selectedIndex }]
-        : [],
-    );
-  });
+  const centre = (i: number) => (x(i) as number) + x.bandwidth() / 2;
+  const xTicks: Tick[] = $derived(
+    bucketTicks(model.buckets, model.step, centre).map(({ i, label }) => ({ at: centre(i), label, strong: i === selectedIndex })),
+  );
 
   type Point = readonly [x: number, lo: number, hi: number];
   const shapes = $derived(

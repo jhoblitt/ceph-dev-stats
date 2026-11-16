@@ -1,5 +1,20 @@
+import { scaleBand } from 'd3-scale';
 import { describe, expect, it } from 'vitest';
-import { barPath, durationTicks, endLabels, logDays, markerPath, spaceTicks, tickStride } from './plot';
+import { bucketTick } from './format';
+import {
+  type BucketTick,
+  LABEL_GAP,
+  barPath,
+  bucketTicks,
+  durationTicks,
+  endLabels,
+  glyphWidth,
+  logDays,
+  markerPath,
+  spaceTicks,
+  tickStride,
+} from './plot';
+import { buckets } from './stats/buckets';
 
 describe('barPath', () => {
   it('rounds the data end and keeps the baseline square', () => {
@@ -98,5 +113,138 @@ describe('endLabels', () => {
 
   it('drops every label when two collide, leaving the legend to name the lines', () => {
     expect(endLabels([{ key: 'a', y: 10 }, { key: 'b', y: 40 }, { key: 'c', y: 50 }], 14)).toEqual([]);
+  });
+});
+
+// The time axis of a bucket chart (BucketChart.svelte): bands from x = 44 to
+// the width less 8, inner padding 0.25 and outer 0.1, each label centred on
+// its band, over the widths a chart takes, from a phone's to a wide desktop's.
+describe('bucketTicks', () => {
+  const day = (s: string) => Date.parse(`${s}T00:00:00Z`) / 1000;
+  const bucketsOf = (from: string, to: string) => buckets({ start: day(from), end: day(to) + 86_400 });
+  const centres = (n: number, width: number) => {
+    const x = scaleBand<number>()
+      .domain(Array.from({ length: n }, (_, i) => i))
+      .range([44, width - 8])
+      .paddingInner(0.25)
+      .paddingOuter(0.1);
+    return (i: number) => (x(i) as number) + x.bandwidth() / 2;
+  };
+  const WIDTHS = Array.from({ length: (1600 - 320) / 20 + 1 }, (_, k) => 320 + 20 * k);
+  const PERIODS: Record<'six months' | 'two years' | 'six years' | 'fifteen years', readonly [string, string]> = {
+    'six months': ['2026-05-15', '2026-11-15'],
+    'two years': ['2024-11-16', '2026-11-15'],
+    'six years': ['2020-11-16', '2026-11-15'],
+    'fifteen years': ['2011-09-01', '2026-11-15'],
+  };
+  const ticksAt = (period: keyof typeof PERIODS, width: number) => {
+    const b = bucketsOf(...PERIODS[period]);
+    const at = centres(b.starts.length, width);
+    return { b, at, ticks: bucketTicks(b.starts, b.step, at, glyphWidth) };
+  };
+  const month = (t: number) => new Date(t * 1000).getUTCMonth();
+  const year = (t: number) => new Date(t * 1000).getUTCFullYear();
+
+  it('keeps the six-month default’s weekly labels as they were, every n-th week from the first', () => {
+    for (const width of WIDTHS) {
+      const { b, at, ticks } = ticksAt('six months', width);
+      expect(b.step).toBe('week');
+      const stride = tickStride(at(1) - at(0), 52);
+      expect(ticks).toEqual(b.starts.flatMap((s, i) => (i % stride === 0 ? [{ i, label: bucketTick(s, 'week') }] : [])));
+    }
+    // As the released build drew them on a 1054px chart and on a 335px one.
+    const pin = (bandStep: number) =>
+      bucketTicks(bucketsOf(...PERIODS['six months']).starts, 'week', (i) => i * bandStep, glyphWidth).map((t) => t.label);
+    expect(pin(37.2)).toEqual([
+      '11 May',
+      '25 May',
+      '8 Jun',
+      '22 Jun',
+      '6 Jul',
+      '20 Jul',
+      '3 Aug',
+      '17 Aug',
+      '31 Aug',
+      '14 Sep',
+      '28 Sep',
+      '12 Oct',
+      '26 Oct',
+      '9 Nov',
+    ]);
+    expect(pin(9.6)).toEqual(['11 May', '22 Jun', '3 Aug', '14 Sep', '26 Oct']);
+  });
+
+  for (const period of Object.keys(PERIODS) as (keyof typeof PERIODS)[]) {
+    it(`never lets two labels come within ${LABEL_GAP}px over ${period}, at any width`, () => {
+      for (const width of WIDTHS) {
+        const { at, ticks } = ticksAt(period, width);
+        for (let k = 1; k < ticks.length; k++) {
+          const a = ticks[k - 1] as BucketTick;
+          const c = ticks[k] as BucketTick;
+          const gap = at(c.i) - at(a.i) - (glyphWidth(a.label) + glyphWidth(c.label)) / 2;
+          expect(gap, `${period} at ${width}px: ${a.label} | ${c.label}`).toBeGreaterThanOrEqual(LABEL_GAP);
+        }
+      }
+    });
+  }
+
+  for (const period of ['two years', 'six years', 'fifteen years'] as const) {
+    it(`puts the ticks over ${period} on a calendar grid, a year's on January, and names the year where it changes`, () => {
+      for (const width of WIDTHS) {
+        const { b, ticks } = ticksAt(period, width);
+        const where = `${period} at ${width}px: ${ticks.map((t) => t.label).join(', ')}`;
+        expect(b.step).toBe('month');
+        // A tick on the period's first month may stand off the grid, to name its year.
+        const grid = ticks.filter((t, k) => !(k === 0 && t.i === 0));
+        const months = grid.map((t) => year(b.starts[t.i] as number) * 12 + month(b.starts[t.i] as number));
+        const steps = new Set(months.slice(1).map((m, k) => m - (months[k] as number)));
+        expect(steps.size, where).toBeLessThanOrEqual(1);
+        const every = [...steps][0] ?? 12;
+        expect([1, 3, 6, 12, 24, 60, 120], where).toContain(every);
+        for (const m of months) expect(m % every, where).toBe(0);
+        // The first tick, and each tick in a year the one before is not in, carries the year.
+        ticks.forEach((t, k) => {
+          const y = year(b.starts[t.i] as number);
+          const named = k === 0 || y !== year(b.starts[(ticks[k - 1] as BucketTick).i] as number);
+          if (named) expect(t.label, where).toMatch(new RegExp(`(^| )${y}$`));
+          else expect(t.label, where).toMatch(/^[A-Z][a-z]{2}$/);
+        });
+      }
+    });
+  }
+
+  it('names every year whose January the period holds, wherever a tick a year fits', () => {
+    for (const period of ['two years', 'six years', 'fifteen years'] as const) {
+      for (const width of WIDTHS) {
+        const { b, ticks } = ticksAt(period, width);
+        const januaries = b.starts.filter((s, i) => i > 0 && month(s) === 0).map(year);
+        const named = new Set(ticks.map((t) => Number(/(\d{4})$/.exec(t.label)?.[1])));
+        const grid = ticks.filter((t, k) => !(k === 0 && t.i === 0)).length;
+        if (grid >= januaries.length) {
+          for (const y of januaries) expect(named.has(y), `${period} at ${width}px: ${y}`).toBe(true);
+        }
+      }
+    }
+    // Six years name every year at every width; fifteen from a chart 640px wide.
+    for (const [period, from] of [
+      ['six years', 320],
+      ['fifteen years', 640],
+    ] as const) {
+      for (const width of WIDTHS.filter((w) => w >= from)) {
+        const { b, ticks } = ticksAt(period, width);
+        const januaries = b.starts.filter((s, i) => i > 0 && month(s) === 0).length;
+        expect(ticks.length, `${period} at ${width}px`).toBeGreaterThanOrEqual(januaries);
+      }
+    }
+  });
+
+  it('labels the whole window on a 1054px chart by year, on each January', () => {
+    const { ticks } = ticksAt('fifteen years', 1054);
+    expect(ticks.map((t) => t.label)).toEqual(Array.from({ length: 15 }, (_, k) => String(2012 + k)));
+  });
+
+  it('labels two years on a 1054px chart by quarter, with the year on the first tick and on each January', () => {
+    const { ticks } = ticksAt('two years', 1054);
+    expect(ticks.map((t) => t.label)).toEqual(['Nov 2024', '2025', 'Apr', 'Jul', 'Oct', '2026', 'Apr', 'Jul', 'Oct']);
   });
 });

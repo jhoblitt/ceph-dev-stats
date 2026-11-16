@@ -263,6 +263,22 @@ test('the methods page renders every section, its figures, and an address to a s
   await fresh.close();
 });
 
+test('no two labels of a time axis touch, from a phone to a wide screen', async ({ page }) => {
+  for (const width of [320, 1280, 1600]) {
+    await page.setViewportSize({ width, height: 900 });
+    await open(page);
+    // Each axis's labels as drawn: the smallest space between neighbours.
+    const gaps = await page.locator('svg:has(.axis-x text)').evaluateAll((svgs) =>
+      svgs.map((svg) => {
+        const boxes = [...svg.querySelectorAll<SVGTextElement>('.axis-x text')].map((t) => t.getBBox());
+        return Math.min(Infinity, ...boxes.slice(1).map((b, i) => b.x - ((boxes[i] as DOMRect).x + (boxes[i] as DOMRect).width)));
+      }),
+    );
+    expect(gaps.length, `${width}px`).toBeGreaterThan(0);
+    expect(Math.min(...gaps), `${width}px`).toBeGreaterThanOrEqual(6);
+  }
+});
+
 test('the footer shows a version and the repository link', async ({ page }) => {
   await open(page);
   const footer = page.getByRole('contentinfo');
