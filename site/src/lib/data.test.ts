@@ -3,6 +3,7 @@ import events2026 from './__fixtures__/data/events-2026.json';
 import rawMeta from './__fixtures__/data/meta.json';
 import prs2026 from './__fixtures__/data/prs-2026.json';
 import table2026 from './__fixtures__/data/table-2026.json';
+import { NAMED_A, NAMED_B, POOLED, deletedMeta } from './__fixtures__/deleted';
 import { BASE, fixtureFetch, withEarlierYear } from './__fixtures__/fetch';
 import {
   DataError,
@@ -86,6 +87,35 @@ describe('parseMeta', () => {
   ])('rejects a meta %s, naming the file and the field', (_name, patch, message) => {
     expect(() => parseMeta({ ...rawMeta, ...patch })).toThrow(DataError);
     expect(() => parseMeta({ ...rawMeta, ...patch })).toThrow(message);
+  });
+
+  it('reads no deleted account by name from data without people_deleted, as the data before names had', () => {
+    expect('people_deleted' in rawMeta).toBe(false);
+    expect(meta.people_deleted).toEqual([]);
+    expect(parseMeta(deletedMeta(false)).people_deleted).toEqual([]);
+  });
+
+  it('reads the deleted accounts known by name, ascending, and an empty list as none', () => {
+    expect(parseMeta(deletedMeta()).people_deleted).toEqual([NAMED_A, NAMED_B]);
+    expect(parseMeta({ ...deletedMeta(), people_deleted: [] }).people_deleted).toEqual([]);
+  });
+
+  it.each([
+    ['that is not a list of indexes', { people_deleted: 'ghost' }, /meta\.json.*"people_deleted"/],
+    ['with an index past the last person', { people_deleted: [NAMED_B + 1] }, /meta\.json.*"people_deleted" has 14 at 0, outside "people" of 14/],
+    ['naming a login', { people_deleted: [2] }, /meta\.json.*"people_deleted" names "fixture-author-a", which is not "ghost:" and a name/],
+    ['naming the pooled entry', { people_deleted: [POOLED] }, /meta\.json.*"people_deleted" names "ghost", which is not "ghost:" and a name/],
+    ['naming a bot', { people_deleted: [NAMED_A], people_bots: [10, NAMED_A] }, /meta\.json.*"people_deleted" names "ghost:Ada Example", which "people_bots" lists too/],
+  ])('rejects a people_deleted %s', (_name, patch, message) => {
+    expect(() => parseMeta({ ...deletedMeta(), ...patch })).toThrow(DataError);
+    expect(() => parseMeta({ ...deletedMeta(), ...patch })).toThrow(message);
+  });
+
+  it('rejects an entry that is "ghost:" with no name', () => {
+    const people = [...rawMeta.people, 'ghost:'];
+    expect(() => parseMeta({ ...rawMeta, people, people_deleted: [people.length - 1] })).toThrow(
+      /meta\.json.*"people_deleted" names "ghost:", which is not "ghost:" and a name/,
+    );
   });
 });
 

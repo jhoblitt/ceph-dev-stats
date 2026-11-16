@@ -3,6 +3,7 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-li
 import { get } from 'svelte/store';
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import App from '../App.svelte';
+import { NAMED_A, NAME_A, POOLED, deletedMeta } from '../lib/__fixtures__/deleted';
 import { BASE, fixtureFetch, withEarlierYear } from '../lib/__fixtures__/fetch';
 import rawEvents2026 from '../lib/__fixtures__/data/events-2026.json';
 import rawMeta from '../lib/__fixtures__/data/meta.json';
@@ -10,6 +11,7 @@ import rawPrs2026 from '../lib/__fixtures__/data/prs-2026.json';
 import rawTable2026 from '../lib/__fixtures__/data/table-2026.json';
 import { fixturePage, memoryLocation, meta } from '../lib/__fixtures__/page';
 import { DataLoader } from '../lib/data';
+import { POOLED_NOTE } from '../lib/handles';
 import { createDataStore, createViewStore, yearsForState } from '../lib/page';
 import { createStateStore } from '../lib/state';
 import { at } from '../lib/stats/testing';
@@ -22,6 +24,13 @@ beforeAll(() => {
 type Columns = Record<string, unknown[]>;
 const append = (raw: unknown, extra: Record<string, unknown[]>): Columns =>
   Object.fromEntries(Object.entries(raw as Columns).map(([k, col]) => [k, [...col, ...(extra[k] ?? [])]]));
+
+/** An element's text as drawn: what is only for assistive technology left out, white space collapsed. */
+function shown(el: HTMLElement): string {
+  const copy = el.cloneNode(true) as HTMLElement;
+  copy.querySelectorAll('.visually-hidden').forEach((n) => n.remove());
+  return copy.textContent?.replace(/\s+/g, ' ').trim() ?? '';
+}
 
 const SHA = (c: string) => c.repeat(40);
 const PR = 'https://github.com/ceph/ceph/pull/67300';
@@ -184,11 +193,43 @@ describe('PrTimeline', () => {
     });
     const group = await within(section).findByRole('group', { name: 'The marks on the line, in time order' });
     expect(within(group).getByRole('link', { name: /^Comment by another person/ }).getAttribute('aria-label')).toBe(
-      'Comment by another person (deleted account), 3 Aug 2026 10:00 UTC',
+      'Comment by another person ((deleted, unknown)), 3 Aug 2026 10:00 UTC',
     );
     const row = within(await within(section).findByRole('table')).getByRole('rowheader', { name: 'Comment by another person' });
-    expect(row.closest('tr')?.querySelector('td.who')?.textContent?.trim()).toBe('deleted account');
-    expect(within(group).getByRole('link', { name: /^Opened/ }).getAttribute('aria-label')).toMatch(/^Opened \(deleted account, the author\)/);
+    const who = row.closest('tr')?.querySelector('td.who') as HTMLElement;
+    expect(shown(who)).toBe('(deleted, unknown)');
+    // What the pooled entry stands for is said to assistive technology, and on hover.
+    expect(who.querySelector('.visually-hidden')?.textContent).toBe(` (${POOLED_NOTE})`);
+    expect(within(who).getByText('(deleted, unknown)').getAttribute('title')).toBe(POOLED_NOTE);
+    expect(within(group).getByRole('link', { name: /^Opened/ }).getAttribute('aria-label')).toMatch(/^Opened \(\(deleted, unknown\), the author\)/);
+  });
+
+  it('names a deleted author by the name on the commits, with no link, and a deleted account’s comment on it as not theirs', async () => {
+    const files = withEveryKind();
+    const prs = files['prs-2026.json'] as Columns;
+    const events = files['events-2026.json'] as Columns;
+    const comment = EVERY.findIndex((e) => e.kind === 'comment_other');
+    const first = (events['pr'] as number[]).length - EVERY.length;
+    const author = (prs['author'] as number[]).map((a, i, all) => (i === all.length - 1 ? NAMED_A : a));
+    const actor = (events['actor'] as number[]).map((a, i) => (i === first + comment ? POOLED : a));
+    const section = await timeline('#/?target=all&pr=67300', {
+      ...files,
+      'meta.json': { ...deletedMeta(), event_kinds: KINDS },
+      'prs-2026.json': { ...prs, author },
+      'events-2026.json': { ...events, actor },
+    });
+    const group = await within(section).findByRole('group', { name: 'The marks on the line, in time order' });
+    expect(within(group).getByRole('link', { name: /^Opened/ }).getAttribute('aria-label')).toMatch(
+      new RegExp(`^Opened \\(\\(deleted\\) ${NAME_A}, the author\\)`),
+    );
+    expect(within(group).getByRole('link', { name: /^Comment by another person/ }).getAttribute('aria-label')).toBe(
+      'Comment by another person ((deleted, unknown)), 3 Aug 2026 10:00 UTC',
+    );
+    const table = await within(section).findByRole('table');
+    const who = (what: string) => within(table).getByRole('rowheader', { name: what }).closest('tr')?.querySelector('td.who') as HTMLElement;
+    expect(shown(who('Comment by the author')).replace(' ,', ',')).toBe(`(deleted) ${NAME_A}, the author`);
+    expect(within(who('Comment by the author')).queryByRole('link')).toBeNull();
+    expect(shown(who('Comment by another person'))).toBe('(deleted, unknown)');
   });
 
   it('says who made a mark when it is hovered or focused', async () => {

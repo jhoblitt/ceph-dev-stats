@@ -104,9 +104,8 @@ describe('the rollup output for the hand-made dataset', () => {
   });
 
   it('lists the deleted accounts named by their commits in people_deleted, beside the pooled ghost', () => {
-    const raw = file('meta.json') as { people_deleted?: unknown };
-    expect(Array.isArray(raw.people_deleted)).toBe(true);
-    expect((raw.people_deleted as number[]).map((d) => meta.people[d])).toEqual(['ghost:Ivy Example']);
+    expect('people_deleted' in (file('meta.json') as object)).toBe(true);
+    expect(meta.people_deleted.map((d) => meta.people[d])).toEqual(['ghost:Ivy Example']);
     expect(meta.people).toContain('ghost');
   });
 

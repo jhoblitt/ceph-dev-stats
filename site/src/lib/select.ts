@@ -10,8 +10,8 @@ import { HUMAN_REVIEWS, kindTable } from './stats/events';
 /**
  * The rows the filters select, ascending. The period keeps every PR active in
  * it: opened before its end and not finished before its start, so a PR opened
- * earlier and still worked on counts in the calendar charts. A login the data
- * does not name selects nothing.
+ * earlier and still worked on counts in the calendar charts. A person the
+ * data does not name selects nothing.
  */
 export function select(data: Dataset, filters: Filters): Uint32Array {
   const p = data.prs;
@@ -61,8 +61,9 @@ export function select(data: Dataset, filters: Filters): Uint32Array {
  * A flag per row, set for the PRs on which `person`, an index into meta's
  * `people`, commented or reviewed between `start` and `end` without being
  * their author: the events that name an actor, which the author's own never
- * do. Every deleted account shares one index, so the author's is not
- * compared.
+ * do. Every deleted account's comments and reviews name the pooled `ghost`
+ * entry, which can be the author's index without being the author, so the
+ * author's is not compared.
  */
 function reviewedBy(data: Dataset, person: number, start: number, end: number): Uint8Array {
   const ev = data.events;

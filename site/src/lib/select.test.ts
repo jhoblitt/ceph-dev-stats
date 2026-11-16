@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import events2026 from './__fixtures__/data/events-2026.json';
 import rawMeta from './__fixtures__/data/meta.json';
 import prs2026 from './__fixtures__/data/prs-2026.json';
+import { NAMED_A, NAMED_B, NAME_A, NAME_B, POOLED, deletedMeta } from './__fixtures__/deleted';
 import { combine, parseMeta, parseYear } from './data';
 import { type Filters, dayOf, dayStart, isDevelopmentBranch, periodRange } from './filters';
 import { openedIn, openedInBucket, select } from './select';
@@ -146,6 +147,32 @@ describe('the Author and Reviewer filters', () => {
   it('select nothing for a login the data does not name', () => {
     expect(rows({ author: 'someone-else' })).toEqual([]);
     expect(rows({ reviewer: 'someone-else' })).toEqual([]);
+  });
+
+  it('keep a named deleted author’s PRs alone as author, and the pooled entry’s alone as `ghost`', () => {
+    // Rows 0–1 by Ada, 2 by Åsa, 3 by the pooled entry, which commented on 0
+    // and reviewed 2: comments and reviews by deleted accounts are its alone.
+    const t = at('2026-06-01T00:00:00Z');
+    const d = dataset(
+      [
+        { created: t, author: NAMED_A },
+        { created: t, author: NAMED_A },
+        { created: t, author: NAMED_B },
+        { created: t, author: POOLED },
+      ],
+      [
+        { pr: 0, at: t + 3600, kind: 'comment_other', actor: POOLED },
+        { pr: 2, at: t + 3600, kind: 'review_approved', actor: POOLED },
+      ],
+      parseMeta(deletedMeta()),
+    );
+    const f = { ...defaultFilters(d.meta), target: 'all' as const };
+    expect([...select(d, { ...f, author: `ghost:${NAME_A}` })]).toEqual([0, 1]);
+    expect([...select(d, { ...f, author: `ghost:${NAME_B}` })]).toEqual([2]);
+    expect([...select(d, { ...f, author: 'ghost' })]).toEqual([3]);
+    // The Reviewer filter is as before: a name never reviews, the pooled entry does.
+    expect([...select(d, { ...f, reviewer: `ghost:${NAME_A}` })]).toEqual([]);
+    expect([...select(d, { ...f, reviewer: 'ghost' })]).toEqual([0, 2]);
   });
 });
 

@@ -1,7 +1,8 @@
 <!--
   A person in a table cell: their GitHub handle, a link to their page there
-  when the login has the form of one, a mark when the account is a bot, and,
-  where a filter by them applies, a control that sets or clears it.
+  when the login has the form of one, a mark when the account is a bot, what
+  the pooled deleted account stands for, and, where a filter by them applies,
+  a control that sets or clears it.
 -->
 <script lang="ts">
   import type { Handle } from '../lib/handles';
@@ -22,7 +23,7 @@
       >{handle.text}</a
     >
   {:else}
-    <span>{handle.text}</span>
+    <span title={handle.note}>{handle.text}</span>{#if handle.note}<span class="visually-hidden">{` (${handle.note})`}</span>{/if}
   {/if}
   {#if bot}
     <span class="bot">bot</span>

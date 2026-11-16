@@ -23,7 +23,7 @@
     onsort: (column: C) => void;
     /** What the row's filter control filters by: "author" or "reviewer". */
     role: string;
-    /** The login the matching filter is set to. */
+    /** The `people` entry the matching filter is set to. */
     active: string | null;
     ontoggle: (login: string) => void;
   }

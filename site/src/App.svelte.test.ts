@@ -4,8 +4,10 @@ import { get } from 'svelte/store';
 import { beforeAll, describe, expect, it } from 'vitest';
 import App from './App.svelte';
 import rawMeta from './lib/__fixtures__/data/meta.json';
+import { NAME_A, NAME_B, deletedMeta } from './lib/__fixtures__/deleted';
 import { BASE, fixtureFetch, heldByYear, withEarlierYear, withYears } from './lib/__fixtures__/fetch';
 import { DataLoader, type Fetch, parseMeta } from './lib/data';
+import { POOLED_NOTE } from './lib/handles';
 import { type Page, createDataStore, createPage, createViewStore, firstYears } from './lib/page';
 import { type HashLocation, RECENT_MONTHS, createStateStore } from './lib/state';
 
@@ -455,6 +457,48 @@ describe('filter bar', () => {
     const list = document.getElementById(author.getAttribute('list') as string) as HTMLDataListElement;
     expect([...list.options].map((o) => o.value)).toEqual(meta.people);
     expect([...list.options].find((o) => o.value === 'fixture-author-j')?.textContent).toBe('bot');
+  });
+
+  describe('with deleted accounts', () => {
+    const named = parseMeta(deletedMeta());
+    const authorInput = () => screen.getByLabelText('Author') as HTMLInputElement;
+
+    it('offers each person as the page writes them: a named deleted account by its name, the pooled entry with what it pools', async () => {
+      render(App, (await page('', {}, named)).props);
+      const list = document.getElementById(authorInput().getAttribute('list') as string) as HTMLDataListElement;
+      expect([...list.options].map((o) => o.value)).toEqual([
+        ...meta.people,
+        '(deleted, unknown)',
+        `(deleted) ${NAME_A}`,
+        `(deleted) ${NAME_B}`,
+      ]);
+      expect([...list.options].find((o) => o.value === '(deleted, unknown)')?.textContent).toBe(POOLED_NOTE);
+      expect([...list.options].find((o) => o.value === `(deleted) ${NAME_A}`)?.textContent).toBe('');
+      expect([...list.options].find((o) => o.value === 'fixture-author-j')?.textContent).toBe('bot');
+    });
+
+    it('shows a named deleted author an address restores as the page writes them', async () => {
+      render(App, (await page(`#/?author=${encodeURIComponent(`ghost:${NAME_B}`)}`, {}, named)).props);
+      expect(authorInput().value).toBe(`(deleted) ${NAME_B}`);
+    });
+
+    it('takes a named deleted author typed as the page writes them, and writes the address with the name', async () => {
+      const { props, loc } = await page('', {}, named);
+      render(App, props);
+      authorInput().value = `(deleted) ${NAME_A}`;
+      await fireEvent.change(authorInput());
+      expect(loc.hash()).toBe(`#/?target=main&author=${encodeURIComponent(`ghost:${NAME_A}`)}`);
+      expect(authorInput().value).toBe(`(deleted) ${NAME_A}`);
+    });
+
+    it('takes an old address with author=ghost as the pooled entry, and says beside the input what it pools', async () => {
+      const { props, loc } = await page('#/?author=ghost', {}, named);
+      render(App, props);
+      expect(loc.hash()).toBe('#/?target=main&author=ghost');
+      expect(authorInput().value).toBe('(deleted, unknown)');
+      const note = screen.getByText(`(deleted, unknown): ${POOLED_NOTE}`);
+      expect(authorInput().getAttribute('aria-describedby')?.split(' ')).toContain(note.id);
+    });
   });
 
   it('shows the author and reviewer a hash restores, each with a way to clear it', async () => {

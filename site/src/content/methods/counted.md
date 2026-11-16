@@ -24,5 +24,5 @@ A pull request that finished before {{windowStart}} can be among the records too
 - **AI use disclosure**: "AI use disclosed" is any of the forms in [Disclosure of LLM use](#disclosure), and "AI use not disclosed" is none of them.
 - **Exclude drafts**: leaves out the pull requests that are drafts now, not those that were drafts once.
 - **Reopened**: keeps the pull requests reopened at least once.
-- **Author**: keeps the pull requests a login opened.
-- **Reviewer**: keeps the pull requests a login reviewed or commented on during the period, other than their own: see [The People tables](#people-tables).
+- **Author**: keeps the pull requests a login opened, or those credited to a deleted account's name or to "(deleted, unknown)" ([Deleted accounts](#people-deleted-accounts)).
+- **Reviewer**: keeps the pull requests a login reviewed or commented on during the period, other than their own: see [The People tables](#people-tables). Every comment and review by a deleted account counts for "(deleted, unknown)", so choosing a deleted account's name keeps none.

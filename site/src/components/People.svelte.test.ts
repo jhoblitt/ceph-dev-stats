@@ -2,7 +2,9 @@
 import { fireEvent, render, screen, within } from '@testing-library/svelte';
 import { beforeAll, describe, expect, it } from 'vitest';
 import App from '../App.svelte';
+import { NAME_A, NAME_B, deletedFiles } from '../lib/__fixtures__/deleted';
 import { fixturePage } from '../lib/__fixtures__/page';
+import { POOLED_NOTE } from '../lib/handles';
 
 beforeAll(() => {
   window.matchMedia = (query: string) =>
@@ -210,5 +212,50 @@ describe('People', () => {
     render(App, (await fixturePage('#/?component=cephfs&kind=docs')).props);
     expect(section().getByText('no PRs match')).toBeTruthy();
     expect(section().queryByRole('table')).toBeNull();
+  });
+});
+
+describe('People with deleted accounts', () => {
+  // #66510 is Ada's, #66700 Åsa's and #67000 the pooled entry's; a deleted
+  // account commented on #66700.
+  it('gives a named deleted author a row of their own, ranked as anyone, written "(deleted)" and the name, with no link', async () => {
+    render(App, (await fixturePage('', deletedFiles())).props);
+    expect(cells('Authors').map((r) => [r[0], r[1], r[2]])).toEqual([
+      ['1', 'fixture-author-d', '2'],
+      ['2', '(deleted, unknown)', '1'],
+      ['3', `(deleted) ${NAME_A}`, '1'],
+      ['4', `(deleted) ${NAME_B}`, '1'],
+      ['5', 'fixture-author-a', '1'],
+      ['6', 'fixture-author-f', '1'],
+    ]);
+    expect(within(table('Authors')).queryByRole('link', { name: /deleted/ })).toBeNull();
+    const authors = section().getByRole('heading', { level: 3, name: 'Authors' }).closest('.part') as HTMLElement;
+    expect(within(authors).getByRole('status').textContent?.replace(/\s+/g, ' ').trim()).toBe(
+      '6 authors of the selected PRs opened in the period',
+    );
+  });
+
+  it('says beside the pooled row what it pools', async () => {
+    render(App, (await fixturePage('', deletedFiles())).props);
+    const row = within(table('Authors')).getByRole('rowheader', { name: /^\(deleted, unknown\)/ });
+    expect(row.querySelector('.visually-hidden')?.textContent).toBe(` (${POOLED_NOTE})`);
+  });
+
+  it('filters by a named deleted author from their row, the address carrying the name', async () => {
+    const { props, loc } = await fixturePage('', deletedFiles());
+    render(App, props);
+    await fireEvent.click(within(table('Authors')).getByRole('button', { name: `Filter by (deleted) ${NAME_B} as author` }));
+    expect(loc.hash()).toBe(`#/?target=main&author=${encodeURIComponent(`ghost:${NAME_B}`)}`);
+    expect(people('Authors')).toEqual([`(deleted) ${NAME_B}`]);
+  });
+
+  it('lists the pooled entry among the reviewers and no named deleted author, and says why', async () => {
+    render(App, (await fixturePage('', deletedFiles())).props);
+    expect(people('Reviewers')).toContain('(deleted, unknown)');
+    expect(people('Reviewers').filter((p) => p !== undefined && (p.includes(NAME_A) || p.includes(NAME_B)))).toEqual([]);
+    const reviewers = section().getByRole('heading', { level: 3, name: 'Reviewers' }).closest('.part') as HTMLElement;
+    expect(reviewers.querySelector('.notes')?.textContent?.replace(/\s+/g, ' ')).toContain(
+      'A deleted account’s pull requests can be credited to the name on their commits, but its comments and reviews carry no name, so they are all in the “(deleted, unknown)” row, and no “(deleted)” author with a name has a row here.',
+    );
   });
 });

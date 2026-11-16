@@ -191,6 +191,9 @@ export const INLINE_FIGURES: Record<string, Figure<string>> = {
     needs: 'data',
     show: (_m, d) => (d.people.largestShare === null ? '–' : formatShare(d.people.largestShare)),
   },
+  'people.deletedNamedPrs': count((d) => d.people.deleted.namedPrs),
+  'people.deletedNames': count((d) => d.people.deleted.names),
+  'people.deletedPooledPrs': count((d) => d.people.deleted.pooledPrs),
 };
 
 export interface TableModel {
