@@ -10,7 +10,6 @@ import {
   comparisonSummary,
   describeShares,
   familiesModel,
-  foldFamilies,
   percent,
   shareModel,
 } from './llm';
@@ -18,7 +17,7 @@ import { curveQuantiles } from './review';
 import { openedIn, select } from './select';
 import { defaultFilters } from './state';
 import { outcomeCurve } from './stats/curve';
-import { disclosureCounts, distribution, familiesShare, mergedWithin, namingAny } from './stats/measures';
+import { disclosureCounts, distribution, mergedWithin } from './stats/measures';
 import { META, all, at, dataset, fixture } from './stats/testing';
 import { weekly } from './stats/weekly';
 
@@ -79,7 +78,7 @@ describe('shareModel', () => {
 });
 
 describe('the tool families', () => {
-  // Five families; of 100 PRs opened, 10 name Claude, 3 Copilot, 1 each Cursor and Gemini, 1 none ("unspecified").
+  // Five families; of 100 PRs opened, 10 name Claude, 5 none ("unspecified"), 3 Copilot, 1 each Cursor and Gemini.
   const FIVE = [
     { id: 'claude', name: 'Claude' },
     { id: 'cursor', name: 'Cursor' },
@@ -91,59 +90,36 @@ describe('the tool families', () => {
   const p = { start: at('2026-06-01T00:00:00Z'), end: at('2026-06-08T00:00:00Z') };
   const naming = (f: number, n: number) => Array.from({ length: n }, () => ({ created: t, disclosure: 3, families: [f] }));
   const many = dataset(
-    [...naming(0, 10), ...naming(3, 3), ...naming(1, 1), ...naming(2, 1), ...naming(4, 1), ...Array.from({ length: 84 }, () => ({ created: t }))],
+    [...naming(0, 10), ...naming(3, 3), ...naming(1, 1), ...naming(2, 1), ...naming(4, 5), ...Array.from({ length: 80 }, () => ({ created: t }))],
     [],
     { families: FIVE },
   );
   const manyRows = all(many);
   const counts = disclosureCounts(many, manyRows);
 
-  it('gives a family its own panel from 2% of the PRs opened, folds the rest, and keeps "unspecified" apart and last', () => {
-    expect(foldFamilies(FIVE, counts)).toEqual({ own: [0, 3], folded: [1, 2], unspecified: 4 });
-  });
-
-  it('keeps a family alone below the threshold in its own panel, since one tool is no fold', () => {
-    const two = dataset([...naming(0, 10), ...naming(1, 1), ...Array.from({ length: 89 }, () => ({ created: t }))], [], { families: FIVE });
-    expect(foldFamilies(FIVE, disclosureCounts(two, all(two)))).toEqual({ own: [0, 1], folded: [], unspecified: null });
-  });
-
-  it('draws the families on one scale in the disclosed colour, the folded ones as one panel naming them', () => {
-    const fold = foldFamilies(FIVE, counts);
-    const other = familiesShare(many, manyRows, p, fold.folded);
-    const chart = familiesModel(
-      weekly(many, manyRows, p, 'disclosureShare'),
-      other,
-      namingAny(many, manyRows, fold.folded),
-      fold,
-      FIVE,
-      counts,
-    );
-    expect(chart.model.lines.map((l) => l.key)).toEqual(['claude', 'copilot', 'other', 'unspecified']);
+  it('draws every family named, however rarely, on one scale in the disclosed colour, most named first and "unspecified" last', () => {
+    const chart = familiesModel(weekly(many, manyRows, p, 'disclosureShare'), FIVE, counts);
+    expect(chart.model.lines.map((l) => l.key)).toEqual(['claude', 'copilot', 'cursor', 'gemini', 'unspecified']);
     expect(chart.model.lines.every((l) => l.color === COLOURS.disclosed)).toBe(true);
     expect(chart.panels).toEqual([
       { keys: ['claude'], unit: 'Claude: 10 PRs, 10% of those opened' },
       { keys: ['copilot'], unit: 'Copilot: 3 PRs, 3% of those opened' },
-      { keys: ['other'], unit: 'Other named tools: 2 PRs, 2% of those opened' },
-      { keys: ['unspecified'], unit: 'Unspecified: 1 PR, 1% of those opened' },
+      { keys: ['cursor'], unit: 'Cursor: 1 PR, 1% of those opened' },
+      { keys: ['gemini'], unit: 'Gemini: 1 PR, 1% of those opened' },
+      { keys: ['unspecified'], unit: 'Unspecified: 5 PRs, 5% of those opened' },
     ]);
-    expect(chart.model.lines[2]?.values).toEqual([2]);
-    expect(chart.folded).toBe('Cursor 1, Gemini 1');
-    // The table view keeps every family on its own.
-    expect(chart.table.lines.map((l) => l.key)).toEqual(['claude', 'copilot', 'cursor', 'gemini', 'unspecified']);
+    expect(chart.model.lines[2]?.values).toEqual([1]);
   });
 
   it('draws the fixture’s two families each in a panel', () => {
     // Claude: 66500 and 67100; GitHub Copilot: 67000; unspecified: none.
     const shares = weekly(data, rows, period, 'disclosureShare');
-    const c = disclosureCounts(data, opened);
-    const fold = foldFamilies(META.families, c);
-    const chart = familiesModel(shares, familiesShare(data, rows, period, fold.folded), 0, fold, META.families, c);
+    const chart = familiesModel(shares, META.families, disclosureCounts(data, opened));
     expect(chart.panels).toEqual([
       { keys: ['claude'], unit: 'Claude: 2 PRs, 29% of those opened' },
       { keys: ['copilot'], unit: 'GitHub Copilot: 1 PR, 14% of those opened' },
     ]);
     expect(chart.model.lines[0]?.values).toEqual((shares.values['claude'] ?? []).map((v) => (v === null ? null : v * 100)));
-    expect(chart.folded).toBeNull();
   });
 });
 

@@ -2,14 +2,11 @@
   import { bucketTable, withCoverage } from '../lib/charts';
   import { COLOURS } from '../lib/colours';
   import { DISCLOSED, NOT_DISCLOSED, dayStart, periodRange } from '../lib/filters';
-  import { formatShare } from '../lib/format';
   import {
     comparison,
     comparisonSummary,
     describeShares,
     familiesModel,
-    OWN_PANEL_SHARE,
-    foldFamilies,
     percent,
     shareModel,
   } from '../lib/llm';
@@ -17,7 +14,7 @@
   import { openedIn } from '../lib/select';
   import { chooseBucket } from '../lib/selection';
   import { sectionHash } from '../lib/state';
-  import { disclosureCounts, familiesShare, namingAny } from '../lib/stats/measures';
+  import { disclosureCounts } from '../lib/stats/measures';
   import { weekly } from '../lib/stats/weekly';
   import BucketChart from './charts/BucketChart.svelte';
   import ChartFrame from './charts/ChartFrame.svelte';
@@ -40,26 +37,10 @@
   const share = $derived(withCoverage(shareModel(shares), period, fetched));
   const step = $derived(share.step);
   const counts = $derived(disclosureCounts(dataset, opened));
-  // The threshold for a panel of its own applies to the current selection, so the panels follow the filters.
-  const fold = $derived(foldFamilies(dataset.meta.families, counts));
-  const families = $derived(
-    familiesModel(
-      shares,
-      familiesShare(dataset, rows, period, fold.folded),
-      namingAny(dataset, opened, fold.folded),
-      fold,
-      dataset.meta.families,
-      counts,
-    ),
-  );
+  const families = $derived(familiesModel(shares, dataset.meta.families, counts));
   const familyModel = $derived(withCoverage(families.model, period, fetched));
-  const familyTable = $derived(withCoverage(families.table, period, fetched));
-  const familyNote = $derived(
-    'In percent of the PRs opened, on one scale. A PR can name more than one tool, and “unspecified” counts a disclosure that names none, so the shares by tool do not add up to the share disclosing.' +
-      (families.folded === null
-        ? ''
-        : ` Tools named on fewer than ${formatShare(OWN_PANEL_SHARE)} of the PRs opened share the panel “other named tools”: ${families.folded}. The table lists each.`),
-  );
+  const familyNote =
+    'In percent of the PRs opened, on one scale. A PR can name more than one tool, and “unspecified” counts a disclosure that names none, so the shares by tool do not add up to the share disclosing.';
   const compared = $derived(comparison(dataset, opened));
 
   const noneOpened = 'no PR was opened in this period';
@@ -103,7 +84,7 @@
     summary={describeShares(familyModel)}
     {empty}
     nothing={familyNothing}
-    table={bucketTable(familyTable, percent)}
+    table={bucketTable(familyModel, percent)}
   >
     <BucketChart
       model={familyModel}

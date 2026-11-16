@@ -2,13 +2,10 @@ import { describe, expect, it } from 'vitest';
 import {
   disclosureCounts,
   distribution,
-  familiesShare,
-  namingAny,
   mergedWithin,
   nearestRank,
 } from './measures';
 import { all, at, dataset } from './testing';
-import { weekly } from './weekly';
 
 const T0 = at('2026-06-01T00:00:00Z');
 const DAY = 86_400;
@@ -93,37 +90,6 @@ describe('mergedWithin', () => {
   it('follows more PRs at a shorter horizon', () => {
     // At 1 day all six are followed; the last merged after exactly a day.
     expect(mergedWithin(data, all(data), 1)).toEqual({ followed: 6, merged: 1, share: 1 / 6 });
-  });
-});
-
-describe('PRs naming any of several families', () => {
-  const p: { start: number; end: number } = { start: at('2026-06-01T00:00:00Z'), end: at('2026-06-15T00:00:00Z') };
-  const w1 = at('2026-06-02T00:00:00Z');
-  const w2 = at('2026-06-09T00:00:00Z');
-  // Week 1: one names 1 and 2, one names 1, one names 0, one none. Week 2: one names 0.
-  const data = dataset([
-    { created: w1, disclosure: 3, families: [1, 2] },
-    { created: w1, disclosure: 3, families: [1] },
-    { created: w1, disclosure: 3, families: [0] },
-    { created: w1 },
-    { created: w2, disclosure: 3, families: [0] },
-  ]);
-
-  it('counts a PR once however many of the families it names', () => {
-    expect(namingAny(data, all(data), [1, 2])).toBe(2);
-    expect(namingAny(data, all(data), [0])).toBe(2);
-    expect(namingAny(data, all(data), [])).toBe(0);
-  });
-
-  it('gives the share by week opened, null for a week with none opened', () => {
-    expect(familiesShare(data, all(data), p, [1, 2]).values['any']).toEqual([0.5, 0]);
-    const none = familiesShare(data, Uint32Array.of(0, 1, 2, 3), p, [0]);
-    expect(none.values['any']).toEqual([0.25, null]);
-    expect(none.week).toEqual([w1 - DAY, w2 - DAY]);
-  });
-
-  it('agrees with the weekly share of one family', () => {
-    expect(familiesShare(data, all(data), p, [0]).values['any']).toEqual(weekly(data, all(data), p, 'disclosureShare').values['claude']);
   });
 });
 
