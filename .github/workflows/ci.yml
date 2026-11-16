@@ -97,13 +97,24 @@ jobs:
           go-version-file: go.mod
           go-package: ./...
 
-  # Filled in when `cephstats check` is implemented.
+  # The hand-edited tables in data/, validated against the committed records.
   data-check:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - name: Nothing to check yet
-        run: echo "cephstats check is not implemented yet"
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          check-latest: true
+
+      - name: cephstats check
+        run: make data-check
 
   # The site under site/, built from the test fixture until `cephstats
   # rollup` writes real data.

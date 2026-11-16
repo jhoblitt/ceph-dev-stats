@@ -1,0 +1,40 @@
+# Comments that only trigger automation. A comment is a command when its
+# whole text matches a pattern, in any case; the first command that
+# matches, top to bottom, names it.
+commands:
+  - id: jenkins-test-make-check-arm64
+    name: jenkins test make check arm64
+    pattern: 'jenkins test make check arm64'
+  - id: jenkins-test-make-check
+    name: jenkins test make check
+    pattern: 'jenkins test make check'
+  - id: jenkins-test-windows
+    name: jenkins test windows
+    pattern: 'jenkins test windows'
+  - id: jenkins-test-api
+    name: jenkins test api
+    pattern: 'jenkins test api'
+  - id: jenkins-test-pr
+    name: jenkins test pr
+    pattern: 'jenkins test pr'
+  - id: jenkins-test
+    name: jenkins test, another job
+    pattern: 'jenkins test .+'
+  - id: jenkins-retest
+    name: jenkins retest this please
+    pattern: 'jenkins retest this please'
+  - id: jenkins-ceph-volume
+    name: jenkins ceph-volume
+    pattern: 'jenkins ceph-volume .+'
+  - id: audit-retest
+    name: /audit retest
+    pattern: '/audit retest'
+  - id: audit-override
+    name: /audit override
+    pattern: '/audit override( .+)?'
+  - id: config-check-ok
+    name: /config check ok
+    pattern: '/config check ok'
+  - id: ok-to-test
+    name: ok to test
+    pattern: 'ok to test'

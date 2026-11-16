@@ -34,7 +34,7 @@ var _ = Describe("Run", func() {
 	})
 
 	It("says a subcommand is not implemented yet", func() {
-		for _, name := range []string{"check", "rollup"} {
+		for _, name := range []string{"rollup"} {
 			Expect(run(name)).To(MatchError(name+" is not implemented"), "subcommand %q", name)
 		}
 	})

@@ -1,0 +1,216 @@
+package classify_test
+
+import (
+	"bytes"
+	"time"
+
+	. "github.com/onsi/ginkgo/v2"
+	. "github.com/onsi/gomega"
+
+	"github.com/jhoblitt/ceph-dev-stats/internal/classify"
+	"github.com/jhoblitt/ceph-dev-stats/internal/fetch"
+	"github.com/jhoblitt/ceph-dev-stats/internal/record"
+	"github.com/jhoblitt/ceph-dev-stats/internal/tracker"
+)
+
+var _ = Describe("Check", func() {
+	var (
+		in  classify.CheckInput
+		out *bytes.Buffer
+	)
+
+	meta := func(openedInWindow, open int) *record.Meta {
+		return &record.Meta{
+			WindowStart:  fetch.WindowStart,
+			GitHubCounts: record.Counts{OpenedInWindow: openedInWindow, Open: open},
+		}
+	}
+
+	// clean is a small dataset every check passes on.
+	clean := func() classify.CheckInput {
+		r1 := pr(1)
+		r1.Labels = []string{"needs-review", "rgw"}
+		r1.Disclosure.Trailers = []string{"Assisted-by: Claude Code", "Co-authored-by: Cursor <cursoragent@cursor.com>"}
+		r1.Disclosure.Description = []string{"Address Claude review comments"}
+		r1.Comments = []record.Comment{
+			{By: "alice", Text: "jenkins test make check"},
+			{By: "bob", Text: "LGTM"},
+			{By: "bob", Text: "lgtm"},
+			{By: "dependabot", Bot: true, Text: "rebased"},
+			{By: "ci-user", Text: "retest"},
+		}
+		r1.KindHints = &record.KindHints{Tickets: []int{1}}
+
+		r2 := pr(2)
+		r2.Base = "squid"
+		r2.Created = time.Date(2026, 5, 1, 0, 0, 0, 0, time.UTC)
+		r2.State = record.StateMerged
+		r2.Labels = []string{"rgw", "squid"}
+		r2.Disclosure.Description = []string{"Address Claude review comments", "GPT partition table"}
+		r2.Comments = []record.Comment{{By: "bob", Text: "LGTM"}, {By: "carol"}}
+
+		r3 := pr(3)
+		r3.State = record.StateMerged
+
+		return classify.CheckInput{
+			Tables: loadTables(nil),
+			Tickets: map[int]tracker.Ticket{
+				1:  {Type: "Bug"},
+				2:  {Type: ""},
+				10: {Type: tracker.TypeBackport, Parent: 1},
+			},
+			Records: []record.Record{r1, r2, r3},
+			Meta:    meta(2, 1),
+			Top:     10,
+		}
+	}
+
+	BeforeEach(func() {
+		in = clean()
+		out = &bytes.Buffer{}
+	})
+
+	It("passes a clean dataset and reports on it", func() {
+		Expect(classify.Check(in, out)).To(Succeed())
+		Expect(out.String()).To(Equal(`Counts: 2 opened in the window (GitHub: 2), 1 open (GitHub: 1)
+Description and commit-prose candidates that match no phrase: 2
+      2  Address Claude review comments
+      1  GPT partition table
+Short comments by people that match no command: 1
+      3  lgtm
+Accounts with the most comments, not typed bots by GitHub: 4
+      3  bob
+      1  alice
+      1  carol
+      1  ci-user (bots.yaml)
+Base branches: 2
+      2  main
+      1  squid
+`))
+	})
+
+	It("passes the tables alone, with no records, meta or tickets", func() {
+		Expect(classify.Check(classify.CheckInput{Tables: in.Tables}, out)).To(Succeed())
+		Expect(out.String()).To(Equal(`Counts: no meta.json to compare with
+Description and commit-prose candidates that match no phrase: 0
+Short comments by people that match no command: 0
+Accounts with the most comments, not typed bots by GitHub: 0
+Base branches: 0
+`))
+	})
+
+	It("cuts each report at the top entries", func() {
+		in.Top = 1
+		Expect(classify.Check(in, out)).To(Succeed())
+		Expect(out.String()).To(ContainSubstring(`Accounts with the most comments, not typed bots by GitHub: 4
+      3  bob
+    and 3 more
+`))
+	})
+
+	DescribeTable("passes",
+		func(change func()) {
+			change()
+			Expect(classify.Check(in, out)).To(Succeed())
+		},
+		Entry("a trailer whose key is listed, in another case", func() {
+			in.Records[2].Disclosure.Trailers = []string{"ASSISTED-BY: Gemini"}
+		}),
+		Entry("a Co-authored-by in another case", func() {
+			in.Records[2].Disclosure.Trailers = []string{"CO-AUTHORED-BY: Claude"}
+		}),
+		Entry("a trailer with an unlisted key that ignore lists", func() {
+			in.Records[2].Disclosure.Trailers = []string{"Made-with: Claude Dupont"}
+		}),
+		Entry("an unclassified label on 4 PRs", func() {
+			for i := range 4 {
+				in.Records = append(in.Records, pr(10+i))
+				in.Records[len(in.Records)-1].Labels = []string{"core"}
+			}
+			in.Meta = meta(6, 5)
+		}),
+		Entry("a kind label on 5 PRs", func() {
+			for i := range 5 {
+				in.Records = append(in.Records, pr(10+i))
+				in.Records[len(in.Records)-1].Labels = []string{"bug-fix"}
+			}
+			in.Meta = meta(7, 6)
+		}),
+		Entry("counts 0.5% apart", func() {
+			for i := range 197 {
+				in.Records = append(in.Records, pr(10+i))
+			}
+			in.Meta = meta(200, 198)
+		}),
+	)
+
+	DescribeTable("fails, naming the problem",
+		func(change func(), want string) {
+			change()
+			Expect(classify.Check(in, out)).To(MatchError(ContainSubstring(want)))
+		},
+		Entry("a trailer whose key is neither listed nor Co-authored-by", func() {
+			in.Records[2].Disclosure.Trailers = []string{"Generated-by: Claude"}
+		}, `tools.yaml: trailer "Generated-by: Claude" (#3) has key "generated-by", which is not in trailer_keys or Co-authored-by, and no ignore entry lists it`),
+		Entry("a counted disclosure that matches no family", func() {
+			in.Records[2].Disclosure.Trailers = []string{"Assisted-by: Bard"}
+		}, `tools.yaml: disclosure "Assisted-by: Bard" (#3) matches no family`),
+		Entry("an unclassified label on 5 PRs", func() {
+			for i := range 5 {
+				in.Records = append(in.Records, pr(10+i))
+				in.Records[len(in.Records)-1].Labels = []string{"core"}
+			}
+			in.Meta = meta(7, 6)
+		}, `labels.yaml: label "core" is on 5 pull requests and no table classifies it`),
+		Entry("a ticket type kinds.yaml does not map", func() {
+			in.Tickets[5] = tracker.Ticket{Type: "Weird"}
+			in.Tickets[3] = tracker.Ticket{Type: "Weird"}
+		}, `kinds.yaml: ticket type "Weird" in tickets.json (tickets 3, 5) has no tracker entry`),
+		Entry("more PRs opened in the window than GitHub counted", func() {
+			in.Meta = meta(1, 1)
+		}, `meta.json: the records hold 2 pull requests opened in the window, GitHub counted 1: more than 0.5% apart`),
+		Entry("fewer open PRs than GitHub counted", func() {
+			in.Meta = meta(2, 300)
+		}, `meta.json: the records hold 1 open pull requests, GitHub counted 300: more than 0.5% apart`),
+		Entry("counts 1% apart", func() {
+			for i := range 196 {
+				in.Records = append(in.Records, pr(10+i))
+			}
+			in.Meta = meta(200, 197)
+		}, `the records hold 198 pull requests opened in the window, GitHub counted 200`),
+	)
+
+	It("names at most five PRs for one problem", func() {
+		for i := range in.Records {
+			in.Records[i].Disclosure.Trailers = []string{"Assisted-by: Bard"}
+		}
+		for i := range 4 {
+			in.Records = append(in.Records, pr(10+i))
+			in.Records[len(in.Records)-1].Disclosure.Trailers = []string{"Assisted-by: Bard"}
+		}
+		in.Meta = nil
+		Expect(classify.Check(in, out)).To(MatchError(
+			`tools.yaml: disclosure "Assisted-by: Bard" (#1, #2, #3, #10, #11 and 2 more) matches no family`))
+	})
+
+	It("names a PR once when its lists repeat a line", func() {
+		in.Records[2].Disclosure.Description = []string{"Assisted by Bard"}
+		in.Records[2].Disclosure.CommitProse = []string{"Assisted by Bard"}
+		Expect(classify.Check(in, out)).To(MatchError(`tools.yaml: disclosure "Assisted by Bard" (#3) matches no family`))
+	})
+
+	It("lists every problem at once, and still reports", func() {
+		in.Records[2].Disclosure.Trailers = []string{"Generated-by: Claude", "Assisted-by: Bard"}
+		in.Tickets[3] = tracker.Ticket{Type: "Weird"}
+		in.Meta = meta(1, 1)
+
+		err := classify.Check(in, out)
+		Expect(err).To(MatchError(And(
+			ContainSubstring(`trailer "Generated-by: Claude"`),
+			ContainSubstring(`disclosure "Assisted-by: Bard"`),
+			ContainSubstring(`ticket type "Weird"`),
+			ContainSubstring(`opened in the window`),
+		)))
+		Expect(out.String()).To(ContainSubstring("Base branches: 2"))
+	})
+})

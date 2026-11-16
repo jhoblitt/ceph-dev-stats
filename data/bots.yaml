@@ -1,0 +1,6 @@
+# Accounts GitHub types as users whose comments and reviews are automated.
+# Accounts GitHub types as bots need no entry. Logins match in any case.
+#
+#   - login: some-ci-account
+#     why: posts test results
+accounts: []
