@@ -8,7 +8,7 @@ import { combine, parseMeta, parseYear } from './data';
 import { type Filters, dayOf, dayStart, periodRange } from './filters';
 import { openedIn, openedInBucket, select } from './select';
 import { defaultFilters } from './state';
-import { all, at, dataset } from './stats/testing';
+import { META, all, at, dataset } from './stats/testing';
 import { weekly } from './stats/weekly';
 
 const meta = parseMeta(rawMeta);
@@ -124,6 +124,25 @@ describe('the Author and Reviewer filters', () => {
     expect(rows({ author: 'fixture-author-d', reviewer: 'fixture-author-f' })).toEqual([3, 10]);
     expect(rows({ author: 'fixture-author-d', reviewer: 'fixture-author-e' })).toEqual([10]);
     expect(rows({ target: 'main', reviewer: 'fixture-author-e' })).toEqual([2, 10]);
+  });
+
+  it('keep a PR a deleted account commented on though another deleted account opened it, as the Reviewers table counts it', () => {
+    // Every deleted account shares the one `ghost` index; an event that names
+    // an actor is never the author's.
+    const people = [...META.people, 'ghost'];
+    const ghost = people.length - 1;
+    const t = at('2026-06-01T00:00:00Z');
+    const d = dataset(
+      [
+        { created: t, author: ghost },
+        { created: t, author: 1 },
+      ],
+      [{ pr: 0, at: t + 3600, kind: 'comment_other', actor: ghost }],
+      { people },
+    );
+    const f = { ...defaultFilters(d.meta), target: 'all' as const };
+    expect([...select(d, { ...f, reviewer: 'ghost' })]).toEqual([0]);
+    expect([...select(d, { ...f, author: 'ghost' })]).toEqual([0]);
   });
 
   it('select nothing for a login the data does not name', () => {

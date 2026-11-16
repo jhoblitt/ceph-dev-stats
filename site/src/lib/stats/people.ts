@@ -203,7 +203,10 @@ export function reviewerRows(data: Dataset, rows: Uint32Array, period: Period): 
       for (let i = e; i < end; i++) {
         const what = table[ev.kind[i] as number] as number;
         const person = ev.actor[i] as number;
-        if (what === -1 || person < 0 || person === p.author[r]) continue;
+        // An event that names an actor is by the data's rule never the
+        // author's: the author's own carry none. Comparing with the author's
+        // index would be wrong, as every deleted account shares one.
+        if (what === -1 || person < 0) continue;
         const t = ev.at[i] as number;
         const row = inPeriod(t) ? of(person) : null;
         if (row) {
