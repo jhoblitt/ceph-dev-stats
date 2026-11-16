@@ -5,7 +5,7 @@
 import { type BucketModel, type LineSeries, type Panel } from './charts';
 import { COLOURS } from './colours';
 import type { Dataset, Named } from './data';
-import { dayOf } from './filters';
+import { DISCLOSED, NOT_DISCLOSED, dayOf } from './filters';
 import { bucketPhrase, formatCount, formatMean, formatShare } from './format';
 import { curveQuantiles } from './review';
 import { outcomeCurve } from './stats/curve';
@@ -37,7 +37,7 @@ export function shareModel(shares: Weekly<number | null>): BucketModel {
     step: shares.step,
     buckets: shares.week,
     bars: [],
-    lines: [shareLine('disclosed', 'disclosing', COLOURS.disclosed, shares.values['disclosed'] ?? [])],
+    lines: [shareLine('disclosed', DISCLOSED, COLOURS.disclosed, shares.values['disclosed'] ?? [])],
   };
 }
 
@@ -270,5 +270,5 @@ export function comparison(data: Dataset, rows: Uint32Array): ComparisonRow[] {
 /** The comparison as sentences, for its text alternative. */
 export function comparisonSummary(rows: readonly ComparisonRow[]): string {
   const cell = (c: Cell) => (c.basis === null ? c.text : `${c.text} (${c.basis})`);
-  return rows.map((r) => `${r.label}: not disclosed ${cell(r.cells[0])}; disclosed ${cell(r.cells[1])}.`).join(' ');
+  return rows.map((r) => `${r.label}: ${NOT_DISCLOSED} ${cell(r.cells[0])}; ${DISCLOSED} ${cell(r.cells[1])}.`).join(' ');
 }

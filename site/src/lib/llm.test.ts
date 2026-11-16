@@ -47,6 +47,7 @@ describe('shareModel', () => {
     expect(model.lines).toHaveLength(1);
     const line = model.lines[0];
     expect(line?.color).toBe(COLOURS.disclosed);
+    expect(line?.label).toBe('AI use disclosed');
     expect(line?.values).toEqual((shares.values['disclosed'] ?? []).map((v) => (v === null ? null : v * 100)));
     expect(percent(25)).toBe('25%');
   });
@@ -62,7 +63,7 @@ describe('shareModel', () => {
     // PRs opened in six weeks: 05-18 (66500 disclosed, 66510) → 50%; 06-01, 06-15 and 07-06 → 0%;
     // 08-03 (67000) and 08-31 (67100) → 100%, the first of them the highest.
     expect(describeShares(model)).toMatch(
-      /^By week, 27 weeks from 2026-05-11 to 2026-11-09\. Disclosing: from 0% to 100%, highest in the week of 2026-08-03\. No PRs opened in 21 weeks\./,
+      /^By week, 27 weeks from 2026-05-11 to 2026-11-09. AI use disclosed: from 0% to 100%, highest in the week of 2026-08-03\. No PRs opened in 21 weeks\./,
     );
   });
 
@@ -72,7 +73,7 @@ describe('shareModel', () => {
     const monthly = shareModel(weekly(data, select(data, { ...filters, from: '2024-11-16' }), long, 'disclosureShare'));
     expect(monthly.step).toBe('month');
     expect(describeShares(monthly)).toMatch(
-      /^By month, 25 months from 2024-11-01 to 2026-11-01\. Disclosing: from 0% to 100%, highest in August 2026\. /,
+      /^By month, 25 months from 2024-11-01 to 2026-11-01. AI use disclosed: from 0% to 100%, highest in August 2026\. /,
     );
   });
 });
@@ -237,7 +238,7 @@ describe('comparison', () => {
 
   it('writes a text alternative naming both groups for each figure', () => {
     const text = comparisonSummary(rowsOf);
-    expect(text).toContain('Lines changed: not disclosed median 70 · 90th percentile 1,050 (of 4 PRs); disclosed median 90 · 90th percentile 2,200 (of 3 PRs).');
-    expect(text).toContain('Merged within 90 days of opening: not disclosed too few to say (only');
+    expect(text).toContain('Lines changed: AI use not disclosed median 70 · 90th percentile 1,050 (of 4 PRs); AI use disclosed median 90 · 90th percentile 2,200 (of 3 PRs).');
+    expect(text).toContain('Merged within 90 days of opening: AI use not disclosed too few to say (only');
   });
 });

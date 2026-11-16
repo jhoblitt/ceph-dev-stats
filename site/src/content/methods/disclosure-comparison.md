@@ -1,4 +1,4 @@
-# Disclosed against not disclosed
+# AI use disclosed against not disclosed
 
 The LLM-use section sets the pull requests that disclose LLM use against those that do not, figure by figure, among the selected pull requests opened during the period. A pull request is in the disclosed group when it discloses in any of the [forms](#disclosure), and in the other group otherwise. Each figure says how many pull requests it rests on, where there are any.
 

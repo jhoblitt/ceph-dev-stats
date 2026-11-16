@@ -21,7 +21,7 @@
     nearestDot,
     project,
   } from '../lib/dots';
-  import { periodRange } from '../lib/filters';
+  import { DISCLOSED, NOT_DISCLOSED, periodRange } from '../lib/filters';
   import { getPage, sectionsBusy, sectionsStale } from '../lib/page';
   import { openedIn } from '../lib/select';
   import AxisX from './charts/AxisX.svelte';
@@ -172,8 +172,8 @@
     table={dotsTable(d)}
   >
     <ul class="legend" aria-label="Legend">
-      <li><svg viewBox="0 0 12 12" aria-hidden="true"><circle cx="6" cy="6" r="4" style:fill={COLOURS.notDisclosed} /></svg>not disclosed</li>
-      <li><svg viewBox="0 0 12 12" aria-hidden="true"><circle cx="6" cy="6" r="4" style:fill={COLOURS.disclosed} /></svg>disclosed</li>
+      <li><svg viewBox="0 0 12 12" aria-hidden="true"><circle cx="6" cy="6" r="4" style:fill={COLOURS.notDisclosed} /></svg>{NOT_DISCLOSED}</li>
+      <li><svg viewBox="0 0 12 12" aria-hidden="true"><circle cx="6" cy="6" r="4" style:fill={COLOURS.disclosed} /></svg>{DISCLOSED}</li>
       <li><svg viewBox="0 0 12 12" aria-hidden="true"><circle cx="6" cy="6" r="3.5" class="ink" /></svg>merged</li>
       <li>
         <svg viewBox="0 0 12 12" aria-hidden="true"><path d="M2.5 2.5L9.5 9.5M2.5 9.5L9.5 2.5" class="ink-stroke" /></svg>closed unmerged

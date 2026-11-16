@@ -8,7 +8,7 @@ import { scaleLinear, scaleLog } from 'd3-scale';
 import type { Readout, Table } from './charts';
 import { COLOURS } from './colours';
 import { type Dataset, PR_STATE } from './data';
-import { DAY, dayOf } from './filters';
+import { DAY, DISCLOSED, NOT_DISCLOSED, dayOf } from './filters';
 import { bucketTick, formatCount, formatDays } from './format';
 import { HOUR, type Tick, durationTicks, labelWidth, logDays, monthTicks, spaceTicks } from './plot';
 import { type Period, bucketEnd, bucketStart, stepFor } from './stats/buckets';
@@ -288,7 +288,7 @@ export function dotsTable(d: Dots): Table {
   };
   return {
     columns: ['PRs', 'merged', 'closed unmerged', 'still open', 'all'],
-    rows: [row('not disclosed', 0), row('disclosed', 1), row('all', null)],
+    rows: [row(NOT_DISCLOSED, 0), row(DISCLOSED, 1), row('all', null)],
   };
 }
 

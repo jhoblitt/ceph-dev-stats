@@ -26,7 +26,7 @@ A backport cherry-picks the original commits. When the cherry-pick keeps their m
 
 ## What it cannot show
 
-- **"Not disclosed" is not "no LLM".** Disclosure is voluntary, and nothing on this site detects use that is not disclosed.
+- **"AI use not disclosed" is not "no LLM".** Disclosure is voluntary, and nothing on this site detects use that is not disclosed.
 - **The two groups are not alike.** Pull requests that disclose and those that do not differ in size, kind, author and age, and either group can be dominated by a few authors. A difference between them does not show that LLM use caused it.
 - **Ceph's rule was a draft.** Ceph's rule asking for an `Assisted-by` trailer was a draft on 2026-10-12. On 2026-11-15 the tracker listed [the motion on that rule](https://tracker.ceph.com/issues/79745) as "Defeated".
 - **A wrapped sentence can be missed.** Lines are judged one at a time, so a disclosure sentence wrapped across two lines can be missed when neither line counts alone. `data/tools.yaml` holds a phrase written for the second half of such a sentence seen in the data. `cephstats check --report` lists neighbouring candidate lines that match a phrase only when joined, so whoever edits the table can find others.

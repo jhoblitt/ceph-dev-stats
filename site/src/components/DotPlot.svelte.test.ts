@@ -49,6 +49,13 @@ describe('DotPlot', () => {
     expect(f.textContent).toContain('The PR table below lists these PRs, and those opened before the period that were still open in it');
   });
 
+  it('says what was disclosed in its legend', async () => {
+    render(App, (await fixturePage('')).props);
+    expect([...figure().querySelectorAll('ul.legend li')].map((li) => li.textContent?.trim())).toEqual(
+      expect.arrayContaining(['AI use not disclosed', 'AI use disclosed']),
+    );
+  });
+
   it('names the PR under the pointer with its values', async () => {
     render(App, (await fixturePage('')).props);
     const canvas = figure().querySelector('canvas') as HTMLCanvasElement;

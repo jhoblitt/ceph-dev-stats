@@ -400,6 +400,16 @@ describe('filter bar', () => {
     expect(loc.hash()).toBe('#/?target=backports&size=gt1000&reopened=only');
   });
 
+  it('says what was disclosed in each Disclosure choice', async () => {
+    render(App, (await page('')).props);
+    const disclosure = screen.getByLabelText('Disclosure') as HTMLSelectElement;
+    expect([...disclosure.options].map((o) => [o.value, o.text])).toEqual([
+      ['', 'all'],
+      ['disclosed', 'AI use disclosed'],
+      ['not-disclosed', 'AI use not disclosed'],
+    ]);
+  });
+
   it('offers every kind in meta, then unknown, under a Kind label', async () => {
     render(App, (await page('')).props);
     const kind = screen.getByLabelText('Kind') as HTMLSelectElement;

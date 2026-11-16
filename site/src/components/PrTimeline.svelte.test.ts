@@ -223,7 +223,7 @@ describe('PrTimeline', () => {
     const section = await timeline('#/?target=all&pr=67300', withEveryKind());
     const line = await within(section).findByText('mgr: a PR with every event');
     expect(line.parentElement?.textContent?.replace(/\s+/g, ' ').trim()).toBe(
-      'mgr: a PR with every event main · 1 commit · not disclosed',
+      'mgr: a PR with every event main · 1 commit · AI use not disclosed',
     );
   });
 

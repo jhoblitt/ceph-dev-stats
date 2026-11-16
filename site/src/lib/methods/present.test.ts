@@ -201,7 +201,7 @@ describe('table figures on the fixture', () => {
       ['a disclosing trailer, such as Assisted-by:', '2', '0', '2'],
       ['Co-authored-by: naming a tool', '1', '0', '1'],
       ['disclosure phrasing in the description or a commit message', '0', '1', '1'],
-      ['not disclosed', '6', '2', '8'],
+      ['AI use not disclosed', '6', '2', '8'],
     ]);
   });
 
@@ -221,7 +221,7 @@ describe('table figures on the fixture', () => {
     expect(model('table.disclosureGroups')).toEqual({
       caption:
         'The 7 pull requests on the development branch opened in the last 6 months, 2026-05-15 to 2026-11-15, those the LLM-use section compares over those months with every other filter as the report opens, by disclosure, as of 2026-11-15',
-      head: ['', 'not disclosed', 'disclosed'],
+      head: ['', 'AI use not disclosed', 'AI use disclosed'],
       rows: [
         ['pull requests', '4', '3'],
         ['median lines changed', '70', '90'],

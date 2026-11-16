@@ -4,7 +4,7 @@
 // text, never markup.
 
 import type { Dataset, Meta, TableYear } from '../data';
-import { dayOf, periodRange } from '../filters';
+import { DISCLOSED, NOT_DISCLOSED, dayOf, periodRange } from '../filters';
 import { formatCount, formatDays, formatShare } from '../format';
 import { HORIZONS, MIN_FOLLOWED } from '../llm';
 import { REVIEWS_RECORDED_FROM } from '../review';
@@ -220,7 +220,7 @@ const DISCLOSURE_LABELS: Record<string, string> = {
   trailer: 'a disclosing trailer, such as Assisted-by:',
   coauthor: 'Co-authored-by: naming a tool',
   description: 'disclosure phrasing in the description or a commit message',
-  none: 'not disclosed',
+  none: NOT_DISCLOSED,
 };
 const DISCLOSURE_ORDER = ['trailer', 'coauthor', 'description', 'none'];
 
@@ -283,7 +283,7 @@ export const TABLE_FIGURES: Record<string, Figure<TableModel>> = {
       const kinds = [...m.kinds.map((k) => ({ id: k.id, name: k.name })), { id: 'unknown', name: 'Unknown' }];
       return {
         caption: `The ${formatCount(d.compared)} pull requests on the development branch opened in ${periodOf(d)}, those the LLM-use section compares over those months with every other filter as the report opens, by disclosure, as of ${dayOf(m.fetched_through)}`,
-        head: ['', 'not disclosed', 'disclosed'],
+        head: ['', NOT_DISCLOSED, DISCLOSED],
         rows: [
           ['pull requests', ...cells((g) => formatCount(g.prs))],
           ['median lines changed', ...cells((g) => (g.medianLines === null ? '–' : formatCount(g.medianLines)))],

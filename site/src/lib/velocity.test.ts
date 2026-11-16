@@ -34,8 +34,8 @@ describe('prsModel', () => {
 
   it('stacks the PRs opened, not disclosed under disclosed', () => {
     expect(model.bars.map((b) => [b.key, b.label, b.color])).toEqual([
-      ['not-disclosed', 'not disclosed', COLOURS.notDisclosed],
-      ['disclosed', 'disclosed', COLOURS.disclosed],
+      ['not-disclosed', 'AI use not disclosed', COLOURS.notDisclosed],
+      ['disclosed', 'AI use disclosed', COLOURS.disclosed],
     ]);
     expect(model.stackLabel).toBe('opened');
     // #66510 (05-20), #66600 (06-02), #66700 (06-15), #66900 (07-10).

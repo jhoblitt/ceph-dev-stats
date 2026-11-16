@@ -171,8 +171,8 @@ describe('describing the dots', () => {
     expect(dotsTable(d)).toEqual({
       columns: ['PRs', 'merged', 'closed unmerged', 'still open', 'all'],
       rows: [
-        { head: 'not disclosed', cells: ['1', '1', '2', '4'] },
-        { head: 'disclosed', cells: ['3', '0', '0', '3'] },
+        { head: 'AI use not disclosed', cells: ['1', '1', '2', '4'] },
+        { head: 'AI use disclosed', cells: ['3', '0', '0', '3'] },
         { head: 'all', cells: ['4', '1', '2', '7'] },
       ],
     });
