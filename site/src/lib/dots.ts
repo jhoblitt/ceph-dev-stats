@@ -10,8 +10,8 @@ import { COLOURS } from './colours';
 import { type Dataset, PR_STATE } from './data';
 import { DAY, dayOf } from './filters';
 import { bucketTick, formatCount, formatDays } from './format';
-import { HOUR, type Tick, durationTicks, logDays, spaceTicks } from './plot';
-import { type Period, bucketEnd, bucketStart } from './stats/buckets';
+import { HOUR, type Tick, durationTicks, labelWidth, logDays, monthTicks, spaceTicks } from './plot';
+import { type Period, bucketEnd, bucketStart, stepFor } from './stats/buckets';
 
 export const DOT_KIND = { merged: 0, closed: 1, open: 2 } as const;
 
@@ -119,7 +119,29 @@ function timeTicks(period: Period): { t: number; label: string }[] {
   return out;
 }
 
-export function dotLayout(period: Period, longest: number, width: number, height: number): DotLayout {
+/** The first instants of the months inside the period. */
+function monthStarts(period: Period): number[] {
+  const out: number[] = [];
+  let t = bucketStart(period.start, 'month');
+  if (t < period.start) t = bucketEnd(t, 'month');
+  for (; t < period.end; t = bucketEnd(t, 'month')) out.push(t);
+  return out;
+}
+
+/**
+ * The plot's geometry. Over a period of more than 53 weeks, which the bucket
+ * charts count by month, the months are ticked on a calendar grid as theirs
+ * are (`monthTicks`); over a shorter one, every month or week is ticked as
+ * room allows. `measure` gives a tick label's width in pixels.
+ */
+export function dotLayout(
+  period: Period,
+  longest: number,
+  width: number,
+  height: number,
+  measure: (label: string) => number = labelWidth,
+): DotLayout {
+  const months = monthStarts(period);
   const left = LEFT;
   const right = Math.max(left + 1, width - RIGHT);
   const top = TOP;
@@ -136,10 +158,13 @@ export function dotLayout(period: Period, longest: number, width: number, height
     bottom,
     x: (t) => xs(t),
     y: (days) => ys(Math.max(days, HOUR)),
-    xTicks: spaceTicks(
-      timeTicks(period).map((t) => ({ at: xs(t.t), label: t.label })),
-      64,
-    ),
+    xTicks:
+      stepFor(period) === 'month'
+        ? monthTicks(months, (i) => xs(months[i] as number), measure).map((t) => ({ at: xs(months[t.i] as number), label: t.label }))
+        : spaceTicks(
+            timeTicks(period).map((t) => ({ at: xs(t.t), label: t.label })),
+            64,
+          ),
     yTicks: spaceTicks(
       durationTicks(lo, hi).map((t) => ({ at: ys(t.days), label: t.label })),
       14,
