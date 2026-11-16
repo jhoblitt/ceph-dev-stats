@@ -190,6 +190,28 @@ describe('a period outside the data', () => {
   });
 });
 
+describe('the selected bucket over a period beyond 53 weeks', () => {
+  // Fetched through 2027-11-15, so the default period steps by month.
+  const longMeta = parseMeta({ ...rawMeta, fetched_through: Date.UTC(2027, 10, 15) / 1000 });
+
+  it('keeps the first of a month', () => {
+    expect(stateFromHash('#/?week=2026-07-01', longMeta).week).toBe('2026-07-01');
+  });
+
+  it('keeps a month that overlaps the start of the period', () => {
+    expect(stateFromHash('#/?week=2026-05-01', longMeta).week).toBe('2026-05-01');
+  });
+
+  it('drops a Monday that is not the first of a month, which names no bucket', () => {
+    expect(stateFromHash('#/?week=2026-06-08', longMeta).week).toBeNull();
+  });
+
+  it('drops a first of the month when the period steps by week', () => {
+    expect(stateFromHash('#/?to=2027-05-12&week=2026-07-01', longMeta).week).toBeNull();
+    expect(stateFromHash('#/?to=2027-05-12&week=2026-07-06', longMeta).week).toBe('2026-07-06');
+  });
+});
+
 describe('parseHash', () => {
   it('reads the route and the first value of each parameter', () => {
     expect(parseHash('#/methods/?target=all&pr=12&pr=13')).toEqual({
