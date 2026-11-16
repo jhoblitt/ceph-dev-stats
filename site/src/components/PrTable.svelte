@@ -23,6 +23,7 @@
     narrowing,
     prUrl,
     rowText,
+    sortWords,
     tableOrder,
     windowRows,
     yearsOfRows,
@@ -94,9 +95,8 @@
 
   const ariaSort = (column: SortColumn) =>
     sort.column !== column ? 'none' : sort.descending ? 'descending' : 'ascending';
-  const sortedBy = $derived(
-    `${TABLE_COLUMNS.find((c) => c.id === sort.column)?.label.toLowerCase()}, ${sort.descending ? 'descending' : 'ascending'}`,
-  );
+  // A browser test waits on this: a table still loading titles may be about to reorder or relabel its rows.
+  const busy = $derived(needed.some((y) => tables.get(y)?.status === 'loading'));
 </script>
 
 <section id="table" aria-labelledby="table-heading" class:stale={$data.loading} {@attach onScreen(() => (shown = true))}>
@@ -134,8 +134,8 @@
         {@attach measureHeight}
         onscroll={(e) => (scrollTop = e.currentTarget.scrollTop)}
       >
-        <table aria-rowcount={ordered.length + 1}>
-          <caption class="visually-hidden">Pull requests, sorted by {sortedBy}</caption>
+        <table aria-rowcount={ordered.length + 1} aria-busy={busy ? 'true' : 'false'}>
+          <caption class="visually-hidden">Pull requests, sorted {sortWords(sort)}</caption>
           <thead>
             <tr aria-rowindex={1}>
               {#each TABLE_COLUMNS as c (c.id)}

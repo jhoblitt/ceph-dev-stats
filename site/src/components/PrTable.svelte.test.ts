@@ -54,6 +54,43 @@ const expected = (hash: string) => {
 };
 
 describe('PrTable', () => {
+  it('names its order in its caption, keeping the column label’s capitals', async () => {
+    const { props } = await page('');
+    render(App, props);
+    expect(table().querySelector('caption')?.textContent).toBe('Pull requests, sorted by Opened, descending');
+    await fireEvent.click(within(table()).getByRole('button', { name: /^PR/ }));
+    expect(table().querySelector('caption')?.textContent).toBe('Pull requests, sorted by PR, ascending');
+    await fireEvent.click(within(table()).getByRole('button', { name: /^LLM use/ }));
+    expect(table().querySelector('caption')?.textContent).toBe('Pull requests, sorted by LLM use, ascending');
+  });
+
+  it('is busy while a table file it needs is loading, and not once none is', async () => {
+    // A fetch that holds the table files back until released.
+    const held: (() => void)[] = [];
+    const base = fixtureFetch();
+    const fetch = (url: string) =>
+      url.includes('table-') ? new Promise<Response>((go) => held.push(() => go(base.fetch(url)))) : base.fetch(url);
+    const loc = memoryLocation('');
+    const selection = createStateStore(meta, loc);
+    const loader = new DataLoader(meta, BASE, fetch);
+    const years = yearsForState(meta, get(selection));
+    const store = createDataStore(loader, selection, years, await loader.load(years));
+    render(App, { props: { page: { meta, selection, data: store, view: createViewStore(selection, store), loader } } });
+    await waitFor(() => expect(held.length).toBeGreaterThan(0));
+    expect(table().getAttribute('aria-busy')).toBe('true');
+    expect(region().getAllByText(/^Loading the titles of the PRs opened in/)).toHaveLength(2);
+    for (const go of held.splice(0)) go();
+    await waitFor(() => expect(table().getAttribute('aria-busy')).toBe('false'));
+    expect(region().queryByText(/^Loading the titles/)).toBeNull();
+  });
+
+  it('is not busy when a table file it needs failed to load', async () => {
+    render(App, (await page('', { 'table-2026.json': undefined })).props);
+    // 2026's file fails, 2025's loads: then none is loading.
+    await waitFor(() => expect(table().getAttribute('aria-busy')).toBe('false'));
+    expect(region().getByText(/PRs opened in 2026 could not be loaded/)).toBeTruthy();
+  });
+
   it('lists exactly the selected PRs, newest opened first', async () => {
     render(App, (await page('')).props);
     expect(listed()).toEqual(expected(''));
