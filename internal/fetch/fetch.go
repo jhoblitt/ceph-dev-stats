@@ -60,6 +60,10 @@ type Config struct {
 	// Since, which skipped the pull requests updated in between, leaves
 	// meta.json as it was. Zero, as for --full, lets any Since write it.
 	DefaultSince time.Time
+	// Refetch fetches again, once in the walk, each listed pull request the
+	// cache holds at the updatedAt the listing gives, so that an entry
+	// whose content changed without moving updatedAt is replaced.
+	Refetch bool
 	// PageSize is the number of pull requests asked for at first; it
 	// halves when a page repeatedly fails. DefaultPageSize when zero.
 	PageSize int
@@ -81,6 +85,8 @@ type walker struct {
 	// unresolved holds the pull requests skipped because GitHub could no
 	// longer resolve them; the walk and the names pass can both meet one.
 	unresolved map[int]bool
+	// written holds the pull requests this walk has cached.
+	written map[int]bool
 }
 
 // unresolvedError is GitHub failing to resolve one pull request a query
@@ -114,7 +120,8 @@ func (w *walker) skipUnresolved(ctx context.Context, u *unresolvedError) {
 // counts to meta.json, unless cfg.Since is later than a set cfg.DefaultSince,
 // when it leaves meta.json as it was and warns. A pull request already cached at the listed
 // updatedAt, in the current FormatVersion, is not fetched again, so a run
-// that stops early can be repeated. While the cache holds entries of an
+// that stops early can be repeated; with cfg.Refetch it is, once in the
+// walk, so a repeated refetching run starts over. While the cache holds entries of an
 // older FormatVersion, a walk from a default since starts at the window
 // start instead, so that it reaches them all. A pull request that GitHub
 // can no longer resolve when asked about it alone, as when it was deleted
@@ -139,7 +146,10 @@ func Run(ctx context.Context, client *ghapi.Client, cfg Config) error {
 	if err := reachStale(ctx, &cfg); err != nil {
 		return err
 	}
-	w := &walker{client: client, cfg: cfg, log: cfg.Logger, started: cfg.Now().UTC(), pageSize: cfg.PageSize, unresolved: map[int]bool{}}
+	w := &walker{
+		client: client, cfg: cfg, log: cfg.Logger, started: cfg.Now().UTC(), pageSize: cfg.PageSize,
+		unresolved: map[int]bool{}, written: map[int]bool{},
+	}
 	w.log.InfoContext(ctx, "walk started",
 		slog.Time("since", cfg.Since),
 		slog.String("cache_dir", cfg.CacheDir))
@@ -365,11 +375,13 @@ const (
 
 // store fetches the rest of n's connections and caches it, unless the
 // cache already holds it in the current format at the same or a later
-// updatedAt, or GitHub can no longer resolve it.
+// updatedAt, or GitHub can no longer resolve it. With cfg.Refetch, one held
+// at the same updatedAt is fetched again, unless this walk wrote it.
 func (w *walker) store(ctx context.Context, n *prNode) (outcome, error) {
 	cached, err := ReadEntry(w.cfg.CacheDir, n.Number)
 	switch {
-	case err == nil && cached.FormatVersion >= FormatVersion && !n.UpdatedAt.After(cached.UpdatedAt):
+	case err == nil && cached.FormatVersion >= FormatVersion && !n.UpdatedAt.After(cached.UpdatedAt) &&
+		(!w.cfg.Refetch || n.UpdatedAt.Before(cached.UpdatedAt) || w.written[n.Number]):
 		return kept, nil
 	case err != nil && !errors.Is(err, fs.ErrNotExist):
 		return 0, err
@@ -385,6 +397,7 @@ func (w *walker) store(ctx context.Context, n *prNode) (outcome, error) {
 	if err := writeJSON(entryPath(w.cfg.CacheDir, e.Number), e); err != nil {
 		return 0, err
 	}
+	w.written[e.Number] = true
 	w.log.DebugContext(ctx, "cached pull request",
 		slog.Int("number", e.Number),
 		slog.Time("updated_at", e.UpdatedAt))

@@ -211,6 +211,24 @@ var _ = Describe("fetch", func() {
 			Expect(server.Requests()).To(BeEmpty())
 		})
 
+		DescribeTable("fetches again a pull request cached at the same updatedAt only when asked to refetch",
+			func(env, title string, args ...string) {
+				Expect(run()).To(Succeed())
+				server.Update(2, func(e *fetch.Entry) { e.Title = "retitled without moving updatedAt" })
+				if env != "" {
+					GinkgoT().Setenv("CEPHSTATS_REFETCH", env)
+				}
+
+				Expect(run(args...)).To(Succeed())
+
+				Expect(fetch.ReadEntry(cacheDir, 2)).To(HaveField("Title", title))
+			},
+			Entry("neither the flag nor the environment", "", "pr"),
+			Entry("--refetch", "", "retitled without moving updatedAt", "--refetch"),
+			Entry("CEPHSTATS_REFETCH=true", "true", "retitled without moving updatedAt"),
+			Entry("CEPHSTATS_REFETCH=false", "false", "pr"),
+		)
+
 		It("rejects --since with --full", func() {
 			Expect(run("--full", "--since", "2026-11-01T00:00:00Z")).To(MatchError("--since and --full are mutually exclusive"))
 		})
