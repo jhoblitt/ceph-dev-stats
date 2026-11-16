@@ -47,6 +47,9 @@ const ROUND_DURATIONS = [
   { days: 30, label: '1 month' },
   { days: 90, label: '3 months' },
   { days: 365, label: '1 year' },
+  { days: 2 * 365, label: '2 years' },
+  { days: 5 * 365, label: '5 years' },
+  { days: 10 * 365, label: '10 years' },
 ];
 
 /**

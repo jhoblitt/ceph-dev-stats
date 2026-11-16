@@ -67,6 +67,14 @@ describe('dotLayout', () => {
     expect(layout.yTicks.map((t) => t.label)).toEqual(['1 hour', '1 day', '1 week', '1 month', '3 months']);
   });
 
+  it('labels a log duration axis reaching six years up to five years, its labels apart', () => {
+    const whole = { start: at('2011-09-01T00:00:00Z'), end: at('2026-11-16T00:00:00Z') };
+    const tall = dotLayout(whole, 6 * 365, 1054, 360);
+    expect(tall.yTicks.map((t) => t.label)).toEqual(['1 hour', '1 day', '1 week', '1 month', '3 months', '1 year', '2 years', '5 years']);
+    const gaps = tall.yTicks.slice(1).map((t, i) => (tall.yTicks[i]?.at ?? 0) - t.at);
+    expect(Math.min(...gaps)).toBeGreaterThanOrEqual(14);
+  });
+
   it('ticks the months across, spaced so labels do not run together', () => {
     expect(layout.xTicks.map((t) => t.label)).toEqual(['Jun 2026', 'Jul 2026', 'Aug 2026', 'Sep 2026', 'Oct 2026', 'Nov 2026']);
     const narrow = dotLayout(period, 166, 300, 300);
