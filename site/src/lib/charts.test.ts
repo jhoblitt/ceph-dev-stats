@@ -109,7 +109,7 @@ describe('coverage', () => {
     expect(marked.partial).toEqual([{ days: 4, of: 7 }, null, null]);
     expect(bucketHead(marked, 0)).toBe('week of 2026-05-11, partial: 4 of 7 days');
     expect(bucketTable(marked, formatCount).rows[0]?.head).toBe('week of 2026-05-11, partial: 4 of 7 days');
-    expect(describeCounts(marked)).toMatch(/ Partial: week of 2026-05-11, partial: 4 of 7 days\.$/);
+    expect(describeCounts(marked)).toMatch(/ Partial: week of 2026-05-11, 4 of 7 days\.$/);
     expect(bucketLegend(marked).at(-1)).toEqual({ label: 'partial week', mark: 'partial', color: 'var(--text-faint)' });
   });
 
@@ -211,14 +211,15 @@ describe('bucket models', () => {
 
   it('names the partial weeks of a chart of waits too', () => {
     expect(describeWaits({ ...waits, partial: [null, null, { days: 2, of: 7 }] })).toMatch(
-      / Partial: week of 2026-05-25, partial: 2 of 7 days\.$/,
+      / Partial: week of 2026-05-25, 2 of 7 days\.$/,
     );
   });
 
   it('states the known waits, the not yet known and not reached, and the weeks with nothing apart', () => {
+    // One value known, or the same in every bucket known, is said once, with how many buckets have it.
     expect(describeWaits(waits)).toBe(
       'By week opened, 3 weeks from 2026-05-11 to 2026-05-25. ' +
-        'median: from 12 hours to 12 hours, not yet known in 1 week. ' +
+        'median: 12 hours in 1 week, not yet known in 1 week. ' +
         '90th percentile: no value known, not yet known in 1 week, not reached in 1 week. ' +
         'No PRs opened in 1 week.',
     );

@@ -190,7 +190,7 @@ describe('Review', () => {
     expect(f.querySelectorAll('.unreached').length).toBeGreaterThan(0);
     expect(within(f).getByRole('list', { name: 'Legend' }).textContent).toMatch(/not yet known.*not reached/);
     expect(f.querySelector('.visually-hidden')?.textContent).toMatch(
-      /No PRs opened in 21 weeks\. Partial: week of 2026-05-11, partial: 3 of 7 days; week of 2026-11-09, partial: 6 of 7 days\.$/,
+      /No PRs opened in 21 weeks\. Partial: week of 2026-05-11, 3 of 7 days; week of 2026-11-09, 6 of 7 days\.$/,
     );
   });
 
