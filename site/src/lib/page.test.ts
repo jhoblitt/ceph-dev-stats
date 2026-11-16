@@ -3,7 +3,16 @@ import { describe, expect, it, vi } from 'vitest';
 import { BASE, fixtureFetch, withEarlierYear } from './__fixtures__/fetch';
 import { type Dataset, DataLoader, type Fetch, type Meta, type YearData, combine, parseMeta, yearsFor } from './data';
 import { type Filters, dayOf, periodRange } from './filters';
-import { createDataStore, createViewStore, firstYears, yearsForState } from './page';
+import {
+  LARGE_DATASET,
+  type View,
+  createDataStore,
+  createViewStore,
+  firstYears,
+  sectionsBusy,
+  sectionsStale,
+  yearsForState,
+} from './page';
 import { select } from './select';
 import { backlog } from './stats/backlog';
 import { commandUse } from './stats/commands';
@@ -456,6 +465,127 @@ describe('createViewStore', () => {
     selection.set(back);
     await vi.waitFor(() => expect(get(view).dataset.size).toBe(13));
     expect(numbers()).toContain(60010);
+  });
+});
+
+// A change over a large dataset freezes the page while every section
+// recomputes, so the view first hands out the state a load in flight shows,
+// and recomputes only once that is painted. The fixture's 12 rows stand for
+// a large dataset by setting the size to 12; `defer` here holds the
+// recompute until the spec runs it, where the page waits for a paint.
+describe('the view while a change recomputes over a large dataset', () => {
+  async function large(size = 12, start: AppState = recent) {
+    const { fetch, requested } = fixtureFetch(earlier);
+    const loader = new DataLoader(meta, BASE, fetch);
+    const selection = writable(start);
+    const years = yearsForState(meta, start);
+    const data = createDataStore(loader, selection, years, await loader.load(years));
+    const jobs: (() => void)[] = [];
+    const defer = (job: () => void) => {
+      jobs.push(job);
+      return () => jobs.splice(jobs.indexOf(job), 1);
+    };
+    const view = createViewStore(selection, data, { large: size, defer });
+    const seen: View[] = [];
+    view.subscribe((v) => seen.push(v));
+    const run = () => jobs.splice(0).forEach((job) => job());
+    return { selection, data, view, seen, jobs, run, requested };
+  }
+  const target = (state: AppState, t: Filters['target']): AppState => ({ ...state, filters: { ...state.filters, target: t } });
+  const summary = (v: View) => ({ target: v.filters.target, pending: v.pending, recomputing: v.recomputing });
+
+  it('hands out the busy state first, the last figures marked stale and busy, then the recomputed view in one step', async () => {
+    const { selection, data, seen, jobs, run } = await large();
+    selection.set(target(recent, 'all'));
+    expect(seen.map(summary)).toEqual([
+      { target: 'main', pending: false, recomputing: false },
+      { target: 'main', pending: false, recomputing: true },
+    ]);
+    const busy = seen[1] as View;
+    expect(busy.rows).toBe(seen[0]?.rows);
+    expect(sectionsStale(busy, get(data))).toBe(true);
+    expect(sectionsBusy(busy, get(data))).toBe(true);
+    expect(jobs).toHaveLength(1);
+
+    run();
+    expect(seen.map(summary).slice(2)).toEqual([{ target: 'all', pending: false, recomputing: false }]);
+    const done = seen[2] as View;
+    expect(sectionsStale(done, get(data))).toBe(false);
+    expect(sectionsBusy(done, get(data))).toBe(false);
+    // The same rows as a recompute at once gives.
+    expect([...done.rows]).toEqual([...select(get(data).dataset, target(recent, 'all').filters)]);
+  });
+
+  it('never shows a change made before the recompute ran, nor computes it', async () => {
+    const { selection, seen, jobs, run } = await large();
+    selection.set(target(recent, 'all'));
+    selection.set(target(recent, 'backports'));
+    expect(jobs).toHaveLength(1);
+    run();
+    expect(seen.map(summary)).toEqual([
+      { target: 'main', pending: false, recomputing: false },
+      { target: 'main', pending: false, recomputing: true },
+      { target: 'backports', pending: false, recomputing: false },
+    ]);
+  });
+
+  it('goes back to the figures shown, computing nothing, when the change is undone before the recompute ran', async () => {
+    const { selection, seen, jobs } = await large();
+    selection.set(target(recent, 'all'));
+    selection.set(target(recent, 'main'));
+    expect(jobs).toHaveLength(0);
+    expect(seen.map(summary)).toEqual([
+      { target: 'main', pending: false, recomputing: false },
+      { target: 'main', pending: false, recomputing: true },
+      { target: 'main', pending: false, recomputing: false },
+    ]);
+    expect(seen[2]?.rows).toBe(seen[0]?.rows);
+  });
+
+  it('waits for a year it needs as before, then marks the recompute over the landed years busy first', async () => {
+    const { selection, data, seen, run } = await large();
+    selection.set(back);
+    expect(seen.map(summary).at(-1)).toEqual({ target: 'main', pending: true, recomputing: false });
+    await vi.waitFor(() => expect(get(data).loading).toBe(false));
+    expect(seen.at(-1)).toMatchObject({ pending: true, recomputing: true });
+    expect(sectionsBusy(seen.at(-1) as View, get(data))).toBe(true);
+    run();
+    expect(seen.at(-1)).toMatchObject({ pending: false, recomputing: false, filters: back.filters });
+    expect(seen.at(-1)?.dataset.size).toBe(13);
+  });
+
+  it('stops waiting for a recompute when a change needs a year not loaded', async () => {
+    const { selection, data, seen, jobs } = await large();
+    selection.set(target(recent, 'all'));
+    selection.set(back);
+    expect(jobs).toHaveLength(0);
+    expect(seen.map(summary).at(-1)).toEqual({ target: 'main', pending: true, recomputing: false });
+    expect(get(data).loading).toBe(true);
+  });
+
+  it('recomputes at once, as before, over a dataset smaller than the size', async () => {
+    const { selection, seen, jobs } = await large(13);
+    selection.set(target(recent, 'all'));
+    expect(jobs).toHaveLength(0);
+    expect(seen.map(summary)).toEqual([
+      { target: 'main', pending: false, recomputing: false },
+      { target: 'all', pending: false, recomputing: false },
+    ]);
+  });
+
+  it('keeps the default view’s sequence: the default size is above what the default period loads', () => {
+    // The default period, six months, loads at most the previous year's file
+    // and half of the current one's: on the data of 2026-11-16, 2025's 5,542
+    // rows and 2026's 8,060 so far. Recomputing 13,602 rows took 126 ms on a
+    // desktop; a two-year period's 19,684 took 167 ms.
+    expect(LARGE_DATASET).toBe(15_000);
+  });
+
+  it('recomputes nothing after it is destroyed', async () => {
+    const { selection, view, jobs } = await large();
+    selection.set(target(recent, 'all'));
+    view.destroy();
+    expect(jobs).toHaveLength(0);
   });
 });
 

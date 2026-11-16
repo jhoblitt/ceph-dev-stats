@@ -44,7 +44,8 @@
   const dataset = $derived($view.dataset);
   const filters = $derived($view.filters);
   const period = $derived(periodRange(filters));
-  const rows = $derived(order ?? byOpening(dataset, $view.rows));
+  const selected = $derived($view.rows);
+  const rows = $derived(order ?? byOpening(dataset, selected));
   const model = $derived(laneModel(dataset, rows));
   const lanes = $derived(model.lanes);
   const empty = $derived(lanes.length === 0);

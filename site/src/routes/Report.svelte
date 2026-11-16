@@ -26,8 +26,13 @@
   const sort = $derived(keepSort($selection.sort));
   const week = $derived($selection.week);
   const band = $derived($selection.band);
-  const titles = $derived(sort.column === 'title' ? rowText($view.dataset, loads.map) : undefined);
-  const laneOrder = $derived(tableOrder($view.dataset, $view.rows, { filters: $view.filters, week, band }, sort, titles));
+  // Each part of the view on its own, so a view that keeps them, such as the
+  // busy state before a recompute, orders nothing again.
+  const dataset = $derived($view.dataset);
+  const rows = $derived($view.rows);
+  const filters = $derived($view.filters);
+  const titles = $derived(sort.column === 'title' ? rowText(dataset, loads.map) : undefined);
+  const laneOrder = $derived(tableOrder(dataset, rows, { filters, week, band }, sort, titles));
   const laneOrderName = $derived(`in the PR table’s order, ${sortWords(sort)}`);
   // A file that did not arrive may arrive when fetched again; one that
   // arrived and could not be read is the same file until the data is
@@ -40,17 +45,22 @@
   );
   // A period is never shown over fewer years than it needs: while its years
   // load, or after one failed, the sections keep the last period that loaded
-  // whole, and the line says which.
+  // whole, and the line says which. A large recompute keeps the figures
+  // shown until it is done.
   const status = $derived(
     $data.loading
       ? $view.pending && !$view.first
         ? `Loading the data for this period; everything below is still for ${$view.filters.from} to ${$view.filters.to}, with the filters then chosen.`
         : 'Loading the data for this period…'
-      : $view.pending
-        ? `The data for the period chosen could not be loaded, so everything below is still for ${$view.filters.from} to ${$view.filters.to}, with the filters then chosen. ${remedy}`
-        : $data.retry.state === 'succeeded'
-          ? 'All the data for this period has loaded.'
-          : '',
+      : $view.recomputing
+        ? $view.first
+          ? 'Computing the figures for this period…'
+          : 'Recomputing the figures for the filters chosen; everything below is still for the filters chosen before.'
+        : $view.pending
+          ? `The data for the period chosen could not be loaded, so everything below is still for ${$view.filters.from} to ${$view.filters.to}, with the filters then chosen. ${remedy}`
+          : $data.retry.state === 'succeeded'
+            ? 'All the data for this period has loaded.'
+            : '',
   );
   const retrying = $derived($data.retry.state === 'running');
   const clock = (at: number) => new Date(at).toTimeString().slice(0, 5);
@@ -69,7 +79,7 @@
   };
   // The lanes name their rows in the PR table's own words for them.
   const laneRowsName = $derived(
-    narrowing($view.dataset, { filters: $view.filters, week, band }) ?? ALL_TABLE_ROWS,
+    narrowing(dataset, { filters, week, band }) ?? ALL_TABLE_ROWS,
   );
 </script>
 
