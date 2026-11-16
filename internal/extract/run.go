@@ -3,7 +3,6 @@ package extract
 import (
 	"cmp"
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -153,7 +152,7 @@ func mergeAuthors(cfg Config) (authors map[string]int, inCache bool, err error) 
 		return nil, false, err
 	}
 	var cached map[string]int
-	err = readCacheJSON(filepath.Join(cfg.CacheDir, "authors.json"), &cached)
+	err = fetch.ReadJSON(filepath.Join(cfg.CacheDir, fetch.AuthorsFile), &cached)
 	if errors.Is(err, fs.ErrNotExist) {
 		return authors, false, nil
 	}
@@ -191,7 +190,7 @@ func setPriorPRs(recs []record.Record, baselines map[string]int) {
 // copyMeta writes the cache's meta, when it has one, as data/meta.json.
 func copyMeta(cfg Config) error {
 	var m fetch.Meta
-	err := readCacheJSON(filepath.Join(cfg.CacheDir, "meta.json"), &m)
+	err := fetch.ReadJSON(filepath.Join(cfg.CacheDir, fetch.MetaFile), &m)
 	if errors.Is(err, fs.ErrNotExist) {
 		return nil
 	}
@@ -205,15 +204,4 @@ func copyMeta(cfg Config) error {
 		GitHubCounts:   record.Counts{OpenedInWindow: m.OpenedInWindow, Open: m.Open},
 	})
 	return err
-}
-
-func readCacheJSON(path string, v any) error {
-	b, err := os.ReadFile(path) //nolint:gosec // the cache directory is the operator's to name
-	if err != nil {
-		return fmt.Errorf("reading %s: %w", path, err)
-	}
-	if err := json.Unmarshal(b, v); err != nil {
-		return fmt.Errorf("decoding %s: %w", path, err)
-	}
-	return nil
 }

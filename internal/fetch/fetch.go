@@ -98,7 +98,7 @@ func Run(ctx context.Context, client *ghapi.Client, cfg Config) error {
 	if err != nil {
 		return err
 	}
-	if err := writeJSON(filepath.Join(cfg.CacheDir, "meta.json"), meta); err != nil {
+	if err := writeJSON(filepath.Join(cfg.CacheDir, MetaFile), meta); err != nil {
 		return err
 	}
 	w.log.InfoContext(ctx, "walk finished",
@@ -306,9 +306,9 @@ func orGhost(a *Actor) *Actor {
 // baselines records, for each human author in the cache not yet in
 // authors.json, how many pull requests they opened before the window.
 func (w *walker) baselines(ctx context.Context) error {
-	path := filepath.Join(w.cfg.CacheDir, "authors.json")
+	path := filepath.Join(w.cfg.CacheDir, AuthorsFile)
 	known := map[string]int{}
-	if err := readJSON(path, &known); err != nil && !errors.Is(err, fs.ErrNotExist) {
+	if err := ReadJSON(path, &known); err != nil && !errors.Is(err, fs.ErrNotExist) {
 		return err
 	}
 	paths, err := cachedEntries(w.cfg.CacheDir)

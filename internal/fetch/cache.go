@@ -91,8 +91,16 @@ type Meta struct {
 	Open           int       `json:"open"`
 }
 
-// RawDir is the directory under a cache directory that holds the entries.
-const RawDir = "raw"
+// Names under a cache directory.
+const (
+	// RawDir holds the entries.
+	RawDir = "raw"
+	// AuthorsFile maps each author to their pull requests opened before
+	// the window start.
+	AuthorsFile = "authors.json"
+	// MetaFile holds Meta.
+	MetaFile = "meta.json"
+)
 
 // ReadEntry reads the cached entry for pull request number. A missing entry
 // is an error that matches fs.ErrNotExist.
@@ -106,7 +114,7 @@ func entryPath(cacheDir string, number int) string {
 
 func readEntryFile(path string) (Entry, error) {
 	var e Entry
-	if err := readJSON(path, &e); err != nil {
+	if err := ReadJSON(path, &e); err != nil {
 		return Entry{}, err
 	}
 	return e, nil
@@ -132,7 +140,9 @@ func cachedEntries(cacheDir string) ([]string, error) {
 	return paths, nil
 }
 
-func readJSON(path string, v any) error {
+// ReadJSON decodes the JSON file at path into v. A missing file is an error
+// that matches fs.ErrNotExist.
+func ReadJSON(path string, v any) error {
 	b, err := os.ReadFile(path) //nolint:gosec // the cache and data directories are the operator's to name
 	if err != nil {
 		return fmt.Errorf("reading %s: %w", path, err)
