@@ -9,8 +9,7 @@
   above the table.
 -->
 <script lang="ts">
-  import { SvelteMap } from 'svelte/reactivity';
-  import { DataError, locateRow } from '../lib/data';
+  import { locateRow } from '../lib/data';
   import { keepEqual } from '../lib/memo';
   import { isBot, personHandle } from '../lib/handles';
   import { getPage } from '../lib/page';
@@ -19,17 +18,17 @@
   import { type Sort, type SortColumn, nextSort, sameSort } from '../lib/sort';
   import {
     TABLE_COLUMNS,
-    type TableLoad,
     cellText,
     countText,
     narrowRows,
     narrowing,
     prUrl,
     rowText,
-    sortRows,
+    tableOrder,
     windowRows,
     yearsOfRows,
   } from '../lib/table';
+  import { tableLoads } from '../lib/tables';
   import Person from './Person.svelte';
   import SelectedPr from './SelectedPr.svelte';
   import { onScreen } from './onscreen';
@@ -54,16 +53,9 @@
   // The table is "shown" once any of it has been on screen.
   let shown = $state(false);
 
-  const tables = new SvelteMap<number, TableLoad>();
-  function request(year: number) {
-    if (tables.has(year)) return;
-    tables.set(year, { status: 'loading' });
-    loader.table(year).then(
-      (table) => tables.set(year, { status: 'loaded', table }),
-      (err: unknown) =>
-        tables.set(year, { status: 'error', message: err instanceof DataError ? `${err.file}: ${err.detail}` : String(err) }),
-    );
-  }
+  const loads = tableLoads(loader);
+  const tables = loads.map;
+  const request = (year: number) => loads.request(year);
 
   const chosenRow = $derived.by(() => {
     const pr = $selection.pr;
@@ -80,7 +72,8 @@
   });
 
   const text = $derived(rowText(dataset, tables));
-  const ordered = $derived(sortRows(dataset, rows, sort, text));
+  // The lanes list the same rows in this order (Report.svelte).
+  const ordered = $derived(tableOrder(dataset, selected, { filters, week, band }, sort, text));
 
   const ROW = 40;
   let scrollTop = $state(0);

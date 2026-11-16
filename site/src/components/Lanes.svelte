@@ -19,7 +19,7 @@
     laneModel,
     lanePitch,
     laneScale,
-    shownNote,
+    lanesLine,
   } from '../lib/lanes';
   import { getPage } from '../lib/page';
   import { hashFromState } from '../lib/state';
@@ -35,9 +35,11 @@
     order?: ArrayLike<number> | undefined;
     /** How `order` is ordered, in words: "newest opened first". */
     orderName?: string;
+    /** Which PRs `order` holds, in words: "opened in the week of 2026-05-18". */
+    rowsName?: string;
   }
 
-  let { order, orderName = 'newest opened first' }: Props = $props();
+  let { order, orderName = 'newest opened first', rowsName = 'open at some point in the period' }: Props = $props();
   const { selection, view, meta } = getPage();
 
   const dataset = $derived($view.dataset);
@@ -206,7 +208,7 @@
   const ENDED = { merged: 'merged', closed: 'closed unmerged', open: 'still open' } as const;
   const hrefFor = (number: number) => hashFromState({ ...$selection, pr: number }, meta);
   const summary = $derived(describeLanes(lanes, model.total, orderName));
-  const note = $derived(shownNote(lanes.length, model.total, orderName));
+  const note = $derived(lanesLine(lanes.length, model.total, rowsName, orderName));
 </script>
 
 <section id="timelines" aria-labelledby="timelines-heading">
@@ -214,7 +216,7 @@
 
   <ChartFrame
     title="Each PR’s timeline, one per row"
-    note={note ?? undefined}
+    {note}
     {summary}
     {empty}
   >

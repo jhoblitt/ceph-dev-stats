@@ -55,7 +55,9 @@ describe('Lanes', () => {
   it('draws at most 200 lanes and says how many of how many', async () => {
     const { section } = await lanes('#/?target=main', manyPrs(250));
     // 250 opened in 2026 and one still open from 2025, all on main.
-    expect(section.getByText('Showing 200 of 251 PRs, newest opened first.')).toBeTruthy();
+    expect(
+      section.getByText('The first 200 of 251 PRs open at some point in the period, in the PR table’s order, by Opened, descending.'),
+    ).toBeTruthy();
     const list = section.getByRole("list", { name: /PRs in the lanes/ });
     const links = within(list).getAllByRole('link');
     expect(links).toHaveLength(200);
@@ -68,8 +70,11 @@ describe('Lanes', () => {
     const figure = section.getByRole('figure', { name: 'Each PR’s timeline, one per row' });
     expect(figure.getAttribute('aria-describedby')).toBeTruthy();
     const summary = document.getElementById(figure.getAttribute('aria-describedby') as string);
-    expect(summary?.textContent).toMatch(/^The timelines of 12 PRs, one per row, newest opened first: from #67250/);
-    expect(section.queryByText(/^Showing /)).toBeNull();
+    expect(summary?.textContent).toMatch(
+      /^The timelines of 12 PRs, one per row, in the PR table’s order, by Opened, descending: from #67250/,
+    );
+    // The line saying which PRs and in what order shows whatever their count.
+    expect(section.getByText('12 PRs open at some point in the period, in the PR table’s order, by Opened, descending.')).toBeTruthy();
     expect(section.getByRole('img').getAttribute('aria-label')).toBe('12 lanes, one per PR; each is a link in the list below.');
   });
 
@@ -91,6 +96,40 @@ describe('Lanes', () => {
     Object.defineProperty(click, 'offsetY', { value: 4 + 14 + 7 });
     await fireEvent(canvas, click);
     expect(loc.hash()).toBe('#/?target=all&pr=67100');
+  });
+
+  it('lists the PR table’s first 200 rows in the order the table is sorted, and says so', async () => {
+    const { section, loc } = await lanes('#/?target=main&sort=number', manyPrs(250));
+    expect(section.getByText('The first 200 of 251 PRs open at some point in the period, in the PR table’s order, by PR, ascending.')).toBeTruthy();
+    const links = () => within(section.getByRole('list', { name: /PRs in the lanes/ })).getAllByRole('link');
+    // By number, #64010 from 2025, active in the period, comes first, then #70000 up.
+    expect(links()[0]?.textContent).toBe('#64010');
+    expect(links()[1]?.textContent).toBe('#70000');
+    expect(links().at(-1)?.textContent).toBe('#70198');
+    const table = within(screen.getByRole('region', { name: 'Pull requests' }));
+    await fireEvent.click(table.getByRole('button', { name: /^PR/ }));
+    expect(loc.hash()).toBe('#/?target=main&sort=-number');
+    expect(links()[0]?.textContent).toBe('#70249');
+    expect(section.getByText('The first 200 of 251 PRs open at some point in the period, in the PR table’s order, by PR, descending.')).toBeTruthy();
+  });
+
+  it('follows a week chosen in a chart, as the PR table does', async () => {
+    const { section } = await lanes('#/?target=all&week=2026-05-18');
+    const links = within(section.getByRole('list', { name: /PRs in the lanes/ })).getAllByRole('link');
+    expect(links.map((l) => l.textContent)).toEqual(['#66510', '#66500']);
+    // The lanes say which PRs in the PR table's own words.
+    expect(section.getByText('2 PRs opened in the week of 2026-05-18, in the PR table’s order, by Opened, descending.')).toBeTruthy();
+    const table = within(screen.getByRole('region', { name: 'Pull requests' }));
+    expect(table.getByText(/^2 PRs opened in the week of 2026-05-18$/)).toBeTruthy();
+  });
+
+  it('says so when an age band chosen in a chart narrows them', async () => {
+    const { section } = await lanes('#/?target=main&week=2026-06-01&band=30-90');
+    expect(
+      section.getByText(
+        /^1 PR open at the end of the week of 2026-06-01, aged 30–90 days, in the PR table’s order, by Opened, descending\.$/,
+      ),
+    ).toBeTruthy();
   });
 
   it('switches the time axis to days since opening', async () => {

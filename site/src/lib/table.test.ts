@@ -13,6 +13,8 @@ import {
   narrowing,
   prUrl,
   sortRows,
+  sortWords,
+  tableOrder,
   tableRows,
   ticketUrl,
   windowRows,
@@ -76,6 +78,32 @@ describe('sortRows', () => {
     const out = sortRows(small, input, { column: 'number', descending: true });
     expect([...input]).toEqual([0, 1]);
     expect(nums(out)).toEqual([11, 10]);
+  });
+});
+
+describe('tableOrder', () => {
+  const rows = select(data, state.filters);
+  const titles = { title: (r: number) => `title ${String(100 - r).padStart(3, '0')}` };
+
+  it('is the table’s rows in the table’s order, narrowed by a chosen week as the table is', () => {
+    const scope = { ...state, week: '2026-05-18' };
+    const sort = { column: 'size', descending: true } as const;
+    expect(numbers(tableOrder(data, rows, scope, sort))).toEqual(numbers(sortRows(data, narrowRows(data, rows, scope), sort)));
+    expect(numbers(tableOrder(data, rows, scope, sort))).toEqual([66500, 66510]);
+  });
+
+  it('reads the titles only when sorting by title', () => {
+    const byOpened = { column: 'opened', descending: true } as const;
+    expect(numbers(tableOrder(data, rows, state, byOpened, titles))).toEqual(numbers(sortRows(data, rows, byOpened)));
+    const byTitle = { column: 'title', descending: false } as const;
+    expect(numbers(tableOrder(data, rows, state, byTitle, titles))).toEqual(numbers(sortRows(data, rows, byTitle, titles)));
+    expect(numbers(tableOrder(data, rows, state, byTitle, titles))).not.toEqual(numbers(rows));
+  });
+
+  it('says the order in words, keeping the column label’s capitals', () => {
+    expect(sortWords({ column: 'opened', descending: true })).toBe('by Opened, descending');
+    expect(sortWords({ column: 'number', descending: false })).toBe('by PR, ascending');
+    expect(sortWords({ column: 'disclosure', descending: false })).toBe('by LLM use, ascending');
   });
 });
 

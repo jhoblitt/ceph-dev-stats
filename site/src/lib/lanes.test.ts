@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { DAY } from './filters';
-import { LANE_CAP, byOpening, describeLanes, laneAt, laneModel, laneScale, lanePitch, shownNote } from './lanes';
+import { LANE_CAP, byOpening, describeLanes, laneAt, laneModel, laneScale, lanePitch, lanesLine } from './lanes';
 import { HOUR } from './plot';
 import { META, all, at, dataset, fixture } from './stats/testing';
 
@@ -121,7 +121,7 @@ describe('lanePitch and laneAt', () => {
   });
 });
 
-describe('describeLanes and shownNote', () => {
+describe('describeLanes and lanesLine', () => {
   it('says what the lanes show', () => {
     const data = fixture();
     const order = byOpening(data, all(data));
@@ -132,8 +132,16 @@ describe('describeLanes and shownNote', () => {
     );
   });
 
-  it('says how many are shown, and of how many, when the selection is larger', () => {
-    expect(shownNote(200, 250, 'newest opened first')).toBe('Showing 200 of 250 PRs, newest opened first.');
-    expect(shownNote(12, 12, 'newest opened first')).toBeNull();
+  it('says which PRs the lanes show, how many and in what order, whatever their count', () => {
+    const order = 'in the PR table’s order, by Opened, descending';
+    expect(lanesLine(200, 4279, 'open at some point in the period', order)).toBe(
+      'The first 200 of 4,279 PRs open at some point in the period, in the PR table’s order, by Opened, descending.',
+    );
+    expect(lanesLine(12, 12, 'open at some point in the period', order)).toBe(
+      '12 PRs open at some point in the period, in the PR table’s order, by Opened, descending.',
+    );
+    expect(lanesLine(1, 1, 'opened in the week of 2026-05-18', order)).toBe(
+      '1 PR opened in the week of 2026-05-18, in the PR table’s order, by Opened, descending.',
+    );
   });
 });
