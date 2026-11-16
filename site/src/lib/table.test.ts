@@ -1,0 +1,183 @@
+import { describe, expect, it } from 'vitest';
+import { AGE_BANDS, dayStart, periodRange } from './filters';
+import { openedInBucket, select } from './select';
+import { defaultState } from './state';
+import { backlogMoment, backlogRows } from './stats/backlog';
+import { META, at, dataset, fixture } from './stats/testing';
+import {
+  TABLE_COLUMNS,
+  cellText,
+  countText,
+  kindDecided,
+  narrowRows,
+  narrowing,
+  prUrl,
+  sortRows,
+  tableRows,
+  ticketUrl,
+  windowRows,
+  yearsOfRows,
+} from './table';
+
+const data = fixture();
+const state = defaultState(META);
+const numbers = (rows: Uint32Array) => [...rows].map((r) => data.prs.number[r]);
+
+describe('sortRows', () => {
+  const t = at('2026-06-01T00:00:00Z');
+  const small = dataset([
+    { number: 10, created: t + 2, additions: 5 },
+    { number: 11, created: t + 1, additions: 50 },
+    { number: 12, created: t + 3, additions: 5, kind: -1 },
+    { number: 13, created: t, additions: 7, kind: 1 },
+  ]);
+  const rows = Uint32Array.of(0, 1, 2, 3);
+  const nums = (r: Uint32Array) => [...r].map((x) => small.prs.number[x]);
+
+  it('orders by a column either way, keeping ties in the order given', () => {
+    expect(nums(sortRows(small, rows, { column: 'opened', descending: true }))).toEqual([12, 10, 11, 13]);
+    expect(nums(sortRows(small, rows, { column: 'size', descending: false }))).toEqual([10, 12, 13, 11]);
+    expect(nums(sortRows(small, rows, { column: 'size', descending: true }))).toEqual([11, 13, 10, 12]);
+  });
+
+  it('puts a missing value last in both directions', () => {
+    // Kind -1 is unknown on 12; the rest default to unknown too, but 13 is a feature.
+    const kinds = dataset([
+      { number: 1, created: t, kind: -1 },
+      { number: 2, created: t, kind: 1 },
+      { number: 3, created: t, kind: 0 },
+    ]);
+    const r = Uint32Array.of(0, 1, 2);
+    const n = (x: Uint32Array) => [...x].map((i) => kinds.prs.number[i]);
+    expect(n(sortRows(kinds, r, { column: 'kind', descending: false }))).toEqual([3, 2, 1]);
+    expect(n(sortRows(kinds, r, { column: 'kind', descending: true }))).toEqual([2, 3, 1]);
+  });
+
+  it('sorts by the table file’s text once it is there, and leaves rows without it last', () => {
+    // Titles b, C, (not loaded), a: compared without regard to case.
+    const text = { title: (r: number) => (r === 2 ? null : (['b', 'C', '', 'a'][r] ?? null)), author: () => null };
+    expect(nums(sortRows(small, rows, { column: 'title', descending: false }, text))).toEqual([13, 10, 11, 12]);
+    expect(nums(sortRows(small, rows, { column: 'author', descending: false }, text))).toEqual([10, 11, 12, 13]);
+    expect(nums(sortRows(small, rows, { column: 'title', descending: true }))).toEqual([10, 11, 12, 13]);
+  });
+
+  it('returns new rows and leaves the input alone', () => {
+    const input = Uint32Array.of(0, 1);
+    const out = sortRows(small, input, { column: 'number', descending: true });
+    expect([...input]).toEqual([0, 1]);
+    expect(nums(out)).toEqual([11, 10]);
+  });
+});
+
+describe('tableRows', () => {
+  const period = periodRange(state.filters);
+  const rows = select(data, state.filters);
+
+  it('is the selection when no week or band is chosen', () => {
+    expect([...tableRows(data, state)]).toEqual([...rows]);
+  });
+
+  it('narrows to the PRs opened in a chosen week', () => {
+    const week = '2026-05-18';
+    const out = tableRows(data, { ...state, week });
+    expect([...out]).toEqual([...openedInBucket(data, rows, period, dayStart(week) as number)]);
+    expect(numbers(out)).toEqual([66500, 66510]);
+  });
+
+  it('narrows to the PRs behind a band of the backlog', () => {
+    const week = '2026-06-01';
+    const at = backlogMoment(data, period, dayStart(week) as number);
+    expect([...tableRows(data, { ...state, week, band: '30-90' })]).toEqual([...backlogRows(data, rows, '30-90', at)]);
+  });
+
+  it('counts what it lists against the PRs opened in the period, or says what narrows it', () => {
+    expect(countText(4275, 3483, null)).toBe('4,275 PRs open at some point in the period, 3,483 of them opened in it');
+    expect(countText(2, 2, 'opened in the week of 2026-05-18')).toBe('2 PRs opened in the week of 2026-05-18');
+    expect(countText(0, 0, 'opened in the week of 2026-06-22')).toBe('no PRs opened in the week of 2026-06-22');
+    expect(countText(1, 0, null)).toBe('1 PR open at some point in the period, 0 of them opened in it');
+  });
+
+  it('narrows a selection already made the same way', () => {
+    const scope = { ...state, week: '2026-05-18' };
+    expect([...narrowRows(data, rows, scope)]).toEqual([...tableRows(data, scope)]);
+  });
+
+  it('says what a week or a band narrows it to', () => {
+    expect(narrowing(data, state)).toBeNull();
+    expect(narrowing(data, { ...state, week: '2026-05-18' })).toBe('opened in the week of 2026-05-18');
+    expect(narrowing(data, { ...state, week: '2026-06-01', band: '30-90' })).toBe(
+      `open at the end of the week of 2026-06-01, aged ${AGE_BANDS[2].label}`,
+    );
+  });
+});
+
+describe('cells', () => {
+  const row = (n: number) => [...Array(data.size).keys()].find((r) => data.prs.number[r] === n) as number;
+  const text = { title: () => 'a title', author: () => 'someone' };
+
+  it('writes each column of a merged, disclosed PR', () => {
+    const r = row(66500);
+    const cells = Object.fromEntries(TABLE_COLUMNS.map((c) => [c.id, cellText(data, r, c.id, text)]));
+    expect(cells).toEqual({
+      number: '#66500',
+      title: 'a title',
+      author: 'someone',
+      opened: '2026-05-18',
+      state: 'merged',
+      kind: 'Bug fix',
+      response: '23 hours',
+      open: '4 days',
+      size: '30 lines, 2 files',
+      disclosure: 'disclosed: Claude',
+      reopened: 'no',
+    });
+  });
+
+  it('says why a wait has no value, and that an open PR’s time is so far', () => {
+    // 66700 was opened as a draft and is one still: never ready. 66600 is open, responded after 8 days.
+    expect(cellText(data, row(66700), 'response', text)).toBe('never ready');
+    expect(cellText(data, row(66700), 'state', text)).toBe('open, draft');
+    expect(cellText(data, row(66600), 'open', text)).toMatch(/^166 days so far$/);
+    // 66510 closed unmerged with no response; 67250 is open with none yet.
+    expect(cellText(data, row(66510), 'response', text)).toBe('none');
+    expect(cellText(data, row(67250), 'response', text)).toBe('none yet');
+    expect(cellText(data, row(66900), 'reopened', text)).toBe('once');
+    expect(cellText(data, row(66510), 'disclosure', text)).toBe('not disclosed');
+    expect(cellText(data, row(66510), 'title', { title: () => null, author: () => null })).toBe('');
+  });
+});
+
+describe('kindDecided', () => {
+  it('says the kind and what decided it in words', () => {
+    expect(kindDecided(META.kinds, 0, 'tracker')).toBe('Bug fix, from its tracker ticket');
+    expect(kindDecided(META.kinds, 1, 'checklist')).toBe('Feature, from the PR’s checklist');
+    expect(kindDecided(META.kinds, 2, 'labels')).toBe('Cleanup, from its labels');
+    expect(kindDecided(META.kinds, 0, 'original')).toBe('Bug fix, from the PR it backports');
+    expect(kindDecided(META.kinds, -1, '')).toBe('unknown: nothing decided it');
+  });
+});
+
+describe('links', () => {
+  it('builds the PR’s and the ticket’s addresses', () => {
+    expect(prUrl('ceph/ceph', 66500)).toBe('https://github.com/ceph/ceph/pull/66500');
+    expect(ticketUrl(72001)).toBe('https://tracker.ceph.com/issues/72001');
+  });
+});
+
+describe('yearsOfRows', () => {
+  it('names the years whose table files the rows need, and no others', () => {
+    // Rows 0–1 are 2025's, 2–11 2026's.
+    expect(yearsOfRows(data, Uint32Array.of(3, 5))).toEqual([2026]);
+    expect(yearsOfRows(data, Uint32Array.of(1, 7))).toEqual([2025, 2026]);
+    expect(yearsOfRows(data, new Uint32Array(0))).toEqual([]);
+  });
+});
+
+describe('windowRows', () => {
+  it('draws the rows in view and a few either side', () => {
+    expect(windowRows(0, 400, 40, 6000, 5)).toEqual({ start: 0, end: 15 });
+    expect(windowRows(4000, 400, 40, 6000, 5)).toEqual({ start: 95, end: 115 });
+    expect(windowRows(239_800, 400, 40, 6000, 5)).toEqual({ start: 5990, end: 6000 });
+    expect(windowRows(0, 400, 40, 3, 5)).toEqual({ start: 0, end: 3 });
+  });
+});
