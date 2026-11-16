@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/svelte';
 import { get } from 'svelte/store';
-import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import App from '../App.svelte';
 import { BASE, fixtureFetch, withEarlierYear } from '../lib/__fixtures__/fetch';
 import { memoryLocation, meta } from '../lib/__fixtures__/page';
@@ -90,6 +90,46 @@ describe('PrTable', () => {
     for (const go of held.splice(0)) go();
     await waitFor(() => expect(table().getAttribute('aria-busy')).toBe('false'));
     expect(region().queryByText(/^Loading the titles/)).toBeNull();
+  });
+
+  describe('when a table file arrives', () => {
+    /** The App with the table files held back; `compares` counts the string comparisons the sorts make. */
+    async function held(hash: string) {
+      const waiting: (() => void)[] = [];
+      const base = fixtureFetch();
+      const fetch = (url: string) =>
+        url.includes('table-') ? new Promise<Response>((go) => waiting.push(() => go(base.fetch(url)))) : base.fetch(url);
+      const loc = memoryLocation(hash);
+      const selection = createStateStore(meta, loc);
+      const loader = new DataLoader(meta, BASE, fetch);
+      const years = yearsForState(meta, get(selection));
+      const store = createDataStore(loader, selection, years, await loader.load(years));
+      render(App, { props: { page: { meta, selection, data: store, view: createViewStore(selection, store), loader } } });
+      await waitFor(() => expect(waiting.length).toBe(1));
+      const compares = vi.spyOn(Intl.Collator.prototype, 'compare', 'get');
+      for (const go of waiting.splice(0)) go();
+      await waitFor(() => expect(table().getAttribute('aria-busy')).toBe('false'));
+      await waitFor(() => expect(within(table()).getByText('rgw: check the bucket owner before a copy')).toBeTruthy());
+      const count = compares.mock.calls.length;
+      compares.mockRestore();
+      return count;
+    }
+
+    it('does not sort the rows again under a sort that reads no title', async () => {
+      expect(await held('#/?sort=author')).toBe(0);
+      expect(listed()).toEqual(expected('#/?sort=author'));
+    });
+
+    it('sorts them again under the title sort, into the order of the titles', async () => {
+      expect(await held('#/?sort=title')).toBeGreaterThan(0);
+      const titles = within(table())
+        .getAllByRole('row')
+        .slice(1)
+        .map((r) => r.querySelectorAll('td')[1]?.textContent?.trim() ?? '');
+      const collator = new Intl.Collator('en', { sensitivity: 'base', numeric: true });
+      expect(titles).toHaveLength(9);
+      expect(titles).toEqual([...titles].sort((a, b) => collator.compare(a, b)));
+    });
   });
 
   it('is not busy when a table file it needs failed to load', async () => {
