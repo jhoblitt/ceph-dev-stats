@@ -4,7 +4,7 @@
 
 import { type Dataset, PR_STATE } from '../data';
 import { type Buckets, type Period, type Step, bucketOf, buckets } from './buckets';
-import { SPAN_OUTCOMES, type Span, outcomeCurve, quantileDays } from './curve';
+import { type Quantile, type Span, outcomeCurve, spanQuantile } from './curve';
 import { HUMAN_REVIEWS, kindTable, rowMask } from './events';
 
 /** Counts by calendar week, except `opened`, which counts by week opened. */
@@ -40,37 +40,35 @@ export interface Weekly<V> {
  * - `disclosureShare`: the share of the week's opened PRs that disclose,
  *   as `disclosed` and under each tool family's id; null for a week with
  *   none opened.
- * - a `WaitingSeries`: each quantile under its number, e.g. `0.5`; null
- *   where it is not yet known.
+ * - a `WaitingSeries`: each quantile under its number, e.g. `0.5`, as a
+ *   `Quantile`: known, not yet known, not reached, or none for a week
+ *   with no PR to measure.
  *
  * Only what falls inside the period counts: a week straddling its start or
  * end counts its part inside. An empty selection gives no weeks.
  */
 export function weekly(data: Dataset, rows: Uint32Array, period: Period, series: CountSeries): Weekly<number>;
-export function weekly(
-  data: Dataset,
-  rows: Uint32Array,
-  period: Period,
-  series: 'disclosureShare' | WaitingSeries,
-): Weekly<number | null>;
-export function weekly(
-  data: Dataset,
-  rows: Uint32Array,
-  period: Period,
-  series: WeeklySeries,
-): Weekly<number> | Weekly<number | null>;
+export function weekly(data: Dataset, rows: Uint32Array, period: Period, series: 'disclosureShare'): Weekly<number | null>;
+export function weekly(data: Dataset, rows: Uint32Array, period: Period, series: WaitingSeries): Weekly<Quantile>;
 export function weekly(
   data: Dataset,
   rows: Uint32Array,
   period: Period,
   series: WeeklySeries,
-): Weekly<number> | Weekly<number | null> {
+): Weekly<number> | Weekly<number | null> | Weekly<Quantile>;
+export function weekly(
+  data: Dataset,
+  rows: Uint32Array,
+  period: Period,
+  series: WeeklySeries,
+): Weekly<number> | Weekly<number | null> | Weekly<Quantile> {
   const b = buckets(period);
   const names = seriesNames(data, series);
   if (rows.length === 0) {
     return { week: [], step: b.step, values: Object.fromEntries(names.map((name) => [name, []])) };
   }
-  const columns = compute(data, rows, b, series);
+  // Each kind of series fills its columns with one kind of value, as the overloads say.
+  const columns = compute(data, rows, b, series) as (number | null)[][];
   return { week: b.starts, step: b.step, values: Object.fromEntries(names.map((name, i) => [name, columns[i] ?? []])) };
 }
 
@@ -95,7 +93,7 @@ function seriesNames(data: Dataset, series: WeeklySeries): string[] {
 }
 
 /** The series' columns, in the order of `seriesNames`. */
-function compute(data: Dataset, rows: Uint32Array, b: Buckets, series: WeeklySeries): (number | null)[][] {
+function compute(data: Dataset, rows: Uint32Array, b: Buckets, series: WeeklySeries): (number | null | Quantile)[][] {
   if (typeof series === 'object') return waiting(data, rows, b, series);
   const p = data.prs;
   switch (series) {
@@ -208,7 +206,7 @@ function disclosureShare(data: Dataset, rows: Uint32Array, b: Buckets): (number 
   return out.map((column) => column.map((n, w) => (opened[w] === 0 ? null : n / (opened[w] as number))));
 }
 
-function waiting(data: Dataset, rows: Uint32Array, b: Buckets, series: WaitingSeries): (number | null)[][] {
+function waiting(data: Dataset, rows: Uint32Array, b: Buckets, series: WaitingSeries): Quantile[][] {
   // Partition the rows opened in each bucket into one array, bucket by bucket.
   const sizes = new Uint32Array(b.starts.length + 1);
   forOpened(data, rows, b, (_r, w) => (sizes[w + 1] = (sizes[w + 1] as number) + 1));
@@ -220,13 +218,12 @@ function waiting(data: Dataset, rows: Uint32Array, b: Buckets, series: WaitingSe
     offsets[w] = (offsets[w] as number) + 1;
   });
 
-  const outcome = SPAN_OUTCOMES[series.span][0];
-  const out = series.quantiles.map(() => b.starts.map((): number | null => null));
+  const out = series.quantiles.map(() => b.starts.map((): Quantile => ({ state: 'none' })));
   for (let w = 0; w < b.starts.length; w++) {
     const week = byWeek.subarray(sizes[w], sizes[w + 1]);
     if (week.length === 0) continue;
     const curve = outcomeCurve(data, week, series.span);
-    series.quantiles.forEach((q, i) => ((out[i] as (number | null)[])[w] = quantileDays(curve, outcome, q)));
+    series.quantiles.forEach((q, i) => ((out[i] as Quantile[])[w] = spanQuantile(curve, series.span, q)));
   }
   return out;
 }

@@ -54,16 +54,31 @@
 
   /*
    * Categorical series, in the palette's validated order (adjacent pairs pass
-   * the CVD and normal-vision checks in both modes). Slots 3 and 4 are under
-   * 3:1 on the light surface, so every chart that uses them labels its marks
-   * and has a table view. --on-series is the ink for a label inside any of
-   * them: near-black out-contrasts white on all four in both modes.
+   * the CVD and normal-vision checks in both modes). Slots 3, 4 and 5 are
+   * under 3:1 on the light surface, so every chart that uses them labels its
+   * marks and has a table view. What each slot stands for on the page is
+   * lib/colours.ts. --on-series is the ink for a label inside slots 1–4:
+   * near-black out-contrasts white on all four in both modes.
    */
   --series-1: light-dark(#2a78d6, #3987e5);
   --series-2: light-dark(#eb6834, #d95926);
   --series-3: light-dark(#1baf7a, #199e70);
   --series-4: light-dark(#eda100, #c98500);
+  --series-5: light-dark(#e87ba4, #d55181);
+  --series-6: light-dark(#008300, #0ca30c);
+  --series-7: light-dark(#6250d6, #9085e9);
+  --series-8: light-dark(#e34948, #e66767);
   --on-series: #0b0b0b;
+
+  /*
+   * An ordinal ramp of the palette's neutrals, low → high, for ordered bands
+   * that must not borrow a series hue. Passes the ordinal checks in both
+   * themes; dark mode flips the anchor as the sequential scale does.
+   */
+  --ordinal-1: light-dark(#898781, #52514e);
+  --ordinal-2: light-dark(#52514e, #898781);
+  --ordinal-3: light-dark(#383835, #c3c2b7);
+  --ordinal-4: light-dark(#0b0b0b, #f0efec);
 
   /* Type */
   --font-sans: system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;

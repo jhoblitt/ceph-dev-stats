@@ -4,11 +4,15 @@ import type { Dataset } from '../data';
 import type { Period } from './buckets';
 import { HUMAN_REVIEWS, kindTable, rowMask } from './events';
 
-/**
- * The share of the human reviews made on the rows during the period that the
- * `top` busiest people made; null when there is no review to share.
- */
-export function reviewerShare(data: Dataset, rows: Uint32Array, period: Period, top: number): number | null {
+export interface ReviewLoad {
+  /** The distinct people who made the human reviews. */
+  reviewers: number;
+  /** The share of those reviews the `top` busiest people made; null when there is no review to share. */
+  share: number | null;
+}
+
+/** Who carried the human reviews made on the rows during the period, as two numbers. */
+export function reviewLoad(data: Dataset, rows: Uint32Array, period: Period, top: number): ReviewLoad {
   const table = kindTable(data, Object.fromEntries(HUMAN_REVIEWS.map((k) => [k, 1])));
   const mask = rowMask(data, rows);
   const ev = data.events;
@@ -23,7 +27,15 @@ export function reviewerShare(data: Dataset, rows: Uint32Array, period: Period, 
     const actor = ev.actor[e] as number;
     if (actor >= 0) byActor.set(actor, (byActor.get(actor) ?? 0) + 1);
   }
-  if (total === 0) return null;
+  if (total === 0) return { reviewers: byActor.size, share: null };
   const busiest = [...byActor.values()].sort((a, b) => b - a).slice(0, top);
-  return busiest.reduce((n, c) => n + c, 0) / total;
+  return { reviewers: byActor.size, share: busiest.reduce((n, c) => n + c, 0) / total };
+}
+
+/**
+ * The share of the human reviews made on the rows during the period that the
+ * `top` busiest people made; null when there is no review to share.
+ */
+export function reviewerShare(data: Dataset, rows: Uint32Array, period: Period, top: number): number | null {
+  return reviewLoad(data, rows, period, top).share;
 }

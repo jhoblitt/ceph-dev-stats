@@ -60,14 +60,54 @@ describe('weekly by week opened', () => {
     });
   });
 
-  it('gives the waiting quantiles of each week opened, null where not yet known', () => {
+  it('gives the waiting quantiles of each week opened, not yet known while PRs still wait', () => {
     // Week 1: responses after 1, 2, 3 and 4 days. Week 2: one response after
     // 1 day, three PRs still waiting. Week 3: none.
     const week1 = [1, 2, 3, 4].map((d) => ({ created: W1, first_response: W1 + d * DAY }));
     const week2 = [{ created: W2, first_response: W2 + DAY }, { created: W2 }, { created: W2 }, { created: W2 }];
     const data = dataset([...week1, ...week2], [], { fetched_through: NOW });
     const s = weekly(data, all(data), PERIOD, { kind: 'waitingByWeekOpened', span: 'response', quantiles: [0.5, 0.9] });
-    expect(s.values).toEqual({ '0.5': [2, null, null], '0.9': [4, null, null] });
+    expect(s.values).toEqual({
+      '0.5': [{ state: 'known', days: 2 }, { state: 'notYetKnown' }, { state: 'none' }],
+      '0.9': [{ state: 'known', days: 4 }, { state: 'notYetKnown' }, { state: 'none' }],
+    });
+  });
+
+  it('says a quantile is not reached when every PR of the week has finished short of it', () => {
+    // Week 1: merged after 1 day and closed unmerged after 2; both finished, half merged.
+    // Week 3: one PR still open.
+    const data = dataset(
+      [
+        { created: W1, state: MERGED, closed: W1 + DAY },
+        { created: W1, state: CLOSED, closed: W1 + 2 * DAY },
+        { created: W3 },
+      ],
+      [],
+      { fetched_through: NOW },
+    );
+    const s = weekly(data, all(data), PERIOD, { kind: 'waitingByWeekOpened', span: 'merge', quantiles: [0.5, 0.9] });
+    expect(s.values).toEqual({
+      '0.5': [{ state: 'known', days: 1 }, { state: 'none' }, { state: 'notYetKnown' }],
+      '0.9': [{ state: 'notReached', share: 0.5 }, { state: 'none' }, { state: 'notYetKnown' }],
+    });
+  });
+
+  it('keeps a week not yet known while one of its PRs is younger than its slowest finished one and still open', () => {
+    // Week 3: one PR open since 06-15, at age 16 days at the fetch, beside three opened the
+    // same day and finished after 17, 18 and 19 days (closed, closed, merged).
+    const data = dataset(
+      [
+        { created: W3 },
+        { created: W3, state: CLOSED, closed: W3 + 17 * DAY },
+        { created: W3, state: CLOSED, closed: W3 + 18 * DAY },
+        { created: W3, state: MERGED, closed: W3 + 19 * DAY },
+      ],
+      [],
+      { fetched_through: W3 + 16 * DAY },
+    );
+    const s = weekly(data, all(data), PERIOD, { kind: 'waitingByWeekOpened', span: 'merge', quantiles: [0.5, 0.9] });
+    expect(s.values['0.5']?.[2]).toEqual({ state: 'notYetKnown' });
+    expect(s.values['0.9']?.[2]?.state).toBe('notReached');
   });
 
   it('gives the waiting quantiles of a span without censoring', () => {
@@ -77,7 +117,7 @@ describe('weekly by week opened', () => {
     ]);
     const series = { kind: 'waitingByWeekOpened', span: 'firstCommitToOpened', quantiles: [0.5] } as const;
     const s = weekly(data, all(data), PERIOD, series);
-    expect(s.values).toEqual({ '0.5': [null, 1, null] });
+    expect(s.values).toEqual({ '0.5': [{ state: 'none' }, { state: 'known', days: 1 }, { state: 'none' }] });
   });
 });
 

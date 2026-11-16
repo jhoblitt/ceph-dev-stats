@@ -1,0 +1,312 @@
+import { describe, expect, it } from 'vitest';
+import { periodRange } from './filters';
+import {
+  arrivalsModel,
+  commandFigures,
+  commandSummary,
+  commandsModel,
+  curveModel,
+  curveNothing,
+  curveQuantiles,
+  reviewerShareText,
+  reviewsModel,
+  BUSIEST_COMMANDS,
+  spanNote,
+  spanTitle,
+  waitingSeries,
+  waitsModel,
+  waitsNothing,
+} from './review';
+import { openedIn, select } from './select';
+import { defaultFilters } from './state';
+import { commandUse } from './stats/commands';
+import { outcomeCurve } from './stats/curve';
+import { META, at, fixture } from './stats/testing';
+import { COLOURS } from './colours';
+import { weekly } from './stats/weekly';
+
+// The default view: PRs on main, 2026-05-15 to 2026-11-15, 27 weeks from 2026-05-11.
+const data = fixture();
+const filters = defaultFilters(META);
+const period = periodRange(filters);
+const rows = select(data, filters);
+// #66500, #66510, #66600, #66700, #66900, #67000, #67100.
+const opened = openedIn(data, rows, period);
+
+/** 27 weekly values of `fill`, with the given weeks set. */
+function weeks<T>(set: Record<number, T>, fill: T): T[] {
+  return Array.from({ length: 27 }, (_, i) => (i in set ? (set[i] as T) : fill));
+}
+
+describe('arrivalsModel', () => {
+  const model = arrivalsModel(
+    weekly(data, rows, period, 'opened'),
+    weekly(data, rows, period, 'reviews'),
+    weekly(data, rows, period, 'reviewers'),
+  );
+
+  it('stacks the PRs opened as the velocity chart does', () => {
+    expect(model.bars.map((b) => b.label)).toEqual(['not disclosed', 'disclosed']);
+    expect(model.bars[1]?.values).toEqual(weeks({ 1: 1, 12: 1, 16: 1 }, 0));
+  });
+
+  it('sets the human reviews and the people making them against them', () => {
+    expect(model.lines.map((l) => [l.label, l.color, l.shape])).toEqual([
+      ['human reviews', COLOURS.humanReviews, 'circle'],
+      ['people reviewing', COLOURS.statistic, 'square'],
+    ]);
+    // 05-20; 06-08 and 06-10; 07-03; 08-07; 08-14; 08-25; 09-18.
+    expect(model.lines[0]?.values).toEqual(weeks({ 1: 1, 4: 2, 7: 1, 12: 1, 13: 1, 15: 1, 18: 1 }, 0));
+    // The week of 06-08 has two different reviewers.
+    expect(model.lines[1]?.values).toEqual(weeks({ 1: 1, 4: 2, 7: 1, 12: 1, 13: 1, 15: 1, 18: 1 }, 0));
+  });
+});
+
+describe('reviewsModel', () => {
+  it('stacks human reviews under bot reviews', () => {
+    const model = reviewsModel(weekly(data, rows, period, 'reviews'));
+    expect(model.bars.map((b) => [b.label, b.color])).toEqual([
+      ['human reviews', COLOURS.humanReviews],
+      ['bot reviews', COLOURS.botReviews],
+    ]);
+    expect(model.stackLabel).toBe('reviews');
+    // #66500 on 05-18, #67000 on 08-06.
+    expect(model.bars[1]?.values).toEqual(weeks({ 1: 1, 12: 1 }, 0));
+  });
+});
+
+describe('waitsModel', () => {
+  const model = waitsModel(
+    weekly(data, rows, period, waitingSeries('merge')),
+    weekly(data, rows, period, 'opened'),
+    'merge',
+  );
+
+  it('draws the median solid and the 90th percentile dashed, both in neutral ink', () => {
+    expect(model.lines.map((l) => [l.key, l.label, l.color, l.shape, l.dashed === true])).toEqual([
+      ['0.5', 'median', COLOURS.statistic, 'circle', false],
+      ['0.9', '90th percentile', COLOURS.statistic, 'square', true],
+    ]);
+  });
+
+  it('reads each week opened off its own curve', () => {
+    // 05-18: #66500 merged after 97 hours, #66510 closed unmerged.
+    expect(model.lines[0]?.values[1]).toBeCloseTo(97 / 24, 9);
+    // #66900 merged after 48 days, #67000 after 13, #67100 after 24.
+    expect([8, 12, 16].map((i) => model.lines[0]?.values[i])).toEqual([48, 13, 24]);
+    expect([8, 12, 16].map((i) => model.lines[1]?.values[i])).toEqual([48, 13, 24]);
+  });
+
+  it('says a quantile is not reached when the week has finished short of it, with the share merged', () => {
+    // 05-18: both PRs finished, half merged; nine in ten can never merge.
+    expect(model.lines[1]?.values[1]).toBeNull();
+    expect(model.lines[1]?.missing?.[1]).toBe('not reached: 50% merged');
+    expect(model.lines[1]?.unreached).toEqual(weeks({ 1: true }, false));
+    expect(model.shade?.[1]).toBe(false);
+  });
+
+  it('says a quantile is not yet known while PRs still wait, and shades only those weeks', () => {
+    // 06-01: #66600 still open; 06-15: the draft #66700, still open.
+    expect([3, 5].map((i) => model.lines[0]?.missing?.[i])).toEqual(['not yet known', 'not yet known']);
+    expect(model.shade).toEqual(weeks({ 3: true, 5: true }, false));
+    expect(model.shadeLabel).toBe('not yet known');
+  });
+
+  it('tells a week with no PRs opened from either', () => {
+    expect(model.notes).toEqual(weeks({ 1: null, 3: null, 5: null, 8: null, 12: null, 16: null }, 'no PRs opened'));
+  });
+
+  it('says a week whose PRs cannot be measured has none to measure, not that none were opened', () => {
+    // 06-15 opened only the draft #66700, never ready: no response wait to measure.
+    const response = waitsModel(
+      weekly(data, rows, period, waitingSeries('response')),
+      weekly(data, rows, period, 'opened'),
+      'response',
+    );
+    expect(response.notes?.[5]).toBe('no PR to measure');
+  });
+});
+
+describe('curveModel and curveQuantiles', () => {
+  const curve = outcomeCurve(data, opened, 'merge');
+  const model = curveModel(curve, 'merge');
+
+  it('names each outcome, and colours it by its role, what remains last', () => {
+    expect(model.series.map((s) => [s.key, s.label, s.color, s.shape, s.remains])).toEqual([
+      ['merged', 'merged', COLOURS.reached, 'circle', false],
+      ['closed', 'closed unmerged', COLOURS.finishedWithout, 'square', false],
+      ['open', 'still open', COLOURS.waiting, 'triangle', true],
+    ]);
+    expect(model.days).toBe(curve.days);
+  });
+
+  it('reads the median, and says the 90th percentile is not reached, with the share merged', () => {
+    // Of seven, four merged (after 4, 13, 24 and 48 days), one closed and two still open:
+    // 4/7 merged plus 2/7 open is 6/7, short of nine in ten.
+    expect(curveQuantiles(curve, 'merge')).toEqual({ median: '48 days', p90: 'not reached: 57% merged' });
+  });
+
+  it('says a quantile is not yet known while enough PRs still wait', () => {
+    // #66500 merged after 4 days; #66600 and the draft #66700 still open: two in three can still merge.
+    const three = outcomeCurve(data, Uint32Array.of(3, 5, 6), 'merge');
+    expect(curveQuantiles(three, 'merge')).toEqual({ median: 'not yet known', p90: 'not yet known' });
+  });
+
+  it('colours a single outcome as reached', () => {
+    const first = curveModel(outcomeCurve(data, opened, 'firstCommitToOpened'), 'firstCommitToOpened');
+    expect(first.series.map((s) => [s.label, s.color, s.remains])).toEqual([['opened', COLOURS.reached, false]]);
+    const last = curveModel(outcomeCurve(data, opened, 'openedToLastCommit'), 'openedToLastCommit');
+    expect(last.series.map((s) => s.label)).toEqual(['last commit made']);
+  });
+
+  it('labels the outcomes of every span', () => {
+    expect(curveModel(outcomeCurve(data, opened, 'response'), 'response').series.map((s) => s.label)).toEqual([
+      'responded',
+      'finished without a response',
+      'still waiting',
+    ]);
+    expect(curveModel(outcomeCurve(data, opened, 'approval'), 'approval').series.map((s) => s.label)).toEqual([
+      'approved',
+      'finished without an approval',
+      'still waiting',
+    ]);
+  });
+});
+
+describe('curveNothing', () => {
+  it('says no PR was opened when none was', () => {
+    expect(curveNothing('afterApproval', 0)).toBe('no PR was opened in this period');
+  });
+
+  it('says what the span lacks when PRs were opened', () => {
+    expect(curveNothing('afterApproval', 3)).toBe('no PR opened in this period has been approved');
+    expect(curveNothing('response', 3)).toBe('no PR opened in this period has been ready for review');
+    expect(curveNothing('firstCommitToOpened', 3)).toBe(
+      'no PR opened in this period has a known first commit before its opening',
+    );
+  });
+});
+
+describe('waitsNothing', () => {
+  const opened = weekly(data, rows, period, 'opened');
+
+  it('has nothing to say while some week has a wait to draw', () => {
+    expect(waitsNothing(waitsModel(weekly(data, rows, period, waitingSeries('merge')), opened, 'merge'), 'merge', 7)).toBeNull();
+  });
+
+  it('says what the waits lack, in the curve\'s words, when no week has anything to measure', () => {
+    // Of the default PRs only the draft #66700 (06-15) was never ready: a selection of it
+    // alone has PRs opened but no response wait anywhere.
+    const draft = Uint32Array.of(6);
+    const model = waitsModel(
+      weekly(data, draft, period, waitingSeries('response')),
+      weekly(data, draft, period, 'opened'),
+      'response',
+    );
+    expect(waitsNothing(model, 'response', 1)).toBe('no PR opened in this period has been ready for review');
+  });
+
+  it('says no PR was opened when none was', () => {
+    const none = waitsModel(weekly(data, new Uint32Array(0), period, waitingSeries('merge')), opened, 'merge');
+    expect(waitsNothing(none, 'merge', 0)).toBe('no PR was opened in this period');
+  });
+});
+
+describe('spanTitle and spanNote', () => {
+  it('calls the first span the original work to the backport when only backports are selected', () => {
+    expect(spanTitle('firstCommitToOpened', 'main')).toBe('First commit to opened');
+    expect(spanTitle('firstCommitToOpened', 'backports')).toBe('Original work to backport opened');
+    expect(spanTitle('openedToLastCommit', 'backports')).toBe('Opened to last commit');
+    expect(spanTitle('afterLastCommit', 'main')).toBe('Last commit to final disposition');
+  });
+
+  it('keeps the plain title for every branch, with a note on backports', () => {
+    expect(spanTitle('firstCommitToOpened', 'all')).toBe('First commit to opened');
+    expect(spanNote('firstCommitToOpened', 'all')).toBe(
+      'For a backport, the first commit is the original work’s, so this is how long after it the backport was opened.',
+    );
+    expect(spanNote('firstCommitToOpened', 'main')).toBeUndefined();
+    expect(spanNote('firstCommitToOpened', 'backports')).toBeUndefined();
+    expect(spanNote('openedToLastCommit', 'all')).toBeUndefined();
+  });
+});
+
+describe('commands', () => {
+  it('keeps the commands used, the most used first', () => {
+    const w = {
+      week: [at('2026-05-11T00:00:00Z'), at('2026-05-18T00:00:00Z')],
+      step: 'week' as const,
+      values: { 'jenkins-test': [1, 0], 'config-check': [2, 1], unused: [0, 0] },
+    };
+    const names = [...META.commands, { id: 'unused', name: 'unused' }];
+    const model = commandsModel(w, names);
+    expect(model.bars.map((b) => [b.key, b.label, b.color, b.values])).toEqual([
+      ['config-check', '/config check ok', COLOURS.command, [2, 1]],
+      ['jenkins-test', 'jenkins test', COLOURS.command, [1, 0]],
+    ]);
+  });
+
+  it('orders commands used equally often by name', () => {
+    const w = {
+      week: [at('2026-05-11T00:00:00Z')],
+      step: 'week' as const,
+      values: { b: [2], c: [1], a: [1], d: [5] },
+    };
+    const names = ['b', 'c', 'a', 'd'].map((id) => ({ id, name: `cmd ${id}` }));
+    expect(commandsModel(w, names).bars.map((b) => b.key)).toEqual(['d', 'b', 'a', 'c']);
+    expect(BUSIEST_COMMANDS).toBe(6);
+  });
+
+  it('counts the commands of the fixture by week', () => {
+    const model = commandsModel(weekly(data, rows, period, 'commands'), META.commands);
+    // One `jenkins test` on #66500, on 05-20.
+    expect(model.bars.map((b) => [b.key, b.values])).toEqual([['jenkins-test', weeks({ 1: 1 }, 0)]]);
+  });
+
+  it('writes the share of PRs with a command and the commands on merged PRs', () => {
+    // Of seven opened, #66500 had one; merged #66500, #66900, #67000 and #67100 took 1, 0, 0, 0.
+    const figures = commandFigures(commandUse(data, opened));
+    expect(figures).toEqual({ share: '14%', merged: { mean: '0.3', median: '0', p90: '1' } });
+    expect(commandFigures({ share: 0.5, merged: null })).toEqual({ share: '50%', merged: null });
+    expect(commandFigures({ share: null, merged: null })).toEqual({ share: null, merged: null });
+  });
+
+  it('states the counts and the figures', () => {
+    const model = commandsModel(weekly(data, rows, period, 'commands'), META.commands);
+    const figures = commandFigures(commandUse(data, opened));
+    expect(commandSummary(model, figures)).toBe(
+      'By week, 27 weeks from 2026-05-11 to 2026-11-09. 1 jenkins test, at most 1 in a week (week of 2026-05-18). ' +
+        '14% of the PRs opened in the period had a bot command. ' +
+        'Bot commands on merged PRs: mean 0.3, median 0, 90th percentile 1.',
+    );
+    expect(commandSummary(model, { share: '0%', merged: null })).toMatch(/had a bot command\. No PR opened in the period has merged\.$/);
+  });
+});
+
+describe('reviewerShareText', () => {
+  it('states the share of the ten busiest of more reviewers, with no names', () => {
+    expect(reviewerShareText({ reviewers: 25, share: 0.8 })).toBe(
+      'The ten busiest of 25 reviewers did 80% of the human reviews in this period.',
+    );
+  });
+
+  it('says how many people did all of the reviews when there were ten or fewer', () => {
+    expect(reviewerShareText({ reviewers: 4, share: 1 })).toBe('4 people did all of the human reviews in this period.');
+    expect(reviewerShareText({ reviewers: 10, share: 1 })).toBe('10 people did all of the human reviews in this period.');
+    expect(reviewerShareText({ reviewers: 1, share: 1 })).toBe('1 person did all of the human reviews in this period.');
+  });
+
+  it('says what share they did when deleted accounts made the rest', () => {
+    expect(reviewerShareText({ reviewers: 3, share: 0.9 })).toBe('3 people did 90% of the human reviews in this period.');
+  });
+
+  it('states that there were no reviews rather than a share of none', () => {
+    expect(reviewerShareText({ reviewers: 0, share: null })).toBe('There were no reviews in this period.');
+  });
+
+  it('says the reviews came from deleted accounts rather than that no one made them', () => {
+    expect(reviewerShareText({ reviewers: 0, share: 0 })).toBe(
+      'The human reviews in this period came from accounts that no longer exist.',
+    );
+  });
+});
