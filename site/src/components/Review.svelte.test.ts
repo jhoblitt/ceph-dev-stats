@@ -29,10 +29,10 @@ const NEW_COMMANDS = ['zeta', 'eta', 'theta', 'iota', 'kappa', 'lambda'];
 function manyCommands(): Record<string, unknown> {
   const m = { ...rawMeta, commands: [...rawMeta.commands, ...NEW_COMMANDS.map((n) => ({ id: n, name: n }))] };
   const columns = rawEvents2026 as Record<string, number[]>;
-  // #66500 is the 2026 file's row 1; its events end before row 2's begin.
-  const at = (columns['pr'] as number[]).indexOf(2);
+  // #66500 is the 2026 file's row 3; its events end before row 4's begin.
+  const at = (columns['pr'] as number[]).indexOf(4);
   const added: Record<string, number[]> = {
-    pr: NEW_COMMANDS.map(() => 1),
+    pr: NEW_COMMANDS.map(() => 3),
     at: NEW_COMMANDS.map((_, k) => 1779450000 + k),
     kind: NEW_COMMANDS.map(() => rawMeta.event_kinds.indexOf('command_other')),
     sub: NEW_COMMANDS.map((_, k) => rawMeta.commands.length + k),

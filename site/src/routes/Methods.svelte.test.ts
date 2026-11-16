@@ -181,8 +181,8 @@ describe('the methods page', () => {
   });
 
   it('keeps the prose when a year of data fails', async () => {
-    await methods({ 'events-2025.json': undefined });
-    await waitFor(() => expect(screen.getByRole('alert').textContent).toMatch(/events-2025\.json: HTTP 404/));
+    await methods({ 'events-2026.json': undefined });
+    await waitFor(() => expect(screen.getByRole('alert').textContent).toMatch(/events-2026\.json: HTTP 404/));
     expect(article().textContent).toContain('(not available) pull requests were open at some point in the window');
     expect(article().textContent).toContain("Ceph's rule asking for an Assisted-by trailer was a draft on 2026-10-12.");
   });

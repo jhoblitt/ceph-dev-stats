@@ -39,7 +39,7 @@
   }
 
   let { order, orderName = 'newest opened first', rowsName = 'open at some point in the period' }: Props = $props();
-  const { selection, view, meta } = getPage();
+  const { selection, view, meta, data } = getPage();
 
   const dataset = $derived($view.dataset);
   const filters = $derived($view.filters);
@@ -209,7 +209,7 @@
   const note = $derived(lanesLine(lanes.length, model.total, rowsName, orderName));
 </script>
 
-<section id="timelines" aria-labelledby="timelines-heading">
+<section id="timelines" aria-labelledby="timelines-heading" aria-busy={$data.loading ? 'true' : undefined}>
   <h2 id="timelines-heading">Timelines</h2>
 
   <ChartFrame

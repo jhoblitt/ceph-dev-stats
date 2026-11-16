@@ -1,12 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import events2025 from './__fixtures__/data/events-2025.json';
 import events2026 from './__fixtures__/data/events-2026.json';
 import rawMeta from './__fixtures__/data/meta.json';
-import prs2025 from './__fixtures__/data/prs-2025.json';
 import prs2026 from './__fixtures__/data/prs-2026.json';
-import table2025 from './__fixtures__/data/table-2025.json';
 import table2026 from './__fixtures__/data/table-2026.json';
-import { BASE, fixtureFetch } from './__fixtures__/fetch';
+import { BASE, fixtureFetch, withEarlierYear } from './__fixtures__/fetch';
 import {
   DataError,
   DataLoader,
@@ -19,17 +16,24 @@ import {
   parsePrs,
   parseTable,
   parseYear,
+  yearHolds,
   yearsFor,
 } from './data';
 
 const meta = parseMeta(rawMeta);
 const SHA = /^[0-9a-f]{40}$/;
 
+// The fixture with 2025 before it, holding #60010 alone.
+const earlier = withEarlierYear();
+const twoYears = parseMeta(earlier['meta.json']);
+const prs2025 = earlier['prs-2025.json'];
+const events2025 = earlier['events-2025.json'] as typeof events2026;
+
 describe('parseMeta', () => {
   it('reads the fixture', () => {
     expect(meta.repo).toBe('ceph/ceph');
     expect(meta.window_start).toBe(Date.UTC(2026, 4, 15) / 1000);
-    expect(meta.years).toEqual([2025, 2026]);
+    expect(meta.years).toEqual([2026]);
     expect(meta.components.map((c) => c.id)).toEqual(['cephfs', 'mgr', 'rbd', 'rgw']);
     expect(meta.disclosure).toEqual(['none', 'description', 'coauthor', 'trailer']);
     expect(meta.kinds).toEqual([
@@ -95,8 +99,7 @@ describe('parsePrs', () => {
   it('reads the kind column, -1 for unknown', () => {
     const prs = parsePrs(prs2026, 'prs-2026.json', meta);
     expect(prs.kind).toBeInstanceOf(Int32Array);
-    expect([...prs.kind]).toEqual([2, 0, 3, 2, 1, 0, 1, 4, 1, 3]);
-    expect([...parsePrs(prs2025, 'prs-2025.json', meta).kind]).toEqual([0, -1]);
+    expect([...prs.kind]).toEqual([0, -1, 2, 0, 3, 2, 1, 0, 1, 4, 1, 3]);
   });
 
   it('rejects a year file whose columns differ in length, naming the file and the column', () => {
@@ -158,7 +161,7 @@ describe('parsePrs', () => {
   });
 
   it('accepts every kind in the dictionary and -1', () => {
-    const kinds = [-1, 0, 1, 2, 3, 4, 4, 4, 4, 4];
+    const kinds = [-1, 0, 1, 2, 3, 4, 4, 4, 4, 4, 4, 4];
     expect([...parsePrs({ ...prs2026, kind: kinds }, 'prs-2026.json', meta).kind]).toEqual(kinds);
   });
 });
@@ -166,7 +169,7 @@ describe('parsePrs', () => {
 describe('parseEvents', () => {
   it('rejects columns of different lengths', () => {
     const short = { ...events2026, actor: events2026.actor.slice(1) };
-    expect(() => parseEvents(short, 'events-2026.json', 10, meta)).toThrow(/events-2026\.json.*actor/);
+    expect(() => parseEvents(short, 'events-2026.json', 12, meta)).toThrow(/events-2026\.json.*actor/);
   });
 
   it('rejects an event on a row the year does not have', () => {
@@ -174,28 +177,28 @@ describe('parseEvents', () => {
   });
 
   it('reads an actor of -1 for an event nobody is named for', () => {
-    expect([...parseEvents(events2026, 'events-2026.json', 10, meta).actor]).toEqual(events2026.actor);
+    expect([...parseEvents(events2026, 'events-2026.json', 12, meta).actor]).toEqual(events2026.actor);
   });
 
   it.each([11, -2])('rejects an actor of %i, outside people, naming the file and the event', (value) => {
     const bad = { ...events2026, actor: events2026.actor.map((v, i) => (i === 4 ? value : v)) };
-    expect(() => parseEvents(bad, 'events-2026.json', 10, meta)).toThrow(DataError);
-    expect(() => parseEvents(bad, 'events-2026.json', 10, meta)).toThrow(
+    expect(() => parseEvents(bad, 'events-2026.json', 12, meta)).toThrow(DataError);
+    expect(() => parseEvents(bad, 'events-2026.json', 12, meta)).toThrow(
       new RegExp(`events-2026\\.json.*"actor" has ${value} at event 4, outside "people" of 11`),
     );
   });
 
-  // Event 16 is a command_author with sub 0; meta has 15 event kinds and 2 commands.
-  const at16 = (column: readonly number[], value: number) => column.map((v, i) => (i === 16 ? value : v));
+  // Event 23 is a command_author with sub 0; meta has 15 event kinds and 2 commands.
+  const at23 = (column: readonly number[], value: number) => column.map((v, i) => (i === 23 ? value : v));
   it.each([
-    ['kind past the last event kind', 'kind', { kind: at16(events2026.kind, 15) }],
-    ['command past the last command', 'sub', { sub: at16(events2026.sub, 2) }],
-    ['command without a command', 'sub', { sub: at16(events2026.sub, -1) }],
+    ['kind past the last event kind', 'kind', { kind: at23(events2026.kind, 15) }],
+    ['command past the last command', 'sub', { sub: at23(events2026.sub, 2) }],
+    ['command without a command', 'sub', { sub: at23(events2026.sub, -1) }],
   ])('rejects a %s, naming the file and the column', (_name, column, patch) => {
     const bad = { ...events2026, ...patch };
-    expect(() => parseEvents(bad, 'events-2026.json', 10, meta)).toThrow(DataError);
-    expect(() => parseEvents(bad, 'events-2026.json', 10, meta)).toThrow(
-      new RegExp(`events-2026\\.json.*"${column}".*16`),
+    expect(() => parseEvents(bad, 'events-2026.json', 12, meta)).toThrow(DataError);
+    expect(() => parseEvents(bad, 'events-2026.json', 12, meta)).toThrow(
+      new RegExp(`events-2026\\.json.*"${column}".*23`),
     );
   });
 });
@@ -211,9 +214,9 @@ describe('parseTable', () => {
   });
 
   it('reads each row its commits as [sha, authored, committed]', () => {
-    expect(table.commits).toHaveLength(10);
+    expect(table.commits).toHaveLength(12);
     // #66500, one commit authored and committed at 2026-05-18 09:30.
-    expect(table.commits[1]).toEqual([[expect.stringMatching(SHA), 1779096600, 1779096600]]);
+    expect(table.commits[3]).toEqual([[expect.stringMatching(SHA), 1779096600, 1779096600]]);
     table.commits.forEach((list, r) => {
       expect(list, `row ${r}`).toHaveLength(prs2026.commits[r] as number);
       expect(list.at(-1)?.[2], `row ${r}`).toBe(prs2026.last_commit[r]);
@@ -222,17 +225,19 @@ describe('parseTable', () => {
 
   it('reads one ref per event, in the events file order', () => {
     expect(table.refs).toHaveLength(events2026.pr.length);
-    expect(table.refs[0]).toMatch(/^[1-9]\d*$/); // comment_other: a comment id
-    expect(table.refs[7]).toMatch(SHA); // merged: the merge commit
-    expect(table.refs[21]).toBe(''); // reopened
-    expect(table.refs[30]).toMatch(/^[1-9]\d*$/); // ready: an event id
-    expect(table.refs[34]).toBe(''); // bot_account without an id
+    expect(table.refs[7]).toMatch(/^[1-9]\d*$/); // comment_other: a comment id
+    expect(table.refs[14]).toMatch(SHA); // merged: the merge commit
+    expect(table.refs[28]).toBe(''); // reopened
+    expect(table.refs[37]).toMatch(/^[1-9]\d*$/); // ready: an event id
+    expect(table.refs[41]).toBe(''); // bot_account without an id
   });
 
   it('reads the tickets, the PR a backport is of, and where each kind came from', () => {
-    expect(table.tickets).toEqual([[], [72001], [], [], [72510], [72140], [72377, 72378], [], [], []]);
-    expect(table.backport_of).toEqual([0, 0, 0, 0, 0, 66500, 0, 0, 0, 67010]);
+    expect(table.tickets).toEqual([[71234], [], [], [72001], [], [], [72510], [72140], [72377, 72378], [], [], []]);
+    expect(table.backport_of).toEqual([0, 63980, 0, 0, 0, 0, 0, 66500, 0, 0, 0, 67010]);
     expect(table.kind_source).toEqual([
+      'tracker',
+      '',
       'labels',
       'checklist',
       'checklist',
@@ -247,8 +252,8 @@ describe('parseTable', () => {
   });
 
   it('reads a kind source of "" for an unknown kind', () => {
-    const y2025 = parseYear(2025, prs2025, events2025, meta);
-    expect(parseTable(table2025, 'table-2025.json', y2025, meta).kind_source).toEqual(['tracker', '']);
+    expect(y2026.prs.kind[1]).toBe(-1);
+    expect(table.kind_source[1]).toBe('');
   });
 
   const sha = 'a'.repeat(40);
@@ -260,7 +265,7 @@ describe('parseTable', () => {
     ['a commit whose sha is not 40 hex digits', 'commits', { commits: at(table2026.commits, 2, [['abc', 1, 2]]) }],
     ['a commit whose time is not a number', 'commits', { commits: at(table2026.commits, 2, [[sha, '1', 2]]) }],
     ['refs one short of the events', 'refs', { refs: table2026.refs.slice(1) }],
-    ['a merge ref that is not a sha', 'refs', { refs: at(table2026.refs, 7, '3412345678') }],
+    ['a merge ref that is not a sha', 'refs', { refs: at(table2026.refs, 14, '3412345678') }],
     ['a comment ref that is a sha', 'refs', { refs: at(table2026.refs, 0, sha) }],
     ['a ref that is not an id', 'refs', { refs: at(table2026.refs, 0, 'issuecomment-1') }],
     ['tickets one short', 'tickets', { tickets: table2026.tickets.slice(1) }],
@@ -277,9 +282,8 @@ describe('parseTable', () => {
   });
 
   it('rejects a kind source for an unknown kind', () => {
-    const y2025 = parseYear(2025, prs2025, events2025, meta);
-    const bad = { ...table2025, kind_source: ['tracker', 'labels'] };
-    expect(() => parseTable(bad, 'table-2025.json', y2025, meta)).toThrow(/table-2025\.json.*"kind_source".*row 1/);
+    const bad = { ...table2026, kind_source: table2026.kind_source.map((s, r) => (r === 1 ? 'labels' : s)) };
+    expect(() => parse(bad)).toThrow(/table-2026\.json.*"kind_source".*row 1/);
   });
 
   it('rejects a missing column', () => {
@@ -289,22 +293,22 @@ describe('parseTable', () => {
 });
 
 describe('combine', () => {
-  const y2025 = parseYear(2025, prs2025, events2025, meta);
-  const y2026 = parseYear(2026, prs2026, events2026, meta);
-  const data = combine(meta, [y2025, y2026]);
+  const y2025 = parseYear(2025, prs2025, events2025, twoYears);
+  const y2026 = parseYear(2026, prs2026, events2026, twoYears);
+  const data = combine(twoYears, [y2025, y2026]);
 
   it('appends the years in order, so a row id is global', () => {
-    expect(data.size).toBe(12);
-    expect([...data.prs.number]).toEqual([...prs2025.number, ...prs2026.number]);
+    expect(data.size).toBe(13);
+    expect([...data.prs.number]).toEqual([60010, ...prs2026.number]);
     expect(data.years).toEqual([
-      { year: 2025, first: 0, count: 2, firstEvent: 0, eventCount: 7 },
-      { year: 2026, first: 2, count: 10, firstEvent: 7, eventCount: 35 },
+      { year: 2025, first: 0, count: 1, firstEvent: 0, eventCount: 5 },
+      { year: 2026, first: 1, count: 12, firstEvent: 5, eventCount: 42 },
     ]);
   });
 
   it('moves each event onto its global row', () => {
     expect(data.events.pr.length).toBe(events2025.pr.length + events2026.pr.length);
-    expect([...data.events.pr]).toEqual([...events2025.pr, ...events2026.pr.map((p) => p + 2)]);
+    expect([...data.events.pr]).toEqual([...events2025.pr, ...events2026.pr.map((p) => p + 1)]);
     expect([...data.events.at]).toEqual([...events2025.at, ...events2026.at]);
   });
 
@@ -318,51 +322,51 @@ describe('combine', () => {
 });
 
 describe('locateRow and locateEvent', () => {
-  // 2025 holds rows 0–1 and events 0–6; 2026 rows 2–11 and events 7–41.
-  const y2025 = parseYear(2025, prs2025, events2025, meta);
-  const y2026 = parseYear(2026, prs2026, events2026, meta);
-  const data = combine(meta, [y2025, y2026]);
+  // 2025 holds row 0 and events 0–4; 2026 rows 1–12 and events 5–46.
+  const y2025 = parseYear(2025, prs2025, events2025, twoYears);
+  const y2026 = parseYear(2026, prs2026, events2026, twoYears);
+  const data = combine(twoYears, [y2025, y2026]);
 
   it.each([
     [0, { year: 2025, index: 0 }],
-    [1, { year: 2025, index: 1 }],
-    [2, { year: 2026, index: 0 }],
-    [11, { year: 2026, index: 9 }],
+    [1, { year: 2026, index: 0 }],
+    [2, { year: 2026, index: 1 }],
+    [12, { year: 2026, index: 11 }],
   ])('puts row %i in its year table', (row, expected) => {
     expect(locateRow(data, row)).toEqual(expected);
   });
 
   it.each([
     [0, { year: 2025, index: 0 }],
-    [6, { year: 2025, index: 6 }],
-    [7, { year: 2026, index: 0 }],
-    [41, { year: 2026, index: 34 }],
+    [4, { year: 2025, index: 4 }],
+    [5, { year: 2026, index: 0 }],
+    [46, { year: 2026, index: 41 }],
   ])('puts event %i in its year refs', (event, expected) => {
     expect(locateEvent(data, event)).toEqual(expected);
   });
 
   it('finds the table entries of a row and of an event', () => {
-    const table = parseTable(table2026, 'table-2026.json', y2026, meta);
-    // Row 3 is #66500; event 14 is its merge, the eighth event of 2026.
-    expect(data.prs.number[3]).toBe(66500);
-    expect(table.titles[locateRow(data, 3).index]).toBe('rgw: check the bucket owner before a copy');
-    expect(data.events.pr[14]).toBe(3);
-    expect(meta.event_kinds[data.events.kind[14] as number]).toBe('merged');
-    expect(table.refs[locateEvent(data, 14).index]).toMatch(SHA);
+    const table = parseTable(table2026, 'table-2026.json', y2026, twoYears);
+    // Row 4 is #66500; event 19 is its merge, the fifteenth event of 2026.
+    expect(data.prs.number[4]).toBe(66500);
+    expect(table.titles[locateRow(data, 4).index]).toBe('rgw: check the bucket owner before a copy');
+    expect(data.events.pr[19]).toBe(4);
+    expect(meta.event_kinds[data.events.kind[19] as number]).toBe('merged');
+    expect(table.refs[locateEvent(data, 19).index]).toMatch(SHA);
   });
 
-  it('counts from the first loaded year when an earlier one is missing', () => {
-    const only2026 = combine(meta, [y2026]);
+  it('counts from the first loaded year when an earlier one is not loaded', () => {
+    const only2026 = combine(twoYears, [y2026]);
     expect(locateRow(only2026, 0)).toEqual({ year: 2026, index: 0 });
-    expect(locateEvent(only2026, 34)).toEqual({ year: 2026, index: 34 });
+    expect(locateEvent(only2026, 41)).toEqual({ year: 2026, index: 41 });
   });
 
-  it.each([-1, 12, 1.5, Number.NaN])('throws for row %d, outside the loaded data, naming it', (row) => {
+  it.each([-1, 13, 1.5, Number.NaN])('throws for row %d, outside the loaded data, naming it', (row) => {
     expect(() => locateRow(data, row)).toThrow(RangeError);
     expect(() => locateRow(data, row)).toThrow(`row ${row} `);
   });
 
-  it.each([-1, 42, 2.5])('throws for event %d, outside the loaded data, naming it', (event) => {
+  it.each([-1, 47, 2.5])('throws for event %d, outside the loaded data, naming it', (event) => {
     expect(() => locateEvent(data, event)).toThrow(RangeError);
     expect(() => locateEvent(data, event)).toThrow(`event ${event} `);
   });
@@ -374,15 +378,37 @@ describe('locateRow and locateEvent', () => {
 
 describe('yearsFor', () => {
   const at = (iso: string) => Date.parse(iso) / 1000;
+  const history = { ...meta, years: [2011, 2012, 2013, 2016, 2021, 2025, 2026] };
 
-  it('loads every year up to the end of the period, since older PRs are still worked on', () => {
-    expect(yearsFor(meta, at('2026-11-16T00:00:00Z'))).toEqual([2025, 2026]);
+  it('loads the years from the start of the period on, since a PR finished before it cannot be active in it', () => {
+    expect(yearsFor(history, at('2026-05-15T00:00:00Z'))).toEqual([2026]);
+    expect(yearsFor(history, at('2026-01-01T00:00:00Z'))).toEqual([2026]);
+    expect(yearsFor(history, at('2025-12-31T23:59:59Z'))).toEqual([2025, 2026]);
   });
 
-  it('leaves out years opened after the period ends', () => {
-    const longer = { ...meta, years: [2024, 2025, 2026] };
-    expect(yearsFor(longer, at('2026-01-01T00:00:00Z'))).toEqual([2024, 2025]);
-    expect(yearsFor(longer, at('2025-07-01T00:00:00Z'))).toEqual([2024, 2025]);
+  it('skips the years the data has no file for', () => {
+    expect(yearsFor(history, at('2014-06-01T00:00:00Z'))).toEqual([2016, 2021, 2025, 2026]);
+  });
+
+  it('loads every year from a start at or before the first', () => {
+    expect(yearsFor(history, at('2011-03-04T00:00:00Z'))).toEqual(history.years);
+    expect(yearsFor(history, at('2009-01-01T00:00:00Z'))).toEqual(history.years);
+  });
+
+  it("loads the fixture's one year for its default period", () => {
+    expect(yearsFor(meta, at('2026-05-15T00:00:00Z'))).toEqual([2026]);
+  });
+
+  it('keeps a year after the last fetch, where a PR closed during the fetch is filed', () => {
+    expect(yearsFor({ ...meta, years: [2025, 2026, 2027] }, at('2026-05-15T00:00:00Z'))).toEqual([2026, 2027]);
+  });
+});
+
+describe('yearHolds', () => {
+  it('names the PRs a year holds: those finished in it, and the open ones in the year of the last fetch', () => {
+    expect(yearHolds(meta, 2025)).toBe('PRs finished in 2025');
+    expect(yearHolds(meta, 2026)).toBe('PRs finished in 2026 or still open');
+    expect(yearHolds(meta, 2027)).toBe('PRs finished in 2027');
   });
 });
 
@@ -404,17 +430,25 @@ describe('loadMeta', () => {
 });
 
 describe('DataLoader', () => {
+  const twoYearFetch = (overrides: Record<string, unknown> = {}) => fixtureFetch({ ...earlier, ...overrides });
+
   it('loads the years asked for into one dataset', async () => {
-    const { fetch } = fixtureFetch();
-    const { dataset, errors } = await new DataLoader(meta, BASE, fetch).load([2025, 2026]);
+    const { fetch } = twoYearFetch();
+    const { dataset, errors } = await new DataLoader(twoYears, BASE, fetch).load([2025, 2026]);
     expect(errors).toEqual([]);
-    expect(dataset.size).toBe(12);
+    expect(dataset.size).toBe(13);
+  });
+
+  it("fetches only the years asked for: the fixture's default period needs 2026 alone", async () => {
+    const { fetch, requested } = twoYearFetch();
+    await new DataLoader(twoYears, BASE, fetch).load([2026]);
+    expect(requested).toEqual([`${BASE}prs-2026.json`, `${BASE}events-2026.json`]);
   });
 
   it('does not fetch the tables until asked, then fetches the one year', async () => {
     const { fetch, requested } = fixtureFetch();
     const loader = new DataLoader(meta, BASE, fetch);
-    await loader.load([2025, 2026]);
+    await loader.load([2026]);
     expect(requested.some((u) => u.includes('table-'))).toBe(false);
     const table = await loader.table(2026);
     expect(table.titles).toEqual(table2026.titles);
@@ -425,38 +459,49 @@ describe('DataLoader', () => {
   });
 
   it('fetches each file once across loads', async () => {
-    const { fetch, requested } = fixtureFetch();
-    const loader = new DataLoader(meta, BASE, fetch);
+    const { fetch, requested } = twoYearFetch();
+    const loader = new DataLoader(twoYears, BASE, fetch);
     await loader.load([2026]);
     await loader.load([2025, 2026]);
+    await loader.load([2026]);
     expect(requested.filter((u) => u.endsWith('prs-2026.json'))).toHaveLength(1);
+    expect(requested.filter((u) => u.endsWith('prs-2025.json'))).toHaveLength(1);
+  });
+
+  it('gives a dataset of the years asked for alone, though more were loaded before', async () => {
+    const { fetch } = twoYearFetch();
+    const loader = new DataLoader(twoYears, BASE, fetch);
+    await loader.load([2025, 2026]);
+    const { dataset } = await loader.load([2026]);
+    expect(dataset.years.map((y) => y.year)).toEqual([2026]);
+    expect(dataset.size).toBe(12);
   });
 
   it('reports a year file that fails to load by name, and loads the rest', async () => {
-    const { fetch } = fixtureFetch({ 'prs-2025.json': undefined });
-    const { dataset, errors } = await new DataLoader(meta, BASE, fetch).load([2025, 2026]);
+    const { fetch } = twoYearFetch({ 'prs-2025.json': undefined });
+    const { dataset, errors } = await new DataLoader(twoYears, BASE, fetch).load([2025, 2026]);
     expect(errors).toHaveLength(1);
     expect(errors[0]).toMatchObject({ file: 'prs-2025.json', year: 2025 });
     expect(errors[0]?.message).toMatch(/404/);
-    expect(dataset.size).toBe(10);
+    expect(dataset.size).toBe(12);
     expect(dataset.years.map((y) => y.year)).toEqual([2026]);
   });
 
   it('reports a year whose columns differ in length by name, and loads the rest', async () => {
-    const { fetch } = fixtureFetch({ 'events-2026.json': { ...events2026, kind: events2026.kind.slice(2) } });
-    const { dataset, errors } = await new DataLoader(meta, BASE, fetch).load([2025, 2026]);
+    const { fetch } = twoYearFetch({ 'events-2026.json': { ...events2026, kind: events2026.kind.slice(2) } });
+    const { dataset, errors } = await new DataLoader(twoYears, BASE, fetch).load([2025, 2026]);
     expect(errors.map((e) => e.file)).toEqual(['events-2026.json']);
     expect(dataset.years.map((y) => y.year)).toEqual([2025]);
   });
 
   it('reports a year file whose author is outside people by name, and loads the rest', async () => {
-    const author = prs2025.author.map((v, i) => (i === 1 ? 99 : v));
-    const { fetch } = fixtureFetch({ 'prs-2025.json': { ...prs2025, author } });
-    const { dataset, errors } = await new DataLoader(meta, BASE, fetch).load([2025, 2026]);
+    const author = prs2026.author.map((v, i) => (i === 1 ? 99 : v));
+    const { fetch } = twoYearFetch({ 'prs-2026.json': { ...prs2026, author } });
+    const { dataset, errors } = await new DataLoader(twoYears, BASE, fetch).load([2025, 2026]);
     expect(errors).toHaveLength(1);
-    expect(errors[0]).toMatchObject({ year: 2025, file: 'prs-2025.json' });
+    expect(errors[0]).toMatchObject({ year: 2026, file: 'prs-2026.json' });
     expect(errors[0]?.message).toMatch(/"author" has 99 at row 1, outside "people"/);
-    expect(dataset.years.map((y) => y.year)).toEqual([2026]);
+    expect(dataset.years.map((y) => y.year)).toEqual([2025]);
   });
 
   it('rejects a table whose length differs from its year', async () => {
@@ -468,6 +513,13 @@ describe('DataLoader', () => {
   it('rejects a table whose refs do not match its year events', async () => {
     const { fetch } = fixtureFetch({ 'table-2026.json': { ...table2026, refs: table2026.refs.slice(1) } });
     const loader = new DataLoader(meta, BASE, fetch);
-    await expect(loader.table(2026)).rejects.toThrow(/table-2026\.json.*"refs".*events-2026\.json has 35 events/);
+    await expect(loader.table(2026)).rejects.toThrow(/table-2026\.json.*"refs".*events-2026\.json has 42 events/);
+  });
+
+  it("reads the earlier year's table", async () => {
+    const { fetch } = twoYearFetch();
+    const table = await new DataLoader(twoYears, BASE, fetch).table(2025);
+    expect(table.titles).toEqual([table2026.titles[0]]);
+    expect(table.refs).toHaveLength(5);
   });
 });

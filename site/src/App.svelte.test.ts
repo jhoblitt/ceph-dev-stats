@@ -4,7 +4,7 @@ import { get } from 'svelte/store';
 import { beforeAll, describe, expect, it } from 'vitest';
 import App from './App.svelte';
 import rawMeta from './lib/__fixtures__/data/meta.json';
-import { BASE, fixtureFetch } from './lib/__fixtures__/fetch';
+import { BASE, fixtureFetch, withEarlierYear } from './lib/__fixtures__/fetch';
 import { DataLoader, parseMeta } from './lib/data';
 import { type Page, createDataStore, createViewStore, yearsForState } from './lib/page';
 import { type HashLocation, createStateStore } from './lib/state';
@@ -48,9 +48,11 @@ describe('App', () => {
   });
 
   it('names a year file that failed, and still draws every section', async () => {
-    render(App, (await page('', { 'prs-2025.json': undefined })).props);
+    const earlier = withEarlierYear();
+    const twoYears = parseMeta(earlier['meta.json']);
+    render(App, (await page('#/?from=2025-03-01', { ...earlier, 'prs-2025.json': undefined }, twoYears)).props);
     const alert = screen.getByRole('alert');
-    expect(alert.textContent).toMatch(/PRs opened in 2025: prs-2025\.json, HTTP 404/);
+    expect(alert.textContent).toMatch(/PRs finished in 2025: prs-2025\.json, HTTP 404/);
     for (const name of SECTIONS) expect(screen.getByRole('heading', { level: 2, name })).toBeTruthy();
   });
 

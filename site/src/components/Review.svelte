@@ -181,7 +181,7 @@
   </ChartFrame>
 {/snippet}
 
-<section id="review" aria-labelledby="review-heading" class:stale={$data.loading}>
+<section id="review" aria-labelledby="review-heading" class:stale={$data.loading} aria-busy={$data.loading ? 'true' : undefined}>
   <h2 id="review-heading">Review</h2>
 
   <ChartFrame

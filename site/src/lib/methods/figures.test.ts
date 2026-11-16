@@ -1,10 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import table2025 from '../__fixtures__/data/table-2025.json';
 import table2026 from '../__fixtures__/data/table-2026.json';
 import { type TableYear, parseTable, parseYear } from '../data';
-import prs2025 from '../__fixtures__/data/prs-2025.json';
 import prs2026 from '../__fixtures__/data/prs-2026.json';
-import events2025 from '../__fixtures__/data/events-2025.json';
 import events2026 from '../__fixtures__/data/events-2026.json';
 import { META, at, dataset, fixture } from '../stats/testing';
 import {
@@ -35,12 +32,8 @@ const data = fixture();
 const rows = baseRows(data);
 
 function fixtureTables(): Map<number, TableYear> {
-  const y2025 = parseYear(2025, prs2025, events2025, META);
   const y2026 = parseYear(2026, prs2026, events2026, META);
-  return new Map([
-    [2025, parseTable(table2025, 'table-2025.json', y2025, META)],
-    [2026, parseTable(table2026, 'table-2026.json', y2026, META)],
-  ]);
+  return new Map([[2026, parseTable(table2026, 'table-2026.json', y2026, META)]]);
 }
 
 const START = at('2026-05-15T00:00:00Z');
@@ -175,8 +168,8 @@ describe('kindSources', () => {
 
   it('throws when a year it needs has no table', () => {
     const tables = fixtureTables();
-    tables.delete(2025);
-    expect(() => kindSources(data, tables, rows)).toThrow(/2025/);
+    tables.delete(2026);
+    expect(() => kindSources(data, tables, rows)).toThrow(/2026/);
   });
 });
 

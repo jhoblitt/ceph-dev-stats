@@ -1,9 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import events2025 from '../__fixtures__/data/events-2025.json';
 import events2026 from '../__fixtures__/data/events-2026.json';
-import prs2025 from '../__fixtures__/data/prs-2025.json';
 import prs2026 from '../__fixtures__/data/prs-2026.json';
-import table2025 from '../__fixtures__/data/table-2025.json';
 import table2026 from '../__fixtures__/data/table-2026.json';
 import { parseTable, parseYear } from '../data';
 import { META, fixture } from '../stats/testing';
@@ -21,7 +18,6 @@ import {
 
 const data = fixture();
 const tables = new Map([
-  [2025, parseTable(table2025, 'table-2025.json', parseYear(2025, prs2025, events2025, META), META)],
   [2026, parseTable(table2026, 'table-2026.json', parseYear(2026, prs2026, events2026, META), META)],
 ]);
 const d: Loadable<DataFigures> = { state: 'ready', value: dataFigures(data) };

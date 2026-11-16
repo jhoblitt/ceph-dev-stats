@@ -9,6 +9,7 @@
   timeline are a section of their own, above this one.
 -->
 <script lang="ts">
+  import { yearHolds } from '../lib/data';
   import { keepEqual } from '../lib/memo';
   import { isBot, personHandle } from '../lib/handles';
   import { getPage } from '../lib/page';
@@ -99,7 +100,12 @@
   const busy = $derived(needed.some((y) => tables.get(y)?.status === 'loading'));
 </script>
 
-<section id="table" aria-labelledby="table-heading" class:stale={$data.loading} {@attach onScreen(() => (shown = true))}>
+<section
+  id="table"
+  aria-labelledby="table-heading"
+  class:stale={$data.loading}
+  aria-busy={$data.loading ? 'true' : undefined}
+  {@attach onScreen(() => (shown = true))}>
   <h2 id="table-heading">Pull requests</h2>
 
   {#if empty}
@@ -114,10 +120,10 @@
     {#each needed as year (year)}
       {@const t = tables.get(year)}
       {#if t?.status === 'loading'}
-        <p class="muted">Loading the titles of the PRs opened in {year}…</p>
+        <p class="muted">Loading the titles of the {yearHolds(loader.meta, year)}…</p>
       {:else if t?.status === 'error'}
         <p class="error">
-          The titles of the PRs opened in {year} could not be loaded ({t.message}); their rows show the rest.
+          The titles of the {yearHolds(loader.meta, year)} could not be loaded ({t.message}); their rows show the rest.
         </p>
       {/if}
     {/each}

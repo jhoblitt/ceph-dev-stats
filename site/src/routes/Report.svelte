@@ -8,6 +8,7 @@
   import PrTimeline from '../components/PrTimeline.svelte';
   import Review from '../components/Review.svelte';
   import Velocity from '../components/Velocity.svelte';
+  import { yearHolds } from '../lib/data';
   import { keepEqual } from '../lib/memo';
   import { getPage } from '../lib/page';
   import { type Sort, sameSort } from '../lib/sort';
@@ -42,7 +43,7 @@
     <p>Some of the data could not be loaded, so everything below leaves these years out:</p>
     <ul>
       {#each $data.errors as e (e.file)}
-        <li>PRs opened in {e.year}: <code>{e.file}</code>, {e.message}</li>
+        <li>{yearHolds(loader.meta, e.year)}: <code>{e.file}</code>, {e.message}</li>
       {/each}
     </ul>
   </div>

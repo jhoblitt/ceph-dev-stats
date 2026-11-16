@@ -1,4 +1,6 @@
 import { describe, expect, it } from 'vitest';
+import { FIXTURE, withEarlierYear } from './__fixtures__/fetch';
+import { combine, parseMeta, parseYear } from './data';
 import { AGE_BANDS, dayStart, periodRange } from './filters';
 import { openedInBucket, select } from './select';
 import { defaultState } from './state';
@@ -204,10 +206,18 @@ describe('links', () => {
 
 describe('yearsOfRows', () => {
   it('names the years whose table files the rows need, and no others', () => {
-    // Rows 0–1 are 2025's, 2–11 2026's.
-    expect(yearsOfRows(data, Uint32Array.of(3, 5))).toEqual([2026]);
-    expect(yearsOfRows(data, Uint32Array.of(1, 7))).toEqual([2025, 2026]);
-    expect(yearsOfRows(data, new Uint32Array(0))).toEqual([]);
+    // With 2025 before the fixture: row 0 is 2025's #60010, rows 1–12 are 2026's.
+    const earlier = withEarlierYear();
+    const m = parseMeta(earlier['meta.json']);
+    const twoYears = combine(m, [
+      parseYear(2025, earlier['prs-2025.json'], earlier['events-2025.json'], m),
+      parseYear(2026, FIXTURE['prs-2026.json'], FIXTURE['events-2026.json'], m),
+    ]);
+    expect(yearsOfRows(twoYears, Uint32Array.of(3, 5))).toEqual([2026]);
+    expect(yearsOfRows(twoYears, Uint32Array.of(0))).toEqual([2025]);
+    expect(yearsOfRows(twoYears, Uint32Array.of(0, 7))).toEqual([2025, 2026]);
+    expect(yearsOfRows(twoYears, new Uint32Array(0))).toEqual([]);
+    expect(yearsOfRows(data, Uint32Array.of(0, 11))).toEqual([2026]);
   });
 });
 

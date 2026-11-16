@@ -10,7 +10,10 @@ import { select } from './select';
 import type { AppState, StateStore } from './state';
 
 export interface DataState {
-  /** The rows of every year the period needs that loaded. */
+  /**
+   * The rows of every year the period needs that loaded: those from the
+   * period's start year on, which hold every PR the period can select.
+   */
   dataset: Dataset;
   /** The years that did not load, each naming its file. */
   errors: LoadError[];
@@ -38,13 +41,15 @@ export interface View {
 export const [getPage, setPage] = createContext<Page>();
 
 export function yearsForState(meta: Meta, state: AppState): number[] {
-  return yearsFor(meta, periodRange(state.filters).end);
+  return yearsFor(meta, periodRange(state.filters).start);
 }
 
 /**
  * The data for the current period: it loads the years a new period needs
  * and keeps showing the last dataset until they arrive. Only the latest
- * load is kept, so a slow one cannot overwrite a newer one.
+ * load is kept, so a slow one cannot overwrite a newer one. A later start
+ * drops the years it no longer needs from the dataset, so every figure
+ * scans only the period's years; their files stay with the loader.
  */
 export function createDataStore(
   loader: DataLoader,

@@ -1,7 +1,7 @@
 // The site data (Seam 4 of the plan), fetched at run time from `data/` under
 // the site's base path: meta.json first, then the year files the period
-// needs, and a year's table only when the PR table asks for it. Times are
-// epoch seconds; -1 means none or unknown.
+// needs, and a year's table only when a view asks for it. Times are epoch
+// seconds; -1 means none or unknown.
 
 import { UNKNOWN_KIND } from './filters';
 
@@ -15,7 +15,12 @@ export interface Meta {
   /** When the last fetch began. */
   fetched_through: number;
   window_start: number;
-  /** The years with a prs-<year>.json, ascending. */
+  /**
+   * The years with a prs-, events- and table-<year>.json, ascending. A
+   * year's files hold the PRs finally merged or closed in it (UTC), with all
+   * their events whenever those happened; a PR still open is in the year of
+   * `fetched_through`.
+   */
   years: number[];
   bases: string[];
   components: Named[];
@@ -506,14 +511,25 @@ export function combine(meta: Meta, years: readonly YearData[]): Dataset {
 }
 
 /**
- * The years whose files a period ending at `end` (epoch seconds, exclusive)
- * needs: every year up to the one it ends in. A PR opened before the period
- * can still be reviewed, closed or waiting in it, and the calendar charts
- * count it.
+ * The years whose files a period starting at `start` (epoch seconds) needs:
+ * the year it starts in and every later one. A year's files hold the PRs
+ * that finished in it, and a PR is active in a period only when it finished
+ * on or after the period's start or is still open, which puts it in the
+ * last year's files.
  */
-export function yearsFor(meta: Meta, end: number): number[] {
-  const last = new Date((end - 1) * 1000).getUTCFullYear();
-  return meta.years.filter((y) => y <= last);
+export function yearsFor(meta: Meta, start: number): number[] {
+  const first = new Date(start * 1000).getUTCFullYear();
+  return meta.years.filter((y) => y >= first);
+}
+
+/**
+ * The PRs a year's files hold, as the page names them: "PRs finished in
+ * 2025", and for the year of the last fetch "PRs finished in 2026 or still
+ * open".
+ */
+export function yearHolds(meta: Meta, year: number): string {
+  const open = year === new Date(meta.fetched_through * 1000).getUTCFullYear();
+  return `PRs finished in ${year}${open ? ' or still open' : ''}`;
 }
 
 async function fetchJson(fetchFn: Fetch, baseUrl: string, file: string): Promise<unknown> {
