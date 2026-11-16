@@ -26,6 +26,7 @@ ignore:
   - {line: 'Assisted-by: nobody', why: a joke}
   - {line: 'Generated with care', why: not a tool}
   - {line: 'Made-with: Claude Dupont', why: a person named Claude}
+  - {line: 'by Gemini, said nobody', why: a joke}
 `,
 	tables.BotsFile: `
 accounts:

@@ -18,9 +18,11 @@ var (
 	ownTemp = regexp.MustCompile(`^\.(?:meta|(?:prs|events|table)-\d+)\.json\.\d+\.tmp$`)
 )
 
-// Result names the files Write wrote and removed, in name order.
+// Result names the files Write wrote and removed.
 type Result struct {
+	// Written is in the order the files were given.
 	Written []string
+	// Removed is in name order.
 	Removed []string
 }
 

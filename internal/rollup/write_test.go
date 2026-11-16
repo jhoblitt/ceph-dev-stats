@@ -47,6 +47,12 @@ var _ = Describe("Write", func() {
 		Expect(read("prs-2026.json")).To(Equal(`{"name":"prs-2026.json"}`))
 	})
 
+	It("names the files it wrote in the order they were given", func() {
+		res, err := rollup.Write(dir, files("table-2026.json", "meta.json", "events-2026.json"))
+		Expect(err).NotTo(HaveOccurred())
+		Expect(res.Written).To(Equal([]string{"table-2026.json", "meta.json", "events-2026.json"}))
+	})
+
 	It("rewrites only the files whose bytes change, and leaves no temporary file", func() {
 		_, err := rollup.Write(dir, files("meta.json", "prs-2026.json"))
 		Expect(err).NotTo(HaveOccurred())

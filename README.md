@@ -8,7 +8,7 @@ requests: how long a pull request waits for a human response, for approval
 and for merge, how much of that is spent after the code stopped changing,
 and whether disclosed LLM assistance is changing any of it. A Go tool,
 `cephstats`, fetches the pull requests and builds the data; a static site
-will render it and compute the statistics in the browser.
+renders it and computes the statistics in the browser.
 
 The design is
 [`docs/superpowers/specs/2026-11-15-ceph-pr-stats-design.md`](docs/superpowers/specs/2026-11-15-ceph-pr-stats-design.md).
@@ -42,15 +42,28 @@ environment variable.
   second. `--refresh` asks again about the tickets the tracker would not
   show before.
 - `check` validates the hand-edited tables against the records and fails,
-  listing every problem, on a table that does not load, a trailer or label
-  no table accounts for, a counted disclosure that names no tool family, a
-  ticket type `kinds.yaml` does not map, or record counts more than 0.5%
-  from GitHub's. `--report` also prints what the tables do not match yet.
-- `rollup` writes the site's data (see [Site](#site)).
+  listing every problem, on a table that does not load, a `tools.yaml`
+  with no `unspecified` family, a trailer or label no table accounts for,
+  a counted disclosure that names no tool family, a ticket type
+  `kinds.yaml` does not map, or record counts more than 0.5% from
+  GitHub's. A candidate line can name a person, so the failure names a
+  trailer or disclosure problem only by its trailer key, how many lines and
+  which pull requests. `--report` also prints those lines, neighboring
+  candidate lines that match a disclosure phrase only when joined, and
+  what the tables do not match yet.
+- `rollup` classifies the records in `data/` with the hand-edited tables
+  and `data/tickets.json`, and writes the site's data files: `meta.json`,
+  and `prs-<year>.json`, `events-<year>.json` and `table-<year>.json` for
+  each year a pull request was opened in. They go to `site/public/data/`,
+  or the directory `--out` names, and are not committed (see
+  [Site](#site)). Only the files whose content changes are rewritten, and
+  a year's files are removed once it has no records. It does not run
+  `check`.
 
 ## Data
 
-Everything under `data/` is committed and public.
+Everything under `data/` is committed and public. The site's data files
+are derived from it by `cephstats rollup` and are not committed.
 
 | File | What it holds | Written by |
 |---|---|---|
@@ -88,12 +101,18 @@ none of the three variables is set, it passes `gh auth token`'s token to
 If the closing `check` fails, the records hold something the tables do not
 cover yet. Then:
 
-1. `make data-report` runs `check --report`, which prints, most frequent
-   first, the description and commit-prose lines that match no disclosure
-   phrase, the short comments by people that match no command, the
-   accounts with the most comments that GitHub does not type as bots, and
-   the base branches. The reports name people, so they are for whoever
-   edits the tables, never for a CI log.
+1. `make data-report` runs `check --report`, which prints the candidate
+   lines behind each trailer or disclosure problem the failure named, the
+   lines an `ignore` entry is copied from; the neighboring description or
+   commit-prose lines that match a disclosure phrase only when joined,
+   which never count, so a real disclosure wrapped across two lines needs a
+   phrase in `tools.yaml` that one of its lines matches alone; and then,
+   most frequent first, the description and commit-prose lines that match
+   no disclosure phrase,
+   the short comments by people that match no command, the accounts with
+   the most comments that GitHub does not type as bots, and the base
+   branches. The reports quote lines and name people, so they are for
+   whoever edits the tables, never for a CI log.
 2. Edit the tables in `data/` until `make data-check` passes.
 3. Commit `data/`.
 
@@ -105,8 +124,15 @@ A refresh trusts GitHub's last-updated time: a pull request updated since
 the last walk is fetched again, and one that is not is kept as cached.
 Whether every kind of change to a pull request (a comment, a review, a push,
 a label, a close) moves that time has not been verified yet. Until it is,
-`cephstats fetch --full`, which walks back to the window start, is the
-fallback.
+the fallback is
+
+```sh
+CEPHSTATS_FULL=true make data-refresh
+```
+
+which runs the whole refresh with `fetch` walking back to the window
+start: `fetch` reads its `--full` flag from `CEPHSTATS_FULL`, and the other
+steps have no such flag.
 
 ## Development
 

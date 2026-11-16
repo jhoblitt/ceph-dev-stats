@@ -34,12 +34,18 @@ const (
 	reviewAuthor    = "review_author"
 )
 
-// eventKinds is meta.json's event_kinds, in the site's order.
-var eventKinds = []string{
-	classify.CommentOther, classify.CommentAuthor, classify.CommandAuthor, classify.CommandOther, classify.BotAccount,
-	reviewApproved, reviewChanges, reviewCommented, botReview, reviewAuthor,
+// lifecycleKinds are the event kinds a record holds. The site knows more,
+// but a comment's or a review's kind in a record's events would be written
+// without the actor those kinds carry.
+var lifecycleKinds = []string{
 	record.KindReady, record.KindDraft, record.KindForcePush, record.KindClosed, record.KindReopened, record.KindMerged,
 }
+
+// eventKinds is meta.json's event_kinds, in the site's order.
+var eventKinds = slices.Concat([]string{
+	classify.CommentOther, classify.CommentAuthor, classify.CommandAuthor, classify.CommandOther, classify.BotAccount,
+	reviewApproved, reviewChanges, reviewCommented, botReview, reviewAuthor,
+}, lifecycleKinds)
 
 var states = map[string]int{record.StateOpen: 0, record.StateMerged: 1, record.StateClosed: 2}
 

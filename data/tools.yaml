@@ -43,6 +43,9 @@ phrases:
   # A Co-authored-by trailer pasted into prose; extract keeps one only when
   # it names a tool.
   - '^co-authored-by:'
+  # The second half of a disclosure wrapped across two lines in pull request
+  # 66817, whose first half, "… generated with assistance from", says no tool.
+  - '^an LLM \(Large Language Model\) and subsequently validated and refined\.$'
 
 # The first family, top to bottom, that matches a counted disclosure is the
 # tool it names. Tools that run another vendor's model come before the

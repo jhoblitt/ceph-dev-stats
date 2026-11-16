@@ -21,11 +21,14 @@ var _ = Describe("check", func() {
 	var (
 		stdout  *bytes.Buffer
 		dataDir string
+		// commitProse is the commit prose writeData gives its record.
+		commitProse []string
 	)
 
 	BeforeEach(func() {
 		stdout = &bytes.Buffer{}
 		dataDir = GinkgoT().TempDir()
+		commitProse = []string{}
 		for _, name := range []string{tables.ToolsFile, tables.BotsFile, tables.CommandsFile, tables.LabelsFile, tables.KindsFile} {
 			b, err := os.ReadFile(filepath.Join("..", "..", "data", name))
 			Expect(err).NotTo(HaveOccurred())
@@ -38,15 +41,24 @@ var _ = Describe("check", func() {
 		return cli.Run(context.Background(), args, &bytes.Buffer{}, stdout, &bytes.Buffer{})
 	}
 
-	writeData := func(ticketType string) {
+	// writeData writes one record carrying trailers, or a trailer that
+	// passes when none are given, beside meta.json and one ticket of
+	// ticketType.
+	writeData := func(ticketType string, trailers ...string) {
 		GinkgoHelper()
+		if len(trailers) == 0 {
+			trailers = []string{"Assisted-by: Claude Code"}
+		}
 		opened := time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC)
 		_, err := record.WriteRecords(dataDir, []record.Record{{
 			Number: 7, Updated: opened, Created: opened, Base: "main", State: record.StateOpen,
-			Author:     record.Actor{Login: "alice"},
-			Labels:     []string{"rgw"},
-			Comments:   []record.Comment{{At: opened, By: "alice", Text: "jenkins test make check"}},
-			Disclosure: record.Disclosure{Trailers: []string{"Assisted-by: Claude Code"}},
+			Author: record.Actor{Login: "alice"},
+			Labels: []string{"rgw"},
+			Comments: []record.Comment{
+				{At: opened, By: "alice", Text: "jenkins test make check"},
+				{At: opened, By: "bob", Text: "LGTM"},
+			},
+			Disclosure: record.Disclosure{Trailers: trailers, CommitProse: commitProse},
 			KindHints:  &record.KindHints{Tickets: []int{90000}},
 		}})
 		Expect(err).NotTo(HaveOccurred())
@@ -91,8 +103,15 @@ var _ = Describe("check", func() {
 	It("lists at most --top entries in each report", func() {
 		writeData("Bug")
 
+		Expect(run("--report", "--top", "1")).To(Succeed())
+		Expect(stdout.String()).To(ContainSubstring("Accounts with the most comments, not typed bots by GitHub: 2\n      1  alice\n    and 1 more\n"))
+	})
+
+	It("lists every entry with --top 0", func() {
+		writeData("Bug")
+
 		Expect(run("--report", "--top", "0")).To(Succeed())
-		Expect(stdout.String()).To(ContainSubstring("Base branches: 1\n"))
+		Expect(stdout.String()).To(ContainSubstring("Accounts with the most comments, not typed bots by GitHub: 2\n      1  alice\n      1  bob\n"))
 		Expect(stdout.String()).NotTo(ContainSubstring("more\n"))
 	})
 
@@ -107,7 +126,53 @@ var _ = Describe("check", func() {
 		writeData("Bug")
 
 		Expect(run("--report")).To(Succeed())
-		Expect(stdout.String()).To(ContainSubstring("Accounts with the most comments, not typed bots by GitHub: 1\n      1  alice\n"))
+		Expect(stdout.String()).To(ContainSubstring("Accounts with the most comments, not typed bots by GitHub: 2\n      1  alice\n      1  bob\n"))
+	})
+
+	DescribeTable("names a candidate's problem, its key and its PR, never its line, without --report",
+		func(trailer, key string) {
+			writeData("Bug", trailer)
+
+			err := run()
+			Expect(err).To(MatchError(And(ContainSubstring(key), ContainSubstring("#7"))))
+			Expect(err.Error()).NotTo(ContainSubstring("Dupont"))
+			Expect(err.Error()).NotTo(ContainSubstring("example.com"))
+			Expect(stdout.String()).To(BeEmpty())
+		},
+		Entry("an unknown trailer key",
+			"Co-developed-by: Claude Dupont <claude.dupont@example.com>", `trailer key "co-developed-by"`),
+		Entry("a trailer with no family",
+			"Assisted-by: Jean Dupont <jean.dupont@example.com>", `trailer key "assisted-by"`),
+	)
+
+	DescribeTable("quotes a candidate's line with --report",
+		func(trailer string) {
+			writeData("Bug", trailer)
+
+			Expect(run("--report")).NotTo(Succeed())
+			Expect(stdout.String()).To(ContainSubstring("      1  " + trailer + "\n"))
+		},
+		Entry("an unknown trailer key", "Co-developed-by: Claude Dupont <claude.dupont@example.com>"),
+		Entry("a trailer with no family", "Assisted-by: Jean Dupont <jean.dupont@example.com>"),
+	)
+
+	Describe("two commits' lines that match a phrase only when joined", func() {
+		BeforeEach(func() {
+			commitProse = []string{"Addressed review comments from Copilot", "Wrote unit tests for the LLM gateway"}
+			writeData("Bug")
+		})
+
+		It("are a hint with --report, and not a problem", func() {
+			Expect(run("--report")).To(Succeed())
+			Expect(stdout.String()).To(ContainSubstring("Neighboring candidates that match a phrase only when joined: 1\n"))
+			Expect(stdout.String()).To(ContainSubstring(
+				"    Addressed review comments from Copilot Wrote unit tests for the LLM gateway (#7)\n"))
+		})
+
+		It("are not mentioned without --report", func() {
+			Expect(run()).To(Succeed())
+			Expect(stdout.String()).To(BeEmpty())
+		})
 	})
 
 	It("prints only its problems on failure without --report", func() {
