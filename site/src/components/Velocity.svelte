@@ -42,7 +42,7 @@
   const backlogTitle = $derived(`Open PRs at the end of each ${step}, by age`);
 </script>
 
-<section id="velocity" aria-labelledby="velocity-heading" class:stale={$data.loading} aria-busy={$data.loading ? 'true' : undefined}>
+<section id="velocity" aria-labelledby="velocity-heading" class:stale={$view.pending} aria-busy={$view.pending && $data.loading ? 'true' : undefined}>
   <h2 id="velocity-heading">Velocity</h2>
 
   <ChartFrame

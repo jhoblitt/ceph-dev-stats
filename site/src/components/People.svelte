@@ -56,7 +56,7 @@
   const hiddenText = (n: number) => (n === 0 ? '' : `, and ${count(n, 'bot account', 'bot accounts')} not shown`);
 </script>
 
-<section id="people" aria-labelledby="people-heading" class:stale={$data.loading} aria-busy={$data.loading ? 'true' : undefined}>
+<section id="people" aria-labelledby="people-heading" class:stale={$view.pending} aria-busy={$view.pending && $data.loading ? 'true' : undefined}>
   <h2 id="people-heading">People</h2>
 
   {#if empty}

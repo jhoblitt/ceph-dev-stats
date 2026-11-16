@@ -209,7 +209,7 @@
   const note = $derived(lanesLine(lanes.length, model.total, rowsName, orderName));
 </script>
 
-<section id="timelines" aria-labelledby="timelines-heading" aria-busy={$data.loading ? 'true' : undefined}>
+<section id="timelines" aria-labelledby="timelines-heading" aria-busy={$view.pending && $data.loading ? 'true' : undefined}>
   <h2 id="timelines-heading">Timelines</h2>
 
   <ChartFrame

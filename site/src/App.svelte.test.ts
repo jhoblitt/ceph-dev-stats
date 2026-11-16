@@ -1,11 +1,11 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen, within } from '@testing-library/svelte';
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/svelte';
 import { get } from 'svelte/store';
 import { beforeAll, describe, expect, it } from 'vitest';
 import App from './App.svelte';
 import rawMeta from './lib/__fixtures__/data/meta.json';
 import { BASE, fixtureFetch, withEarlierYear } from './lib/__fixtures__/fetch';
-import { DataLoader, parseMeta } from './lib/data';
+import { DataLoader, type Fetch, parseMeta } from './lib/data';
 import { type Page, createDataStore, createViewStore, firstYears } from './lib/page';
 import { type HashLocation, createStateStore } from './lib/state';
 
@@ -28,10 +28,10 @@ function memoryLocation(initial: string): HashLocation & { hash: () => string } 
   };
 }
 
-async function page(hash: string, files: Record<string, unknown> = {}, m = meta) {
+async function page(hash: string, files: Record<string, unknown> = {}, m = meta, wrap = (f: Fetch) => f) {
   const loc = memoryLocation(hash);
   const selection = createStateStore(m, loc);
-  const loader = new DataLoader(m, BASE, fixtureFetch(files).fetch);
+  const loader = new DataLoader(m, BASE, wrap(fixtureFetch(files).fetch));
   const years = firstYears(m, get(selection));
   const data = createDataStore(loader, selection, years, await loader.load(years));
   const p: Page = { meta: m, selection, data, view: createViewStore(selection, data), loader };
@@ -54,6 +54,52 @@ describe('App', () => {
     const alert = screen.getByRole('alert');
     expect(alert.textContent).toMatch(/PRs finished in 2025: prs-2025\.json, HTTP 404/);
     for (const name of SECTIONS) expect(screen.getByRole('heading', { level: 2, name })).toBeTruthy();
+  });
+
+  it('shows no figure, only that it is loading, when the report is reached from the methods page before its years land', async () => {
+    const earlier = withEarlierYear();
+    const twoYears = parseMeta(earlier['meta.json']);
+    const held: (() => void)[] = [];
+    const hold = (f: Fetch): Fetch => (url) =>
+      url.includes('-2025') ? new Promise((go) => held.push(() => go(f(url)))) : f(url);
+    const { props } = await page('#/methods?from=2025-03-01', earlier, twoYears, hold);
+    render(App, props);
+    // As following the Statistics link does: the same address, on the report.
+    props.page.selection.update((s) => ({ ...s, route: 'report' }));
+    await waitFor(() => expect(held.length).toBeGreaterThan(0));
+    await waitFor(() => expect(screen.getByRole('heading', { level: 1, name: 'Ceph pull requests' })).toBeTruthy());
+
+    expect(screen.getByText('Loading the data for this period…')).toBeTruthy();
+    expect(document.querySelector('.waiting')?.getAttribute('aria-busy')).toBe('true');
+    expect(screen.queryByText(/no PRs match/)).toBeNull();
+    expect(screen.queryByRole('heading', { level: 2, name: 'Velocity' })).toBeNull();
+
+    for (const go of held.splice(0)) go();
+    await waitFor(() => expect(screen.getByRole('heading', { level: 2, name: 'Velocity' })).toBeTruthy());
+    expect(document.querySelector('.waiting')).toBeNull();
+    const table = within(screen.getByRole('region', { name: /^Pull requests$/ }));
+    expect(table.getByRole('status').textContent).toMatch(/^10 PRs open at some point in the period/);
+  });
+
+  it('keeps the last period that loaded whole when a year an earlier start needs fails, says so, and comes back', async () => {
+    const earlier = withEarlierYear();
+    const twoYears = parseMeta(earlier['meta.json']);
+    render(App, (await page('', { ...earlier, 'events-2025.json': undefined }, twoYears)).props);
+    const status = () => screen.getByText((_, el) => el?.classList.contains('loading') === true);
+    const table = () => within(screen.getByRole('region', { name: /^Pull requests$/ }));
+    const count = table().getByRole('status').textContent;
+
+    await fireEvent.click(screen.getByRole('button', { name: 'All, from 1 Jan 2025' }));
+    await waitFor(() => expect(screen.getByRole('alert').textContent).toMatch(/events-2025\.json, HTTP 404/));
+    expect(status().textContent).toBe(
+      'The data for the period chosen could not be loaded, so everything below is still for 2026-05-15 to 2026-11-15, with the filters then chosen.',
+    );
+    expect(table().getByRole('status').textContent).toBe(count);
+    expect(screen.getByRole('region', { name: 'Velocity' }).classList.contains('stale')).toBe(true);
+
+    await fireEvent.click(screen.getByRole('button', { name: 'Last 6 months' }));
+    await waitFor(() => expect(status().textContent).toBe(''));
+    expect(screen.getByRole('region', { name: 'Velocity' }).classList.contains('stale')).toBe(false);
   });
 
   it('shows one PR only when a PR is selected', async () => {

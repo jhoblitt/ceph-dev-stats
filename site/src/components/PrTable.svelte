@@ -103,8 +103,8 @@
 <section
   id="table"
   aria-labelledby="table-heading"
-  class:stale={$data.loading}
-  aria-busy={$data.loading ? 'true' : undefined}
+  class:stale={$view.pending}
+  aria-busy={$view.pending && $data.loading ? 'true' : undefined}
   {@attach onScreen(() => (shown = true))}>
   <h2 id="table-heading">Pull requests</h2>
 

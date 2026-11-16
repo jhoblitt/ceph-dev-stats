@@ -29,6 +29,15 @@
   const laneOrder = $derived(tableOrder($view.dataset, $view.rows, { filters: $view.filters, week, band }, sort, titles));
   const laneOrderName = $derived(`in the PR table’s order, ${sortWords(sort)}`);
   // The lanes name their rows in the PR table's own words for them.
+  // A period whose years failed to load is never shown over the rest: the
+  // sections keep the last period that loaded whole, and say which.
+  const status = $derived(
+    $data.loading
+      ? 'Loading the data for this period…'
+      : $view.pending
+        ? `The data for the period chosen could not be loaded, so everything below is still for ${$view.filters.from} to ${$view.filters.to}, with the filters then chosen.`
+        : '',
+  );
   const laneRowsName = $derived(
     narrowing($view.dataset, { filters: $view.filters, week, band }) ?? ALL_TABLE_ROWS,
   );
@@ -40,7 +49,11 @@
 
 {#if $data.errors.length > 0}
   <div class="load-errors" role="alert">
-    <p>Some of the data could not be loaded, so everything below leaves these years out:</p>
+    <p>
+      {$view.pending
+        ? 'Some of the data for the period chosen could not be loaded:'
+        : 'Some of the data could not be loaded, so everything below leaves these years out:'}
+    </p>
     <ul>
       {#each $data.errors as e (e.file)}
         <li>{yearHolds(loader.meta, e.year)}: <code>{e.file}</code>, {e.message}</li>
@@ -49,17 +62,22 @@
   </div>
 {/if}
 
-<p class="loading" role="status">{$data.loading ? 'Loading the data for this period…' : ''}</p>
+<p class="loading" role="status">{status}</p>
 
-<Velocity />
-<Review />
-<LlmUse />
-<DotPlot />
-<Lanes order={laneOrder} orderName={laneOrderName} rowsName={laneRowsName} />
-<!-- The chosen PR, what it is and then its timeline, between the views that choose one. -->
-<PrTimeline />
-<PrTable />
-<People />
+{#if $view.first}
+  <!-- Reached from another route while the period's years load: no section has figures to show yet. -->
+  <div class="waiting" aria-busy="true"></div>
+{:else}
+  <Velocity />
+  <Review />
+  <LlmUse />
+  <DotPlot />
+  <Lanes order={laneOrder} orderName={laneOrderName} rowsName={laneRowsName} />
+  <!-- The chosen PR, what it is and then its timeline, between the views that choose one. -->
+  <PrTimeline />
+  <PrTable />
+  <People />
+{/if}
 
 <style>
   .load-errors {
@@ -72,6 +90,10 @@
   .load-errors p,
   .load-errors ul {
     margin: 0;
+  }
+
+  .waiting {
+    min-height: 60vh;
   }
 
   .loading {

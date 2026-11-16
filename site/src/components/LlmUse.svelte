@@ -75,7 +75,7 @@
   const compareTitle = 'Disclosed against not disclosed, PRs opened in the period';
 </script>
 
-<section id="llm" aria-labelledby="llm-heading" class:stale={$data.loading} aria-busy={$data.loading ? 'true' : undefined}>
+<section id="llm" aria-labelledby="llm-heading" class:stale={$view.pending} aria-busy={$view.pending && $data.loading ? 'true' : undefined}>
   <h2 id="llm-heading">LLM use</h2>
 
   <ChartFrame

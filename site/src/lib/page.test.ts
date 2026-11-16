@@ -146,6 +146,170 @@ describe('the methods route', () => {
   });
 });
 
+describe('the view while the years a period needs load', () => {
+  /** The stores over the fixture with 2025 before it, recording every view they hand out. */
+  async function watched(fetch: Fetch, start: AppState = recent) {
+    const loader = new DataLoader(meta, BASE, fetch);
+    const selection = writable(start);
+    const years = yearsForState(meta, start);
+    const data = createDataStore(loader, selection, years, await loader.load(years));
+    const view = createViewStore(selection, data);
+    const seen: { from: string; target: string; years: number[]; size: number; selected: number; pending: boolean }[] = [];
+    view.subscribe((v) =>
+      seen.push({
+        from: v.filters.from,
+        target: v.filters.target,
+        years: v.dataset.years.map((y) => y.year),
+        size: v.dataset.size,
+        selected: v.rows.length,
+        pending: v.pending,
+      }),
+    );
+    return { selection, data, view, seen };
+  }
+
+  it('shows the previous selection until every year the new one needs has landed, then the new one in one step', async () => {
+    const gate = gatedFetch();
+    const first = watched(gate.fetch);
+    gate.release();
+    const { selection, data, seen } = await first;
+
+    selection.set(back);
+    expect(get(data).loading).toBe(true);
+    gate.release();
+    await vi.waitFor(() => expect(get(data).loading).toBe(false));
+
+    expect(seen).toEqual([
+      { from: '2026-05-15', target: 'main', years: [2026], size: 12, selected: seen[0]?.selected, pending: false },
+      { from: '2026-05-15', target: 'main', years: [2026], size: 12, selected: seen[0]?.selected, pending: true },
+      { from: '2025-03-01', target: 'main', years: [2025, 2026], size: 13, selected: seen[2]?.selected, pending: false },
+    ]);
+    // #60010, merged 2025-06-10, is in the new selection and was in no earlier one.
+    expect(seen[2]?.selected).toBe((seen[0]?.selected ?? 0) + 1);
+  });
+
+  it('never computes the new period over fewer years when a year it needs fails, and lets the reader back', async () => {
+    const { fetch } = fixtureFetch({ ...earlier, 'events-2025.json': undefined });
+    const { selection, data, view, seen } = await watched(fetch);
+
+    selection.set(back);
+    await vi.waitFor(() => expect(get(data).loading).toBe(false));
+    expect(get(data).errors.map((e) => e.file)).toEqual(['events-2025.json']);
+    expect(seen.every((s) => s.from === '2026-05-15')).toBe(true);
+    expect(get(view)).toMatchObject({ pending: true, filters: recent.filters });
+
+    selection.set({ ...back, filters: { ...back.filters, target: 'all' } });
+    expect(get(view)).toMatchObject({ pending: true, filters: recent.filters });
+
+    selection.set({ ...recent, filters: { ...recent.filters, target: 'all' } });
+    await vi.waitFor(() => expect(get(view).filters.target).toBe('all'));
+    expect(get(view)).toMatchObject({ pending: false, filters: { from: '2026-05-15', target: 'all' } });
+  });
+
+  it('changes at once, and is never pending, for a filter that needs no new year', async () => {
+    const { fetch, requested } = fixtureFetch(earlier);
+    const { selection, seen } = await watched(fetch);
+    const before = requested.length;
+    selection.set({ ...recent, filters: { ...recent.filters, from: '2026-07-01', target: 'all' } });
+    expect(seen.map((s) => [s.from, s.target, s.pending])).toEqual([
+      ['2026-05-15', 'main', false],
+      ['2026-07-01', 'all', false],
+    ]);
+    expect(requested.length).toBe(before);
+  });
+
+  it('changes at once for a later start, over the years it already has, and keeps its figures when the fewer years land', async () => {
+    const { fetch } = fixtureFetch(earlier);
+    const { selection, data, seen } = await watched(fetch, back);
+    selection.set(recent);
+    // The fewer years are loaded already, so they are taken at once too.
+    expect(get(data).dataset.size).toBe(12);
+    expect(seen.map((s) => [s.from, s.years.join(), s.pending])).toEqual([
+      ['2025-03-01', '2025,2026', false],
+      ['2026-05-15', '2025,2026', false],
+      ['2026-05-15', '2026', false],
+    ]);
+    expect(seen[2]?.selected).toBe(seen[1]?.selected);
+  });
+
+  it('keeps today’s behaviour over a first load with a failed year: what loaded is shown, and a filter needing no new year changes at once', async () => {
+    const { fetch } = fixtureFetch({ ...earlier, 'prs-2025.json': undefined });
+    const { selection, view } = await watched(fetch, back);
+    expect(get(view)).toMatchObject({ pending: false, filters: back.filters });
+    expect(get(view).dataset.years.map((y) => y.year)).toEqual([2026]);
+    selection.set({ ...back, filters: { ...back.filters, target: 'all' } });
+    expect(get(view)).toMatchObject({ pending: false, filters: { target: 'all' } });
+  });
+});
+
+describe('the view when the report is reached from another route', () => {
+  const onMethods: AppState = { ...recent, route: 'methods' };
+
+  /** The stores as main.ts makes them at `start`, recording every view they hand out. */
+  async function from(start: AppState, fetch: Fetch, before?: (loader: DataLoader) => Promise<unknown>) {
+    const loader = new DataLoader(meta, BASE, fetch);
+    await before?.(loader);
+    const selection = writable(start);
+    const years = firstYears(meta, start);
+    const data = createDataStore(loader, selection, years, await loader.load(years));
+    const view = createViewStore(selection, data);
+    const seen: { from: string; years: number[]; selected: number; pending: boolean; first: boolean }[] = [];
+    view.subscribe((v) =>
+      seen.push({
+        from: v.filters.from,
+        years: v.dataset.years.map((y) => y.year),
+        selected: v.rows.length,
+        pending: v.pending,
+        first: v.first,
+      }),
+    );
+    return { selection, data, view, seen, loader };
+  }
+
+  it('is pending, with no figures to show, until the years the report needs land after the methods page', async () => {
+    const gate = gatedFetch();
+    const { selection, data, seen } = await from(onMethods, gate.fetch);
+    expect(seen).toEqual([{ from: '2026-05-15', years: [], selected: 0, pending: true, first: true }]);
+
+    selection.set(back);
+    expect(get(data).loading).toBe(true);
+    gate.release();
+    await vi.waitFor(() => expect(get(data).loading).toBe(false));
+    const shown = seen.findIndex((s) => !s.pending);
+    expect(seen.slice(0, shown).every((s) => s.pending && s.first)).toBe(true);
+    expect(seen.slice(shown)).toEqual([{ from: '2025-03-01', years: [2025, 2026], selected: 10, pending: false, first: false }]);
+  });
+
+  it('takes the report up at once, fetching nothing, over the years the methods page has loaded', async () => {
+    const { fetch, requested } = fixtureFetch(earlier);
+    // The methods page loads the default period's years through the same loader.
+    const { selection, data, seen } = await from(onMethods, fetch, (loader) => loader.load([2026]));
+    const before = requested.length;
+    selection.set(recent);
+    expect(get(data).loading).toBe(false);
+    expect(seen.at(-1)).toEqual({ from: '2026-05-15', years: [2026], selected: 9, pending: false, first: false });
+    expect(seen.slice(1).every((s) => !s.pending)).toBe(true);
+    expect(requested.length).toBe(before);
+  });
+
+  it('keeps the report’s last figures, pending, when the address changes the period on the methods page, until the report’s years land', async () => {
+    const { fetch, requested } = fixtureFetch(earlier);
+    const { selection, data, seen } = await from(recent, fetch);
+    expect(seen.at(-1)).toMatchObject({ from: '2026-05-15', pending: false });
+
+    const before = requested.length;
+    selection.set({ ...back, route: 'methods' });
+    expect(get(data).loading).toBe(false);
+    expect(requested.length).toBe(before);
+    selection.set(back);
+    expect(get(data).loading).toBe(true);
+    await vi.waitFor(() => expect(get(data).loading).toBe(false));
+    const shown = seen.findIndex((s) => s.from === '2025-03-01');
+    expect(seen.slice(1, shown).every((s) => s.pending && s.from === '2026-05-15' && s.years.join() === '2026')).toBe(true);
+    expect(seen.slice(shown)).toEqual([{ from: '2025-03-01', years: [2025, 2026], selected: 10, pending: false, first: false }]);
+  });
+});
+
 describe('createViewStore', () => {
   async function stores() {
     const { fetch } = fixtureFetch(earlier);

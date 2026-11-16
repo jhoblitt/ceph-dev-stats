@@ -33,9 +33,20 @@ export interface Page {
 
 export interface View {
   dataset: Dataset;
+  /** The filters the figures are for: the reader's, or while `pending` the previous ones. */
   filters: Filters;
   /** The rows the filters select from `dataset`, ascending. */
   rows: Uint32Array;
+  /**
+   * The reader's filters need years not loaded yet, or that failed to load,
+   * so the figures are still those of the previous filters.
+   */
+  pending: boolean;
+  /**
+   * No figures have been shown yet: the reader's filters wait for their
+   * years, and `rows` is empty. Always `pending` too.
+   */
+  first: boolean;
 }
 
 export const [getPage, setPage] = createContext<Page>();
@@ -78,6 +89,12 @@ export function createDataStore(
     if (key === shown) return;
     shown = key;
     const ticket = ++latest;
+    // Years another route has loaded through the same loader are taken at once.
+    const have = loader.loaded(wanted);
+    if (have) {
+      inner.set({ ...have, loading: false });
+      return;
+    }
     inner.update((d) => ({ ...d, loading: true }));
     void loader.load(wanted).then((result) => {
       if (ticket === latest) inner.set({ ...result, loading: false });
@@ -86,12 +103,25 @@ export function createDataStore(
   return { subscribe: inner.subscribe, destroy: stop };
 }
 
+const sameYears = (a: readonly number[], b: readonly number[]) => a.length === b.length && a.every((y, i) => y === b[i]);
+const yearsOf = (data: Dataset) => data.years.map((s) => s.year);
+
 /**
  * The selection every section reads. The state store hands out a new filters
  * object on every change of the URL, choosing a PR or a sort included, and a
  * Svelte derivation compares by identity; this one notifies only when the
- * filters' values or the dataset change, so a statistic over the selection is
- * computed again only then.
+ * filters' values, the dataset or `pending` change, so a statistic over the
+ * selection is computed again only then.
+ *
+ * Filters are taken up only over every year their period needs: until those
+ * land, and for good when one fails, the view keeps the previous filters'
+ * figures and says it is pending, so no figure is ever shown for a period
+ * over fewer years than it needs. A year that failed is let off only where
+ * no figures would otherwise be shown, the page's first, and for filters
+ * needing the same years as those shown over the same dataset; the page's
+ * alert then names it. Until the first figures can be shown the view is
+ * pending with nothing to show, as when the report is reached from another
+ * route and its years are still loading.
  */
 export function createViewStore(
   selection: Readable<AppState>,
@@ -100,14 +130,35 @@ export function createViewStore(
   const keep = keepEqual(sameFilters);
   let state = get(selection);
   let dataset = get(data).dataset;
-  const view = (filters: Filters): View => ({ dataset, filters, rows: select(dataset, filters) });
-  let current = view(keep(state.filters));
+  let failed = get(data).errors.map((e) => e.year);
+  const needs = (filters: Filters) => yearsFor(dataset.meta, periodRange(filters).start);
+  const view = (filters: Filters): View => ({
+    dataset,
+    filters,
+    rows: select(dataset, filters),
+    pending: false,
+    first: false,
+  });
+  let current: View = { dataset, filters: keep(state.filters), rows: new Uint32Array(0), pending: true, first: true };
+
+  const ready = (filters: Filters) => {
+    const have = yearsOf(dataset);
+    const missing = needs(filters).filter((y) => !have.includes(y));
+    if (missing.length === 0) return true;
+    if (!missing.every((y) => failed.includes(y))) return false;
+    if (current.first) return true;
+    return sameYears(needs(filters), needs(current.filters)) && sameYears(have, yearsOf(current.dataset));
+  };
+
+  if (ready(current.filters)) current = view(current.filters);
   const inner = writable(current);
 
   const update = () => {
     const filters = keep(state.filters);
-    if (current.filters === filters && current.dataset === dataset) return;
-    current = view(filters);
+    if (!current.pending && current.filters === filters && current.dataset === dataset) return;
+    if (ready(filters)) current = view(filters);
+    else if (!current.pending) current = { ...current, pending: true };
+    else return;
     inner.set(current);
   };
   const stopState = selection.subscribe((s) => {
@@ -116,6 +167,7 @@ export function createViewStore(
   });
   const stopData = data.subscribe((d) => {
     dataset = d.dataset;
+    failed = d.errors.map((e) => e.year);
     update();
   });
   return {

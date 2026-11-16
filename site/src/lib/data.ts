@@ -624,16 +624,31 @@ export class DataLoader {
     this.#fetch = fetchFn;
   }
 
+  /** The years that have loaded, for asking without waiting. */
+  readonly #done = new Map<number, YearData>();
+
   #year(year: number): Promise<YearData> {
     let p = this.#years.get(year);
     if (!p) {
       p = Promise.all([
         fetchJson(this.#fetch, this.#baseUrl, prsFile(year)),
         fetchJson(this.#fetch, this.#baseUrl, eventsFile(year)),
-      ]).then(([prs, events]) => parseYear(year, prs, events, this.meta));
+      ]).then(([prs, events]) => {
+        const y = parseYear(year, prs, events, this.meta);
+        this.#done.set(year, y);
+        return y;
+      });
       this.#years.set(year, p);
     }
     return p;
+  }
+
+  /** The years asked for as one dataset, now, when every one has already loaded; else null. */
+  loaded(years: readonly number[]): LoadResult | null {
+    const wanted = [...new Set(years)].sort((a, b) => a - b);
+    const have = wanted.map((y) => this.#done.get(y));
+    if (have.some((y) => y === undefined)) return null;
+    return { dataset: combine(this.meta, have as YearData[]), errors: [] };
   }
 
   /** The years asked for, in ascending order, as one dataset; never rejects. */

@@ -160,7 +160,7 @@
   const title = 'Days to merge or close, each PR opened in the period';
 </script>
 
-<section id="dots" aria-labelledby="dots-heading" class:stale={$data.loading} aria-busy={$data.loading ? 'true' : undefined}>
+<section id="dots" aria-labelledby="dots-heading" class:stale={$view.pending} aria-busy={$view.pending && $data.loading ? 'true' : undefined}>
   <h2 id="dots-heading">Each PR</h2>
 
   <ChartFrame
