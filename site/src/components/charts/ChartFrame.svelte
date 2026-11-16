@@ -30,6 +30,10 @@
 
   let { title, summary, empty, nothing = null, note, legend, table, figures, children }: Props = $props();
   const uid = $props.id();
+  // A single series needs no key; a mark such as a partial bucket's always does.
+  const keyed = $derived(
+    legend !== undefined && (legend.length > 1 || legend.some((i) => i.mark !== 'bar' && i.mark !== 'line' && i.mark !== 'area')),
+  );
 </script>
 
 <figure class="chart" aria-labelledby="{uid}-title" aria-describedby="{uid}-summary">
@@ -41,7 +45,7 @@
     <p id="{uid}-summary" class="empty">{nothing}</p>
   {:else}
     <p id="{uid}-summary" class="visually-hidden">{summary}</p>
-    {#if legend && legend.length > 1}
+    {#if legend && keyed}
       <Legend items={legend} />
     {/if}
     {@render children?.()}

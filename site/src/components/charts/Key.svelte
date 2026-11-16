@@ -2,7 +2,8 @@
   A series' key, drawn as its mark is: a rounded square for a bar, a wash
   with its edge for an area, a short line with its marker for a line, a
   hollow marker for a value not reached, and a faded square for a partial
-  bucket.
+  bucket's bars, or, given a shape, a line stopping short of a lone hollow
+  marker for a partial bucket's line value.
 -->
 <script lang="ts">
   import type { Readout } from '../../lib/charts';
@@ -21,6 +22,9 @@
 <svg class="key" width="20" height="12" viewBox="0 0 20 12" aria-hidden="true">
   {#if mark === 'bar'}
     <rect x="4" y="0" width="12" height="12" rx="3" style:fill={color} />
+  {:else if mark === 'partial' && shape}
+    <line x1="0" x2="6" y1="6" y2="6" class="stroke" style:stroke={color} />
+    <path d={markerPath(shape, 40)} transform="translate(14 6)" class="hollow" style:stroke={color} />
   {:else if mark === 'partial'}
     <rect x="4" y="0" width="12" height="12" rx="3" class="faded" style:fill={color} />
   {:else if mark === 'area'}

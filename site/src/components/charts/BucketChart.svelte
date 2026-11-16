@@ -87,6 +87,8 @@
 
   let measured = $state(0);
   const width = $derived(measured > 0 ? measured : 640);
+  // Below this width the plot keeps no margin for end labels, and a panel says its shorter unit.
+  const NARROW = 480;
 
   const LEFT = 44;
   const TOP = 8;
@@ -97,9 +99,9 @@
   const n = $derived(model.buckets.length);
   const isPartial = (i: number) => model.partial?.[i] != null;
 
-  const specs = $derived(
-    panels ?? [{ keys: [...model.bars.map((b) => b.key), ...model.lines.map((l) => l.key)], unit }],
-  );
+  // A line marked undrawn is in the readout and the table only.
+  const shownLines = $derived(model.lines.filter((l) => !l.undrawn));
+  const specs = $derived(panels ?? [{ keys: [...model.bars.map((b) => b.key), ...shownLines.map((l) => l.key)], unit }]);
 
   /** The largest value a panel draws: its stacks' totals and its lines' values. */
   function largest(bars: readonly BarSeries[], lines: readonly LineSeries[]): number {
@@ -113,9 +115,16 @@
   const layout = $derived.by(() => {
     const parts = specs.map((p) => {
       const bars = model.bars.filter((b) => p.keys.includes(b.key));
-      const lines = model.lines.filter((l) => p.keys.includes(l.key));
+      const lines = shownLines.filter((l) => p.keys.includes(l.key));
       const strip = lines.some((l) => l.unreached?.some(Boolean));
-      return { unit: p.unit, bars, lines, strip, reserve: (p.unit ? UNIT : 0) + (strip ? STRIP : 0) };
+      return {
+        unit: width < NARROW && p.narrowUnit !== undefined ? p.narrowUnit : p.unit,
+        minTicks: p.minTicks,
+        bars,
+        lines,
+        strip,
+        reserve: (p.unit ? UNIT : 0) + (strip ? STRIP : 0),
+      };
     });
     const shared = Math.max(...parts.map((p) => largest(p.bars, p.lines)));
     const each = (base - TOP - parts.reduce((t, p) => t + p.reserve, 0) - GAP * (parts.length - 1)) / parts.length;
@@ -137,12 +146,19 @@
           14,
         );
       } else {
-        const s = scaleLinear().domain([0, Math.max(1, max)]).nice().range([bottom, top]);
+        // A panel asking for more ticks also ends its scale on one, so its top value can be read.
+        const want = p.minTicks ?? 0;
+        let count = Math.max(bottom - top < 100 ? 2 : 4, want);
+        const domain = scaleLinear().domain([0, Math.max(1, max)]);
+        const s = (want > 0 ? domain.nice(count) : domain.nice()).range([bottom, top]);
+        const values = () => s.ticks(count).filter((t) => !integer || Number.isInteger(t));
+        let shown = values();
+        while (shown.length < want && count < 12) {
+          count++;
+          shown = values();
+        }
         y = s;
-        ticks = s
-          .ticks(bottom - top < 100 ? 2 : 4)
-          .filter((t) => !integer || Number.isInteger(t))
-          .map((t) => ({ at: s(t), label: t.toLocaleString('en-US', { maximumFractionDigits: 1 }) }));
+        ticks = shown.map((t) => ({ at: s(t), label: t.toLocaleString('en-US', { maximumFractionDigits: 1 }) }));
       }
       return { ...p, top, bottom, y, ticks };
     });
@@ -162,7 +178,11 @@
       }),
     ),
   );
-  const named = $derived(width >= 480 ? endLabels(ends, 14) : []);
+  // A line alone in a panel with a unit title, and no bars, is named by that title.
+  const lone = $derived(
+    new Set(layout.flatMap((p) => (p.unit && p.bars.length === 0 && p.lines.length === 1 ? [p.lines[0]?.key] : []))),
+  );
+  const named = $derived(width >= NARROW ? endLabels(ends.filter((e) => !lone.has(e.key)), 14) : []);
   const right = $derived(named.length > 0 ? 120 : 8);
 
   const x = $derived(

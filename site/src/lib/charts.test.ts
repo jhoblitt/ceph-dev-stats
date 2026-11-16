@@ -112,6 +112,30 @@ describe('coverage', () => {
     expect(describeCounts(marked)).toMatch(/ Partial: week of 2026-05-11, partial: 4 of 7 days\.$/);
     expect(bucketLegend(marked).at(-1)).toEqual({ label: 'partial week', mark: 'partial', color: 'var(--text-faint)' });
   });
+
+  it('keys a partial bucket of a chart with no bars as its lone hollow marker, after the first line drawn', () => {
+    const lines = {
+      ...counts,
+      bars: [],
+      lines: [
+        { key: 'n', label: 'n', color: 'var(--text-muted)', shape: 'circle' as const, values: [1, 2, 3], undrawn: true },
+        { key: 'r', label: 'r', color: 'var(--text-muted)', shape: 'square' as const, values: [1, 2, 3] },
+      ],
+      partial: [{ days: 4, of: 7 }, null, null],
+    };
+    expect(bucketLegend(lines).at(-1)).toEqual({
+      label: 'partial week',
+      mark: 'partial',
+      color: 'var(--text-muted)',
+      shape: 'square',
+    });
+  });
+
+  it('adds the model\'s note to a partial bucket\'s name, and only to a partial one', () => {
+    const marked = { ...counts, partial: [{ days: 4, of: 7 }, null, null], partialNote: 'both counts are partial' };
+    expect(bucketHead(marked, 0)).toBe('week of 2026-05-11, partial: 4 of 7 days; both counts are partial');
+    expect(bucketHead(marked, 1)).toBe('week of 2026-05-18');
+  });
 });
 
 describe('bucket models', () => {

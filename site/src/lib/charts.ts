@@ -33,6 +33,8 @@ export interface LineSeries {
   missing?: readonly (string | null)[];
   /** The buckets where the value can no longer be reached, marked above the plot. */
   unreached?: readonly boolean[];
+  /** Carried for the readout and the table only: never drawn, so it has no key and no legend entry. */
+  undrawn?: boolean;
 }
 
 /** How much of a bucket the data covers, in whole days of the bucket's days. */
@@ -58,12 +60,18 @@ export interface BucketModel {
   shadeLabel?: string;
   /** The buckets the period or the fetch cuts short; null for a whole one. */
   partial?: readonly (Coverage | null)[];
+  /** What else a partial bucket's name says, e.g. that its ratios divide partial counts. */
+  partialNote?: string;
 }
 
 /** One panel of a bucket chart: the series it draws, by key, and what its value axis measures. */
 export interface Panel {
   keys: readonly string[];
   unit?: string | undefined;
+  /** Said in place of `unit` where the chart is too narrow for it. */
+  narrowUnit?: string;
+  /** The least number of labelled value ticks, so a compact panel's values can be read off its axis. */
+  minTicks?: number;
 }
 
 export interface AreaLayer {
@@ -162,7 +170,8 @@ export function partialText(c: Coverage): string {
 export function bucketHead(model: BucketModel, i: number): string {
   const c = model.partial?.[i];
   const name = bucketName(model.buckets[i] as number, model.step);
-  return c ? `${name}, ${partialText(c)}` : name;
+  if (!c) return name;
+  return `${name}, ${partialText(c)}${model.partialNote ? `; ${model.partialNote}` : ''}`;
 }
 
 /** The first index of the largest value; ties go to the earliest bucket. */
@@ -198,7 +207,7 @@ function missingText(model: BucketModel, l: LineSeries, i: number): string {
 export function bucketLegend(model: BucketModel): LegendItem[] {
   const items: LegendItem[] = [
     ...model.bars.map((b): LegendItem => ({ label: b.label, mark: 'bar', color: b.color })),
-    ...model.lines.map((l): LegendItem => {
+    ...model.lines.filter((l) => !l.undrawn).map((l): LegendItem => {
       const item: LegendItem = { label: l.label, mark: 'line', color: l.color, shape: l.shape };
       if (l.dashed) item.dashed = true;
       return item;
@@ -211,7 +220,13 @@ export function bucketLegend(model: BucketModel): LegendItem[] {
     items.push({ label: 'not reached', mark: 'unreached', color: COLOURS.statistic });
   }
   if (model.partial?.some((c) => c !== null)) {
-    items.push({ label: `partial ${model.step}`, mark: 'partial', color: COLOURS.partial });
+    // With no bars, a partial bucket shows only as a lone hollow marker: its key is drawn so, after the first line's.
+    const line = model.lines.find((l) => !l.undrawn);
+    items.push(
+      model.bars.length === 0 && line
+        ? { label: `partial ${model.step}`, mark: 'partial', color: line.color, shape: line.shape }
+        : { label: `partial ${model.step}`, mark: 'partial', color: COLOURS.partial },
+    );
   }
   return items;
 }
@@ -256,7 +271,7 @@ export function bucketReadout(model: BucketModel, i: number, format: (v: number)
     const row: Readout = {
       label: l.label,
       value: v === null || v === undefined ? missingText(model, l, i) : format(v),
-      color: l.color,
+      color: l.undrawn ? null : l.color,
       mark: 'line',
       shape: l.shape,
     };
