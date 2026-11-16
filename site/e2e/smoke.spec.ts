@@ -384,15 +384,135 @@ test('no two labels of a time axis touch, from a phone to a wide screen', async 
   for (const width of [320, 1280, 1600]) {
     await page.setViewportSize({ width, height: 900 });
     await open(page);
-    // Each axis's labels as drawn: the smallest space between neighbours.
-    const gaps = await page.locator('svg:has(.axis-x text)').evaluateAll((svgs) =>
-      svgs.map((svg) => {
-        const boxes = [...svg.querySelectorAll<SVGTextElement>('.axis-x text')].map((t) => t.getBBox());
-        return Math.min(Infinity, ...boxes.slice(1).map((b, i) => b.x - ((boxes[i] as DOMRect).x + (boxes[i] as DOMRect).width)));
-      }),
-    );
+    const gaps = await labelGaps(page.locator('body'));
     expect(gaps.length, `${width}px`).toBeGreaterThan(0);
     expect(Math.min(...gaps), `${width}px`).toBeGreaterThanOrEqual(6);
+  }
+});
+
+/** The Timelines' lanes, one PR per row. */
+function lanesChart(page: Page): Locator {
+  return page.getByRole('figure', { name: 'Each PR’s timeline, one per row', exact: true });
+}
+
+/** The smallest space between neighbouring labels of each time axis in `scope`, as drawn. */
+async function labelGaps(scope: Locator): Promise<number[]> {
+  return scope.locator('svg:has(.axis-x text)').evaluateAll((svgs) =>
+    svgs.map((svg) => {
+      const boxes = [...svg.querySelectorAll<SVGTextElement>('.axis-x text')].map((t) => t.getBBox());
+      return Math.min(Infinity, ...boxes.slice(1).map((b, i) => b.x - ((boxes[i] as DOMRect).x + (boxes[i] as DOMRect).width)));
+    }),
+  );
+}
+
+test('on the whole history the Timelines’ calendar covers only the stretch its PRs take up, and says so', async ({ page }) => {
+  await open(page);
+  const to = await page.getByRole('group', { name: 'Period' }).getByLabel('To').inputValue();
+  const last = Date.parse(`${to}T00:00:00Z`);
+  const figure = lanesChart(page);
+  await figure.scrollIntoViewIfNeeded();
+  // Every label naming a day or a month names one in the half-year before the period's last day, not 2011.
+  const dated = (await figure.locator('.axis-x text').allTextContents()).filter((l) => /[A-Z][a-z]{2}/.test(l));
+  expect(dated.length).toBeGreaterThan(0);
+  for (const label of dated) {
+    const words = label.replace(/ \d\d:\d\d$/, '').split(' ');
+    const year = words.find((w) => /^\d{4}$/.test(w)) ?? to.slice(0, 4);
+    const day = /^\d{1,2}$/.test(words[0]!) ? words[0]! : '1';
+    const month = words.find((w) => /^[A-Z][a-z]{2}$/.test(w))!;
+    let t = Date.parse(`${day} ${month} ${year} 00:00 UTC`);
+    // A label without its year, after the year changed, is of the year before the last day's.
+    if (!/\d{4}/.test(label) && t > last + 86_400_000) t = Date.parse(`${day} ${month} ${Number(year) - 1} 00:00 UTC`);
+    expect(t, label).toBeGreaterThan(last - 183 * 86_400_000);
+    expect(t, label).toBeLessThanOrEqual(last + 86_400_000);
+  }
+  await expect(
+    figure.getByText(/^The calendar runs over the part of the period these PRs take up, \d{1,2} [A-Z][a-z]{2} \d{4}( to \d{1,2} [A-Z][a-z]{2} \d{4})?\.$/),
+  ).toBeVisible();
+});
+
+test('on a one-day period the Timelines draw that day alone, marking lives that go on past it; since opening, whole lives', async ({
+  page,
+}) => {
+  for (const width of [1280, 390]) {
+    await page.setViewportSize({ width, height: 900 });
+    await open(page, '#/?from=2024-03-12&to=2024-03-12');
+    const figure = lanesChart(page);
+    await figure.scrollIntoViewIfNeeded();
+    // The time axis is the section's own state, kept from the width before.
+    await figure.getByRole('radio', { name: 'Calendar' }).check();
+    const labels = figure.locator('.axis-x text');
+    await expect(labels.first(), `${width}px`).toHaveText('12 Mar 2024');
+    // The day's first moment names it; every other label is an hour of it.
+    const hours = (await labels.allTextContents()).slice(1);
+    expect(hours.length, `${width}px`).toBeGreaterThan(0);
+    expect(hours.filter((h) => !/^\d\d:\d\d$/.test(h)), `${width}px`).toEqual([]);
+    expect(Math.min(...(await labelGaps(figure))), `${width}px`).toBeGreaterThanOrEqual(6);
+    // The lanes' links, each described by what is drawn of it once the list is open.
+    const list = figure.locator('details');
+    if ((await list.getAttribute('open')) === null) await list.locator('summary').click();
+    await expect(figure.locator('ol a').first()).toHaveAccessibleDescription(/^As the calendar shows it: /);
+
+    // Read off the canvas: where anything is drawn, and which lanes have
+    // ink where a "goes on before" chevron's upper arm is, beside the left
+    // edge and above the line.
+    const drawn = await figure.evaluate((fig) => {
+      const canvas = fig.querySelector('canvas') as HTMLCanvasElement;
+      const plot = (fig.querySelector('svg.axis') as SVGSVGElement).getBoundingClientRect();
+      const box = canvas.getBoundingClientRect();
+      const k = canvas.width / box.width;
+      const { data } = (canvas.getContext('2d') as CanvasRenderingContext2D).getImageData(0, 0, canvas.width, canvas.height);
+      const inked = (x: number, y: number) => (data[(y * canvas.width + x) * 4 + 3] as number) > 0;
+      let first = Infinity;
+      let last = -Infinity;
+      for (let x = 0; x < canvas.width; x++) {
+        for (let y = 0; y < canvas.height; y++) {
+          if (!inked(x, y)) continue;
+          first = Math.min(first, x);
+          last = Math.max(last, x + 1);
+          break;
+        }
+      }
+      const links = [...fig.querySelectorAll('ol a')];
+      const n = links.length;
+      const pitch = (box.height - 8) / n;
+      const r = Math.max(1.5, Math.min(3.5, pitch / 2 - 0.5));
+      const before = links.map((a, i) => {
+        const said = document.getElementById(a.getAttribute('aria-describedby') ?? '')?.textContent ?? '';
+        const y = 4 + i * pitch + pitch / 2;
+        let ink = false;
+        for (let x = Math.ceil((plot.left - box.left + 2) * k); x < (plot.left - box.left + 2 + r) * k; x++) {
+          for (let yy = Math.floor((y - r - 0.5) * k); yy < (y - 1.2) * k; yy++) ink ||= inked(x, yy);
+        }
+        return { said: said.includes('its life goes on earlier than shown'), ink };
+      });
+      return {
+        plot: { left: plot.left, right: plot.right },
+        ink: { left: box.left + first / k, right: box.left + last / k },
+        before,
+        after: links.filter((a) => document.getElementById(a.getAttribute('aria-describedby') ?? '')?.textContent?.includes('its life goes on later than shown')).length,
+      };
+    });
+    // Nothing of a lane is drawn outside the plot's edges.
+    expect(drawn.ink.left, `${width}px`).toBeGreaterThanOrEqual(drawn.plot.left - 0.5);
+    expect(drawn.ink.right, `${width}px`).toBeLessThanOrEqual(drawn.plot.right + 0.5);
+    // Lives go on past the day, and every lane said to go on before it has its chevron drawn.
+    expect(drawn.before.filter((b) => b.said).length, `${width}px`).toBeGreaterThan(0);
+    expect(drawn.after, `${width}px`).toBeGreaterThan(0);
+    expect(drawn.before.filter((b) => b.said && !b.ink), `${width}px`).toEqual([]);
+    await expect(figure.getByRole('list', { name: 'Legend' }).getByText('its life goes on earlier than shown')).toBeVisible();
+
+    // The PRs open that day span it, so the calendar is the day and says nothing more of what it covers.
+    await expect(figure.getByText(/^The calendar runs over/)).toHaveCount(0);
+
+    // Since opening, the same lanes are whole lives, and nothing says the period cuts them.
+    await figure.getByRole('radio', { name: 'Days since opening' }).check();
+    await expect(labels.first()).toHaveText('1 hour');
+    await expect(figure).toHaveAccessibleDescription(/^The whole timelines of /);
+    const lives = await figure
+      .locator('ol a')
+      .evaluateAll((links) => links.map((a) => document.getElementById(a.getAttribute('aria-describedby') ?? '')?.textContent ?? ''));
+    expect(lives.length).toBeGreaterThan(0);
+    expect(lives.filter((l) => !l.startsWith('Its whole life, from its opening: opened ') || l.includes('period'))).toEqual([]);
   }
 });
 
@@ -429,6 +549,9 @@ test('every chart over the period has the same plot edges, down the whole page',
       );
       drawn.forEach((e, k) => edges.push({ chart: `${name.source} #${k}`, left: Math.round(e.left), right: Math.round(e.right) }));
     }
+    // The Timelines on the calendar, whose axis is the period: their plot's edges are their time axis's.
+    const lanes = await lanesChart(page).locator('svg.axis').evaluate((svg) => svg.getBoundingClientRect());
+    edges.push({ chart: 'Timelines', left: Math.round(lanes.left), right: Math.round(lanes.right) });
     const first = edges[0]!;
     for (const e of edges) expect(e, `${width}px`).toEqual({ ...first, chart: e.chart });
   }

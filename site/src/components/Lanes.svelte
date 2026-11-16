@@ -1,9 +1,11 @@
 <!--
   The lanes: up to 200 PRs of the selection, one per row, each its timeline's
-  line, against the calendar or the time since it opened. Drawn on a canvas,
-  which neither a screen reader nor a keyboard can enter, so a text
-  alternative says what it shows and every lane is also a link in the list
-  under it. Hovering a lane names its PR; choosing one opens its timeline.
+  line, against the calendar, cut to the stretch of the period they take up,
+  or the time since it opened, whole. Drawn on a canvas, which neither a
+  screen reader nor a keyboard can enter, so a text alternative says what it
+  shows and every lane is also a link in the list under it, described by what
+  is drawn of it. Hovering a lane names its PR; choosing one opens its
+  timeline.
 -->
 <script lang="ts">
   import { TIMELINE_COLOURS as C } from '../lib/colours';
@@ -12,15 +14,21 @@
   import {
     type Lane,
     type LaneMode,
+    type LaneView,
     byOpening,
+    calendarSpan,
+    describeLane,
     describeLanes,
     laneAt,
     laneModel,
     lanePitch,
     laneScale,
+    laneView,
     lanesLine,
+    spanNote,
   } from '../lib/lanes';
   import { getPage, sectionsBusy, sectionsStale } from '../lib/page';
+  import { PLOT_LEFT as LEFT, PLOT_RIGHT as RIGHT } from '../lib/plot';
   import { hashFromState } from '../lib/state';
   import { formatDate } from '../lib/timeline-axis';
   import ChartFrame from './charts/ChartFrame.svelte';
@@ -60,15 +68,16 @@
 
   let mode = $state<LaneMode>('calendar');
   let measured = $state(0);
-  const PAD = 8;
   const TOP = 4;
   const width = $derived(measured > 0 ? measured : 960);
-  const plotWidth = $derived(Math.max(100, width - 2 * PAD));
+  // The plot's edges are those of every chart over the period.
+  const plotWidth = $derived(Math.max(100, width - LEFT - RIGHT));
   const pitch = $derived(lanePitch(lanes.length));
   const height = $derived(TOP + lanes.length * pitch + 4);
-  const scale = $derived(
-    laneScale(mode, lanes, plotWidth, { start: period.start, end: Math.min(period.end, meta.fetched_through) }),
-  );
+  // The calendar never goes outside the period, and within it shows only the stretch the lanes take up.
+  const span = $derived(calendarSpan(lanes, period, plotWidth));
+  const scale = $derived(laneScale(mode, lanes, plotWidth, span));
+  const views = $derived(lanes.map((l) => laneView(mode, l, span)));
   const selectedLane = $derived(lanes.findIndex((l) => l.number === $selection.pr));
 
   let canvas = $state<HTMLCanvasElement | null>(null);
@@ -115,16 +124,24 @@
     const colour = (c: string) => palette.get(c) ?? c;
     const at = (lane: Lane, t: number) => {
       const x = scale.x(lane, t);
-      return x === null ? null : PAD + x;
+      return x === null ? null : LEFT + x;
     };
     ctx.clearRect(0, 0, width, height);
     ctx.lineWidth = 1;
     ctx.strokeStyle = colour('var(--grid)');
     for (const t of scale.ticks) {
       ctx.beginPath();
-      ctx.moveTo(Math.round(PAD + t.at) + 0.5, 0);
-      ctx.lineTo(Math.round(PAD + t.at) + 0.5, height);
+      ctx.moveTo(Math.round(LEFT + t.at) + 0.5, 0);
+      ctx.lineTo(Math.round(LEFT + t.at) + 0.5, height);
       ctx.stroke();
+    }
+    // On the calendar nothing is drawn past its edges, not even a mark inside
+    // them whose width would reach over one.
+    ctx.save();
+    if (mode === 'calendar') {
+      ctx.beginPath();
+      ctx.rect(LEFT, 0, plotWidth, height);
+      ctx.clip();
     }
     const line = (x0: number | null, x1: number | null, y: number, w: number, c: string, dash: number[] = []) => {
       if (x0 === null || x1 === null) return;
@@ -139,27 +156,36 @@
     };
     const thick = pitch >= 9 ? 2 : 1.5;
     lanes.forEach((lane, i) => {
+      const view = views[i];
+      if (view === undefined) return;
       const y = TOP + i * pitch + pitch / 2;
-      if (lane.firstCommit !== null) line(at(lane, lane.firstCommit), at(lane, lane.created), y, 1, colour(C.quiet));
-      let from = lane.created;
-      for (const c of lane.closed) {
-        line(at(lane, from), at(lane, c.from), y, thick, colour(C.author));
-        line(at(lane, c.from), at(lane, c.to), y, thick, colour(C.closed), [2, 2]);
-        from = c.to;
-      }
-      line(at(lane, from), at(lane, lane.end), y, thick, colour(C.author));
       const half = pitch / 2 - 0.5;
+      const r = Math.max(1.5, Math.min(3.5, half));
+      if (view.beforeOpening !== null) line(at(lane, view.beforeOpening.from), at(lane, view.beforeOpening.to), y, 1, colour(C.quiet));
+      for (const s of view.open) line(at(lane, s.from), at(lane, s.to), y, thick, colour(C.author));
+      for (const s of view.closed) line(at(lane, s.from), at(lane, s.to), y, thick, colour(C.closed), [2, 2]);
+      // A chevron at an edge, pointing out of the calendar, where the life goes on past what it shows.
+      const edge = (x: number, out: -1 | 1) => {
+        ctx.lineWidth = 1.5;
+        ctx.strokeStyle = colour(C.lifecycle);
+        ctx.beginPath();
+        ctx.moveTo(x - out * r, y - r);
+        ctx.lineTo(x, y);
+        ctx.lineTo(x - out * r, y + r);
+        ctx.stroke();
+      };
+      if (view.before) edge(LEFT + 1.5, -1);
+      if (view.after) edge(LEFT + plotWidth - 1.5, 1);
       const stroke = (t: number, h: number, w: number, c: string) => {
         const x = at(lane, t);
         if (x === null) return;
         ctx.fillStyle = c;
         ctx.fillRect(x - w / 2, y - h, w, 2 * h);
       };
-      for (const t of lane.activity) stroke(t, half * 0.6, 1, colour(C.quiet));
-      for (const t of lane.approvals) stroke(t, half, 1.5, colour(C.lifecycle));
-      const x = at(lane, lane.end);
+      for (const t of view.activity) stroke(t, half * 0.6, 1, colour(C.quiet));
+      for (const t of view.approvals) stroke(t, half, 1.5, colour(C.lifecycle));
+      const x = view.ending === null ? null : at(lane, view.ending);
       if (x === null) return;
-      const r = Math.max(1.5, Math.min(3.5, half));
       if (lane.state === 'merged') {
         ctx.fillStyle = colour(C.merged);
         ctx.beginPath();
@@ -178,6 +204,7 @@
         ctx.fill();
       }
     });
+    ctx.restore();
   }
 
   $effect(() => {
@@ -214,7 +241,10 @@
 
   const ENDED = { merged: 'merged', closed: 'closed unmerged', open: 'still open' } as const;
   const hrefFor = (number: number) => hashFromState({ ...$selection, pr: number }, meta);
-  const summary = $derived(describeLanes(lanes, model.total, orderName));
+  const summary = $derived(describeLanes(lanes, views, model.total, orderName, mode, span));
+  const covers = $derived(spanNote(span, period));
+  const uid = $props.id();
+  let listed = $state(false);
   const note = $derived(lanesLine(lanes.length, model.total, rowsName, orderName, newest));
 </script>
 
@@ -247,21 +277,46 @@
       <li><svg width="12" height="12" aria-hidden="true"><circle cx="6" cy="6" r="3.5" style:fill={C.merged} /></svg>merged</li>
       <li><svg width="12" height="12" aria-hidden="true"><rect x="5" y="1" width="2" height="10" style:fill={C.closed} /></svg>closed unmerged</li>
       <li><svg width="12" height="12" aria-hidden="true"><path d="M2.5,2.5L9.5,6L2.5,9.5Z" style:fill={C.open} /></svg>still open</li>
+      {#if mode === 'calendar'}
+        <li>
+          <svg width="20" height="12" aria-hidden="true"
+            ><line x1="3" x2="19" y1="6" y2="6" stroke-width="2" style:stroke={C.author} /><path
+              d="M5.5,2.5L2,6L5.5,9.5"
+              fill="none"
+              stroke-width="1.5"
+              style:stroke={C.lifecycle}
+            /></svg
+          >its life goes on earlier than shown
+        </li>
+        <li>
+          <svg width="20" height="12" aria-hidden="true"
+            ><line x1="1" x2="17" y1="6" y2="6" stroke-width="2" style:stroke={C.author} /><path
+              d="M14.5,2.5L18,6L14.5,9.5"
+              fill="none"
+              stroke-width="1.5"
+              style:stroke={C.lifecycle}
+            /></svg
+          >its life goes on later than shown
+        </li>
+      {/if}
     </ul>
-    {#if mode === 'sinceOpening'}
-      <p class="mode-note">Each row starts when its PR opened, on a log scale from an hour; what came before the opening is not drawn.</p>
+    {#if mode === 'calendar' && covers !== null}
+      <p class="mode-note">{covers}</p>
+    {:else if mode === 'sinceOpening'}
+      <p class="mode-note">
+        Each row starts when its PR opened, on a log scale from an hour, and runs to its end, whatever the period; what came before the
+        opening is not drawn.
+      </p>
     {/if}
 
     <div class="plot" {@attach measureWidth((w) => (measured = w))}>
-      <svg class="axis" width={width} height="20" aria-hidden="true">
-        {#each scale.ticks as t (t.at)}
-          <!-- A label at either edge is set inside it, not cut by it. -->
-          <text
-            x={PAD + t.at}
-            y="14"
-            text-anchor={t.at < 32 ? 'start' : t.at > plotWidth - 32 ? 'end' : 'middle'}>{t.label}</text
-          >
-        {/each}
+      <!-- As wide as the plot, from its left edge; a label at either edge is set inside it. -->
+      <svg class="axis" style:margin-left="{LEFT}px" width={plotWidth} height="20" aria-hidden="true">
+        <g class="axis-x">
+          {#each scale.ticks as t (t.at)}
+            <text x={t.at} y="14" text-anchor={t.anchor}>{t.label}</text>
+          {/each}
+        </g>
       </svg>
       <div
         class="lanes"
@@ -298,19 +353,22 @@
       </div>
     </div>
 
-    <details class="numbers">
+    <details class="numbers" bind:open={listed}>
       <summary>The {formatCount(lanes.length)} PRs in the lanes, as links, in their order</summary>
       <ol aria-label="The PRs in the lanes, in their order">
-        {#each lanes as lane (lane.row)}
+        {#each lanes as lane, i (lane.row)}
           <li>
             <a
               href={hrefFor(lane.number)}
               aria-current={lane.number === $selection.pr ? 'true' : undefined}
+              aria-describedby={listed ? `${uid}-lane-${lane.row}` : undefined}
               onclick={(e) => {
                 e.preventDefault();
                 choose(lane.number);
               }}>#{lane.number}</a
             >
+            <!-- Written only while the list is open, the only time a reader can reach it, so a redraw does not pay for 200 of them. -->
+            {#if listed}<span id="{uid}-lane-{lane.row}" class="visually-hidden">{describeLane(lane, views[i] as LaneView, mode)}</span>{/if}
           </li>
         {/each}
       </ol>
