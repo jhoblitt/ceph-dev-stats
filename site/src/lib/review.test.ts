@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { periodRange } from './filters';
+import { type BackportLink, type Target, periodRange } from './filters';
 import {
   capacityLegend,
   capacityModel,
@@ -19,6 +19,7 @@ import {
   reviewsRecordedNote,
   REVIEWS_RECORDED_FROM,
   BUSIEST_COMMANDS,
+  onlyBackports,
   spanNote,
   spanTitle,
   waitingSeries,
@@ -377,21 +378,40 @@ describe('reviewsRecordedNote', () => {
 });
 
 describe('spanTitle and spanNote', () => {
-  it('calls the first span the original work to the backport when only backports are selected', () => {
-    expect(spanTitle('firstCommitToOpened', 'main')).toBe('First commit to opened');
-    expect(spanTitle('firstCommitToOpened', 'backports')).toBe('Original work to backport opened');
-    expect(spanTitle('openedToLastCommit', 'backports')).toBe('Opened to last commit');
-    expect(spanTitle('afterLastCommit', 'main')).toBe('Last commit to final disposition');
+  const only = (target: Target, backportLink: BackportLink | null) => ({ target, backportLink });
+
+  it('calls the first span the original work to the backport only when every PR selected links the one it backports', () => {
+    expect(spanTitle('firstCommitToOpened', true)).toBe('Original work to backport opened');
+    expect(spanTitle('firstCommitToOpened', false)).toBe('First commit to opened');
+    expect(spanTitle('openedToLastCommit', true)).toBe('Opened to last commit');
+    expect(spanTitle('afterLastCommit', true)).toBe('Last commit to final disposition');
   });
 
-  it('keeps the plain title for every branch, with a note on backports', () => {
-    expect(spanTitle('firstCommitToOpened', 'all')).toBe('First commit to opened');
-    expect(spanNote('firstCommitToOpened', 'all')).toBe(
-      'For a backport, the first commit is the original work’s, so this is how long after it the backport was opened.',
-    );
-    expect(spanNote('firstCommitToOpened', 'main')).toBeUndefined();
-    expect(spanNote('firstCommitToOpened', 'backports')).toBeUndefined();
-    expect(spanNote('openedToLastCommit', 'all')).toBeUndefined();
+  it.each([
+    ['main', 'linked', true],
+    ['backports', 'linked', true],
+    ['all', 'linked', true],
+    ['backports', null, false],
+    ['backports', 'unlinked', false],
+    ['all', null, false],
+    ['main', null, false],
+  ] satisfies [Target, BackportLink | null, boolean][])(
+    'takes the selection under %s with the backport link %s for backports alone: %s',
+    (target, link, expected) => {
+      expect(onlyBackports(only(target, link))).toBe(expected);
+    },
+  );
+
+  it('notes what a backport’s first commit is wherever backports may be among others, never under main', () => {
+    const note = 'For a backport, the first commit is the original work’s, so this is how long after it the backport was opened.';
+    expect(spanNote('firstCommitToOpened', only('all', null))).toBe(note);
+    expect(spanNote('firstCommitToOpened', only('backports', null))).toBe(note);
+    expect(spanNote('firstCommitToOpened', only('backports', 'unlinked'))).toBe(note);
+    expect(spanNote('firstCommitToOpened', only('main', null))).toBeUndefined();
+    expect(spanNote('firstCommitToOpened', only('main', 'unlinked'))).toBeUndefined();
+    expect(spanNote('firstCommitToOpened', only('backports', 'linked'))).toBeUndefined();
+    expect(spanNote('firstCommitToOpened', only('main', 'linked'))).toBeUndefined();
+    expect(spanNote('openedToLastCommit', only('all', null))).toBeUndefined();
   });
 });
 

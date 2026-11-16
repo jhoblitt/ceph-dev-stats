@@ -360,10 +360,10 @@ export function prTimeline(data: Dataset, row: number, table: TableYear): PrTime
   // A PR is worded as a backport only when it links the original it
   // backports: off the development branch alone, it may be a feature
   // branch's, or a backport that does not say what it copies.
-  const target = (table.backport_of[index] ?? 0) > 0 ? 'backports' : 'main';
+  const backport = (table.backport_of[index] ?? 0) > 0;
   const open = disposition.state === 'open';
   const span = (key: SpanKey, from: number, to: number, days: number | null, soFar: boolean): TimelineSpan => {
-    const title = spanTitle(key, target);
+    const title = spanTitle(key, backport);
     const length = days === null ? 'unknown' : `${formatDays(days)}${soFar ? ' so far' : ''}`;
     return { key, title, from, to, days, length, text: `${title}: ${length}` };
   };

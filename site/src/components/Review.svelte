@@ -28,6 +28,7 @@
     formatRatio,
     reviewerShareText,
     reviewsModel,
+    onlyBackports,
     spanNote,
     spanTitle,
     waitingSeries,
@@ -116,8 +117,8 @@
   } as const;
   const spans = $derived(
     (['firstCommitToOpened', 'openedToLastCommit', 'afterLastCommit'] as const).map((span) => {
-      const title = spanTitle(span, filters.target);
-      const note = spanNote(span, filters.target);
+      const title = spanTitle(span, onlyBackports(filters));
+      const note = spanNote(span, filters);
       return {
         curve: curve(span, title, SPAN_UNITS[span], note),
         waits: waits(span, `${title}, by ${step} opened`, note),

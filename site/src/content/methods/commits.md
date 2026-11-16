@@ -18,4 +18,4 @@ The final disposition is the last merge or close. A pull request reopened and cl
 
 ## Backports
 
-A backport cherry-picks the original commits, which keep their author dates, so a backport's first commit is the original work's. For a backport, first commit to opened therefore measures how long after the original work the backport was opened, and the site titles that span "Original work to backport opened" in the Review section when only backports are selected, and in a selected pull request's timeline when, and only when, the pull request links the one it backports.
+A backport cherry-picks the original commits, which keep their author dates, so a backport's first commit is the original work's. For a backport, first commit to opened therefore measures how long after the original work the backport was opened, and the site titles that span "Original work to backport opened" in the Review section when, and only when, the Backport link filter is "links its original", so that every pull request selected links the one it backports, whatever the target, and in a selected pull request's timeline when, and only when, the pull request links the one it backports.
