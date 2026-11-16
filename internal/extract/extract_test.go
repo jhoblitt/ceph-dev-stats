@@ -2,6 +2,7 @@ package extract_test
 
 import (
 	"encoding/json"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -21,6 +22,12 @@ func fixture(name string) fetch.Entry {
 	var e fetch.Entry
 	Expect(json.Unmarshal(b, &e)).To(Succeed(), "fixture %s", name)
 	return e
+}
+
+// quiet is a logger for specs that do not read the log, which would
+// otherwise go to the test binary's stderr.
+func quiet() *slog.Logger {
+	return slog.New(slog.DiscardHandler)
 }
 
 // entry is a minimal cached pull request by login, opened at created.

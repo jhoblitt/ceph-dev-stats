@@ -148,7 +148,7 @@ var _ = Describe("links back to GitHub", func() {
 
 		It("keeps a linked record's bytes when an entry of an older format has the same updatedAt", func() {
 			cache(fixture("links"))
-			Expect(extract.Run(context.Background(), extract.Config{CacheDir: cacheDir, DataDir: dataDir})).To(Succeed())
+			Expect(extract.Run(context.Background(), extract.Config{CacheDir: cacheDir, DataDir: dataDir, Logger: quiet()})).To(Succeed())
 			month := filepath.Join(dataDir, record.PRsDir, "2026-09.jsonl")
 			linked, err := os.ReadFile(month)
 			Expect(err).NotTo(HaveOccurred())
@@ -171,7 +171,7 @@ var _ = Describe("links back to GitHub", func() {
 				old.TimelineItems[i] = fetch.Event{Typename: old.TimelineItems[i].Typename, CreatedAt: old.TimelineItems[i].CreatedAt}
 			}
 			cache(old)
-			Expect(extract.Run(context.Background(), extract.Config{CacheDir: cacheDir, DataDir: dataDir})).To(Succeed())
+			Expect(extract.Run(context.Background(), extract.Config{CacheDir: cacheDir, DataDir: dataDir, Logger: quiet()})).To(Succeed())
 
 			kept, err := os.ReadFile(month)
 			Expect(err).NotTo(HaveOccurred())
@@ -189,7 +189,7 @@ var _ = Describe("links back to GitHub", func() {
 			Expect(os.WriteFile(month, old, 0o600)).To(Succeed())
 			cache(fixture("links"))
 
-			Expect(extract.Run(context.Background(), extract.Config{CacheDir: cacheDir, DataDir: dataDir})).To(Succeed())
+			Expect(extract.Run(context.Background(), extract.Config{CacheDir: cacheDir, DataDir: dataDir, Logger: quiet()})).To(Succeed())
 
 			recs, err := record.ReadRecords(dataDir)
 			Expect(err).NotTo(HaveOccurred())
@@ -199,7 +199,7 @@ var _ = Describe("links back to GitHub", func() {
 			before, err := os.Stat(month)
 			Expect(err).NotTo(HaveOccurred())
 
-			Expect(extract.Run(context.Background(), extract.Config{CacheDir: cacheDir, DataDir: dataDir})).To(Succeed())
+			Expect(extract.Run(context.Background(), extract.Config{CacheDir: cacheDir, DataDir: dataDir, Logger: quiet()})).To(Succeed())
 
 			after, err := os.Stat(month)
 			Expect(err).NotTo(HaveOccurred())

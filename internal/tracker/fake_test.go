@@ -3,6 +3,7 @@ package tracker_test
 import (
 	"context"
 	"encoding/json"
+	"log/slog"
 	"net/http"
 	"slices"
 	"strconv"
@@ -13,6 +14,12 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 )
+
+// quiet is a logger for specs that do not read the log, which would
+// otherwise go to the test binary's stderr.
+func quiet() *slog.Logger {
+	return slog.New(slog.DiscardHandler)
+}
 
 // fakeClock moves only when the code under test sleeps, or when the fake
 // tracker spends time answering.

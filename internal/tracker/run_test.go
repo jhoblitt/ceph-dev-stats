@@ -47,9 +47,9 @@ var _ = Describe("Run", func() {
 	}
 
 	run := func(refresh bool) error {
-		c, err := tracker.NewClient(server.URL, tracker.WithClock(clock), tracker.WithHTTPClient(server.Client()))
+		c, err := tracker.NewClient(server.URL, tracker.WithClock(clock), tracker.WithHTTPClient(server.Client()), tracker.WithLogger(quiet()))
 		Expect(err).NotTo(HaveOccurred())
-		return tracker.Run(context.Background(), c, tracker.Config{DataDir: dataDir, Refresh: refresh})
+		return tracker.Run(context.Background(), c, tracker.Config{DataDir: dataDir, Refresh: refresh, Logger: quiet()})
 	}
 
 	saved := func() map[int]tracker.Ticket {

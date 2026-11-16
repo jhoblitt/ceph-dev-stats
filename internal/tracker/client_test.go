@@ -31,7 +31,7 @@ var _ = Describe("Client", func() {
 
 	newClient := func(opts ...tracker.Option) *tracker.Client {
 		GinkgoHelper()
-		base := []tracker.Option{tracker.WithClock(clock), tracker.WithHTTPClient(server.Client())}
+		base := []tracker.Option{tracker.WithClock(clock), tracker.WithHTTPClient(server.Client()), tracker.WithLogger(quiet())}
 		c, err := tracker.NewClient(server.URL, append(base, opts...)...)
 		Expect(err).NotTo(HaveOccurred())
 		return c

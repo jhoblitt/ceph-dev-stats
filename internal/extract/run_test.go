@@ -51,7 +51,7 @@ var _ = Describe("Run", func() {
 
 	run := func() {
 		GinkgoHelper()
-		Expect(extract.Run(context.Background(), extract.Config{CacheDir: cacheDir, DataDir: dataDir})).To(Succeed())
+		Expect(extract.Run(context.Background(), extract.Config{CacheDir: cacheDir, DataDir: dataDir, Logger: quiet()})).To(Succeed())
 	}
 
 	files := func() map[string]file {
@@ -349,7 +349,7 @@ var _ = Describe("Run", func() {
 		Expect(os.MkdirAll(filepath.Dir(path), 0o750)).To(Succeed())
 		Expect(os.WriteFile(path, []byte("{"), 0o600)).To(Succeed())
 
-		err := extract.Run(context.Background(), extract.Config{CacheDir: cacheDir, DataDir: dataDir})
+		err := extract.Run(context.Background(), extract.Config{CacheDir: cacheDir, DataDir: dataDir, Logger: quiet()})
 
 		Expect(err).To(MatchError(ContainSubstring(path)))
 		Expect(files()).To(BeEmpty())
