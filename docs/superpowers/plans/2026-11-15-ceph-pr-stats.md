@@ -52,8 +52,10 @@ behaviour and records the ruling in the PR description.
 - Wording on the page: "disclosed" and "not disclosed". Never
   "human-written", "AI-written" or "LLM-generated".
 - People are shown by GitHub handle, each linked to
-  `https://github.com/<login>`. The site data carries the login of every
-  author and of every person who commented or reviewed. The owner asked for
+  `https://github.com/<login>`. The site data's `people` holds the login of
+  every person an `author` or an `actor` index names (Seam 4); a bot
+  command, a bot's comment or review, and the author's own comments and
+  reviews carry no actor. The owner asked for
   sorting by author and by reviewer; an earlier rule against ranking named
   people was the builder's and is withdrawn.
 - No duration on the page is negative or NaN: a span that cannot be
@@ -280,16 +282,25 @@ Under `site/public/data/`, fetched at run time, never bundled.
   ```
 
   `kind` indexes `kinds`, a list of `{id, name}`; `-1` is unknown. `author`
-  indexes `people`.
+  indexes `people`. `closed` is the time of the last `merged` or `closed`
+  event when the PR is not open, the record's `updated` when a finished PR
+  has no such event, and `-1` only for an open PR.
 
 - `events-<year>.json`: arrays `pr` (row in that year's file), `at`, `kind`,
   `sub`, `actor`; sorted by `pr`, then `at`. Kinds: `comment_other`,
   `comment_author`, `command_author`, `command_other`, `bot_account`,
   `review_approved`, `review_changes`, `review_commented`, `bot_review`,
-  `ready`, `draft`, `force_push`, `closed`, `reopened`, `merged`. `sub` is
-  the command's index for a command, else `-1`. `actor` indexes `people`
-  for `comment_other` and the three human review kinds, else `-1`; the
-  indexes are stable for a given set of records.
+  `review_author`, `ready`, `draft`, `force_push`, `closed`, `reopened`,
+  `merged`. `review_author` is a review by the PR's own author, with actor
+  `-1` and its review id as ref; it is not a human review, a response or an
+  approval. `sub` is the command's index for a command, else `-1`. `actor`
+  indexes `people` for `comment_other` and the three human review kinds,
+  else `-1`; the indexes are stable for a given set of records. A `closed`
+  event at, or within five seconds after, a `merged` event of the same PR
+  is not written: GitHub records the close a merge causes up to a few
+  seconds after it, and the page shows one mark. A merged PR with no
+  `merged` event, which GitHub marks merged without recording one, has its
+  last `closed` event written as `merged` at that time, with an empty ref.
 - `table-<year>.json`: `titles` and `authors`, aligned with the PR rows.
   It also carries `commits`, one list per PR row of `[sha, authored,
   committed]`, and `refs`, one string per event of that year's events file
@@ -385,11 +396,14 @@ tests beside them.
 `internal/cli/extract.go`, fixtures under `internal/extract/testdata/`.
 
 **Behaviour:**
-- `cephstats extract [--all] [--cache-dir .cache] [--data data]` upserts:
-  it reads the existing monthly files, replaces the record of every cached
-  PR whose `updatedAt` is newer than the record's `updated` (every cached
-  PR with `--all`), and rewrites only the months that changed. With an
-  empty cache it changes nothing.
+- `cephstats extract [--cache-dir .cache] [--data data]` upserts: it
+  reads the existing monthly files, replaces the record of every cached PR
+  whose `updatedAt` is newer than the record's `updated`, and rewrites only
+  the months that changed. With an empty cache it changes nothing. An
+  `--all` flag, to re-derive every cached PR, was built and then removed:
+  a plain run already re-derives every record a current-format entry is as
+  new as, so all it added was letting an older cache entry overwrite a
+  record.
 - It copies `.cache/authors.json` into `data/authors.json` (sorted) and the
   cache's meta into `data/meta.json`.
 - Record fields follow Seam 2. `commits.first_authored` is the earliest
@@ -443,7 +457,9 @@ the build.
   link field holds the fixture's value, and whose reopening has neither
   `id` nor `sha`;
 - a record without link fields, written before this task, still reads, and
-  the next `extract --all` rewrites it with them.
+  the next `extract` run rewrites it with them from a current-format entry
+  (`extract --all`, which this once named, was removed: all it added to a
+  plain run was letting an older cache entry overwrite a record).
 
 - [ ] Tests first, implement, pass. `make check`.
 
