@@ -25,3 +25,8 @@ updates:
     groups:
       npm-dependencies:
         patterns: ["*"]
+    # svelte-check loads TypeScript 6's JavaScript API, so typescript stays on
+    # 6; TypeScript 7 is installed beside it as @typescript/native.
+    ignore:
+      - dependency-name: typescript
+        update-types: ["version-update:semver-major"]
