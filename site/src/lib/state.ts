@@ -15,7 +15,6 @@ import type { Meta } from './data';
 import {
   AGE_BANDS,
   type AgeBand,
-  DAY,
   DISCLOSURES,
   type Filters,
   SIZE_BANDS,
@@ -27,6 +26,7 @@ import {
   isMonday,
   periodRange,
 } from './filters';
+import { bucketEnd, bucketStart, stepFor } from './stats/buckets';
 
 export const ROUTES = ['report', 'methods'] as const;
 export type Route = (typeof ROUTES)[number];
@@ -34,7 +34,10 @@ export type Route = (typeof ROUTES)[number];
 export interface AppState {
   route: Route;
   filters: Filters;
-  /** The selected week's Monday, `YYYY-MM-DD`; it overlaps the period. */
+  /**
+   * The first day of the selected bucket, `YYYY-MM-DD`: a Monday, or the
+   * first of a month when the period steps by month. It overlaps the period.
+   */
   week: string | null;
   /** The selected age band, alone or within the selected week. */
   band: AgeBand | null;
@@ -117,11 +120,15 @@ function validPeriod(from: string | undefined, to: string | undefined, d: Filter
   return period.from <= period.to ? period : { from: d.from, to: d.to };
 }
 
+/** A bucket of the period's step, a week or a month, that overlaps the period. */
 function validWeek(week: string | undefined, filters: Filters): string | null {
-  if (week === undefined || !isMonday(week)) return null;
-  const monday = dayStart(week) as number;
-  const { start, end } = periodRange(filters);
-  return monday < end && monday + 7 * DAY > start ? week : null;
+  if (week === undefined) return null;
+  const first = dayStart(week);
+  if (first === null) return null;
+  const period = periodRange(filters);
+  const step = stepFor(period);
+  const isStart = step === 'week' ? isMonday(week) : bucketStart(first, step) === first;
+  return isStart && first < period.end && bucketEnd(first, step) > period.start ? week : null;
 }
 
 const PR_NUMBER = /^[1-9]\d{0,8}$/;
