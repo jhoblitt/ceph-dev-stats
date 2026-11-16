@@ -78,9 +78,9 @@ describe('App', () => {
     );
   });
 
-  it('renders the methods placeholder', async () => {
+  it('renders the methods page', async () => {
     render(App, (await page('#/methods')).props);
-    expect(screen.getByRole('main').textContent).toMatch(/The methods are not written yet\./);
+    expect(screen.getByRole('heading', { level: 1, name: 'Methods' })).toBeTruthy();
     expect(screen.queryByRole('heading', { name: 'Filters' })).toBeNull();
   });
 });
