@@ -1,0 +1,50 @@
+# What counts as a disclosure of LLM use, and which tool it names.
+#
+# Phrases and family patterns are regular expressions matched anywhere in
+# a candidate line, in any case. `cephstats check` lists the candidates
+# that match no phrase, and fails on a counted disclosure that matches no
+# family or a trailer whose key is not covered here.
+
+# A commit trailer with one of these keys discloses by itself. A kept
+# Co-authored-by: is a co-author disclosure without being listed here.
+trailer_keys:
+  - assisted-by
+  - assistant-by
+  - claude-session
+
+# A description or commit-prose line counts only when it matches one of
+# these: a tool's name alone is not a disclosure.
+phrases:
+  - 'assist(ed|ant)[ -]by'
+  - '(generated|raised) (with|by) \W*(claude|codex|copilot|cursor|gemini|chatgpt|gpt|an? (llm|ai)\b)'
+  - 'with the help of (claude|codex|copilot|cursor|gemini|chatgpt|gpt|an? (llm|ai)\b)'
+  - '\bwith an? (llm|ai)\b'
+
+# The first family, top to bottom, that matches a counted disclosure is the
+# tool it names. Tools that run another vendor's model come before the
+# models, and unspecified comes last.
+families:
+  - id: copilot
+    name: Copilot
+    patterns: ['copilot']
+  - id: cursor
+    name: Cursor
+    patterns: ['\bcursor\b', 'cursoragent']
+  - id: ibm-bob
+    name: IBM Bob
+    patterns: ['ibm[ -]bob']
+  - id: claude
+    name: Claude
+    patterns: ['claude', 'anthropic']
+  - id: openai
+    name: OpenAI
+    patterns: ['codex', 'chatgpt', '\bgpt', 'openai']
+  - id: gemini
+    name: Gemini
+    patterns: ['gemini']
+  - id: unspecified
+    name: Unspecified
+    patterns: ['\bllms?\b', '\bai\b']
+
+# Candidate lines judged not to be a disclosure, each matched exactly.
+ignore: []

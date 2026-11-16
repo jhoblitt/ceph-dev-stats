@@ -1,0 +1,28 @@
+# What each label says about a pull request. An entry is a label's name,
+# in which `*` stands for any run of characters, `/` included, and every
+# other character for itself. `cephstats check`
+# fails on a label carried by 5 or more pull requests that no entry here,
+# and no kind label in kinds.yaml, classifies.
+
+# A pull request with two component labels belongs to both components.
+components:
+  - id: rgw
+    name: RGW
+    labels: [rgw]
+  - id: core
+    name: Core
+    labels: [core]
+  - id: cephfs
+    name: CephFS
+    labels: [cephfs]
+
+# Where a pull request is in the review and test process.
+process:
+  - needs-review
+  - needs-qa
+  - needs-ci-approval
+  - 'wip-*-testing'
+  - DNM
+
+# Labels that are neither.
+other: []
