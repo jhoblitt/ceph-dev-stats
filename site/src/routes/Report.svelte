@@ -8,6 +8,7 @@
   import PrTable from '../components/PrTable.svelte';
   import PrTimeline from '../components/PrTimeline.svelte';
   import Review from '../components/Review.svelte';
+  import ReviewsRecordedNote from '../components/ReviewsRecordedNote.svelte';
   import Velocity from '../components/Velocity.svelte';
   import { yearHolds } from '../lib/data';
   import { keepEqual } from '../lib/memo';
@@ -134,6 +135,7 @@
   <!-- Reached from another route while the period's years load: no section has figures to show yet. -->
   <div class="waiting" aria-busy="true"></div>
 {:else}
+  <ReviewsRecordedNote />
   <Velocity />
   <Review />
   <LlmUse />

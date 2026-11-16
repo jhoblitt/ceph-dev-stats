@@ -322,8 +322,8 @@ export function reviewsRecordedNote(filters: Pick<Filters, 'from' | 'to'>): stri
   const day = formatDate(REVIEWS_RECORDED_FROM);
   return (
     `GitHub recorded no reviews of pull requests before ${day}, and this period starts earlier. ` +
-    'Its figures about reviews, approvals and reviewers understate review before that day, ' +
-    'and its first responses count only comments then, not reviews.'
+    'In the Review, AI use and People sections, its figures about reviews, approvals and reviewers ' +
+    'understate review before that day, and its first responses count only comments then, not reviews.'
   );
 }
 
