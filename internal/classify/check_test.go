@@ -122,7 +122,9 @@ Description`))
 		in.Records[0].Disclosure.Description = []string{"Docs assisted"}
 		in.Records[0].Disclosure.CommitProse = []string{"by Gemini."}
 		in.Records[1].Disclosure.Description = []string{"Docs assisted", "by Gemini, said nobody"}
+		in.Records[1].Disclosure.CommitProse = []string{"Generated with care", "by Gemini."}
 		in.Records[2].Disclosure.CommitProse = []string{"Assisted by an LLM", "by Gemini."}
+		in.Records[2].Disclosure.Description = []string{"Docs", "assisted by an LLM"}
 		Expect(classify.Check(in, out)).To(Succeed())
 		Expect(out.String()).To(ContainSubstring("Neighboring candidates that match a phrase only when joined: 0\n"))
 	})
