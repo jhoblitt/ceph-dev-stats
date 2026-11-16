@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { Dataset } from '../data';
 import { AGE_BANDS, DAY, dayOf, periodRange } from '../filters';
 import { defaultFilters } from '../state';
-import { backlog, backlogMoment, backlogRows } from './backlog';
+import { awaitingResponse, backlog, backlogMoment, backlogRows } from './backlog';
 import type { Period } from './buckets';
 import { type Event, type Row, all, at, dataset, fixture, random } from './testing';
 
@@ -210,5 +210,118 @@ describe('backlogRows', () => {
 
   it('gives no rows for an empty selection', () => {
     expect([...backlogRows(fx, new Uint32Array(0), 'gt90', now)]).toEqual([]);
+  });
+});
+
+describe('awaitingResponse', () => {
+  // Four whole weeks from Monday 06-01, measured at each week's end: 06-08, 06-15, 06-22, 06-29.
+  const PERIOD = { start: W1, end: W1 + 28 * DAY };
+  const CLOSED = 2;
+  const day = (d: string) => at(`2026-06-${d}T00:00:00Z`);
+  const noon = at('2026-06-10T12:00:00Z');
+  // Opened ready unless `opened_draft`; the `ready` column is the first ready, which
+  // the count does not read: only the `ready` and `draft` events say when a PR is a draft.
+  const rows: Row[] = [
+    // 0: opened as a draft, a draft at the first week's end, ready on 06-10, never answered.
+    { created: day('02'), opened_draft: 1, ready: day('10') },
+    // 1: opened as a draft, made ready on 06-03 and answered on 06-04, in the same week.
+    { created: day('02'), opened_draft: 1, ready: day('03'), first_response: day('04') },
+    // 2: answered in a later week, on 06-18.
+    { created: day('02'), first_response: day('18') },
+    // 3: closed unanswered on 06-12.
+    { created: day('02'), state: CLOSED, closed: day('12') },
+    // 4: closed on 06-10, reopened on 06-20, still unanswered.
+    { created: day('02'), reopened: 1 },
+    // 5: opened as a draft, with no ready or draft event: never ready.
+    { created: day('02'), opened_draft: 1, ready: -1, draft: 1 },
+    // 6: ready exactly at the second week's end, answered exactly at the third's.
+    { created: day('02'), opened_draft: 1, ready: day('15'), first_response: day('22') },
+    // 7: opened ready, converted to draft exactly at the second week's end, never answered.
+    { created: day('02'), draft: 1 },
+    // 8: opened as a draft; ready on 06-03, back to draft on 06-10, ready again on 06-17; never answered.
+    { created: day('02'), opened_draft: 1, ready: day('03') },
+    // 9: opened ready; a draft and then a ready event, both at 06-10 12:00.
+    { created: day('02') },
+    // 10: opened as a draft; a ready and then a draft event, both at 06-10 12:00.
+    { created: day('02'), opened_draft: 1, ready: noon, draft: 1 },
+  ];
+  const events: Event[] = [
+    { pr: 0, at: day('10'), kind: 'ready' },
+    { pr: 1, at: day('03'), kind: 'ready' },
+    { pr: 4, at: day('10'), kind: 'closed' },
+    { pr: 4, at: day('20'), kind: 'reopened' },
+    { pr: 6, at: day('15'), kind: 'ready' },
+    { pr: 7, at: day('15'), kind: 'draft' },
+    { pr: 8, at: day('03'), kind: 'ready' },
+    { pr: 8, at: day('10'), kind: 'draft' },
+    { pr: 8, at: day('17'), kind: 'ready' },
+    { pr: 9, at: noon, kind: 'draft' },
+    { pr: 9, at: noon, kind: 'ready' },
+    { pr: 10, at: noon, kind: 'ready' },
+    { pr: 10, at: noon, kind: 'draft' },
+  ];
+  const data = dataset(rows, events, { fetched_through: NOW });
+  const one = (r: number) => awaitingResponse(data, Uint32Array.of(r), PERIOD).values['waiting'];
+
+  it("leaves out a PR that is a draft at the week's end, and counts it once it is ready", () => {
+    expect(one(0)).toEqual([0, 1, 1, 1]);
+  });
+
+  it('leaves out a PR made ready and answered in the same week', () => {
+    expect(one(1)).toEqual([0, 0, 0, 0]);
+  });
+
+  it('counts a PR answered in a later week until then', () => {
+    expect(one(2)).toEqual([1, 1, 0, 0]);
+  });
+
+  it('drops a PR closed unanswered when it closes', () => {
+    expect(one(3)).toEqual([1, 0, 0, 0]);
+  });
+
+  it('counts a PR reopened and still unanswered again', () => {
+    expect(one(4)).toEqual([1, 0, 1, 1]);
+  });
+
+  it('never counts a PR opened as a draft with no ready event', () => {
+    expect(one(5)).toEqual([0, 0, 0, 0]);
+  });
+
+  it('drops a PR converted to draft from the moment it is converted, though its ready column says it was ready', () => {
+    expect(one(7)).toEqual([1, 0, 0, 0]);
+  });
+
+  it('counts a PR made ready, put back into draft and made ready again from its second ready', () => {
+    expect(one(8)).toEqual([1, 0, 1, 1]);
+  });
+
+  it('lets the later of a draft and a ready event at the same second win, in the order the events file keeps', () => {
+    // The rollup sorts a PR's events stably by time, so events of one second keep GitHub's timeline order.
+    expect(one(9)).toEqual([1, 1, 1, 1]);
+    expect(one(10)).toEqual([0, 0, 0, 0]);
+  });
+
+  it('counts a PR ready at the moment, and not one answered at it', () => {
+    expect(one(6)).toEqual([0, 1, 0, 0]);
+  });
+
+  it('adds the PRs up over a selection', () => {
+    expect(awaitingResponse(data, all(data), PERIOD)).toEqual({
+      week: [W1, W1 + 7 * DAY, W1 + 14 * DAY, W1 + 21 * DAY],
+      step: 'week',
+      // 06-08: 2, 3, 4, 7, 8, 9; 06-15: 0, 2, 6, 9; 06-22 and 06-29: 0, 4, 8, 9.
+      values: { waiting: [6, 4, 4, 4] },
+    });
+  });
+
+  it("measures a partial last week at the period's end, as the backlog does", () => {
+    // 06-01 to 06-10: the second week is measured at 06-11 00:00.
+    const short = { start: W1, end: W1 + 10 * DAY };
+    expect(awaitingResponse(data, Uint32Array.of(2), short).values['waiting']).toEqual([1, 1]);
+    expect(awaitingResponse(data, Uint32Array.of(0), short).values['waiting']).toEqual([0, 1]);
+  });
+
+  it('has no weeks for an empty selection', () => {
+    expect(awaitingResponse(data, new Uint32Array(0), PERIOD)).toEqual({ week: [], step: 'week', values: { waiting: [] } });
   });
 });

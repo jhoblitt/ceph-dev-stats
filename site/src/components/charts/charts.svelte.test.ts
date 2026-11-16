@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { fireEvent, render, screen, within } from '@testing-library/svelte';
-import { createRawSnippet } from 'svelte';
+import { createRawSnippet, tick } from 'svelte';
 import { describe, expect, it, vi } from 'vitest';
 import type { AreaModel, BucketModel, CurveModel, Panel } from '../../lib/charts';
 import { formatCount, formatDays } from '../../lib/format';
@@ -100,6 +100,36 @@ describe('ChartFrame', () => {
     expect(screen.queryByRole('list', { name: 'Legend' })).toBeNull();
   });
 
+  it('keeps a lone key for a mark that is not a series', () => {
+    render(ChartFrame, {
+      title: 'One',
+      summary: 's',
+      empty: false,
+      legend: [{ label: 'partial week', mark: 'partial', color: 'var(--text-faint)' }],
+      children: stub,
+    });
+    expect(within(screen.getByRole('list', { name: 'Legend' })).getByText('partial week')).not.toBeNull();
+  });
+
+  it("draws a partial bucket's key as the mark it explains: a faded bar, or a lone hollow marker", () => {
+    const { container } = render(ChartFrame, {
+      title: 'Two',
+      summary: 's',
+      empty: false,
+      legend: [
+        { label: 'partial week', mark: 'partial', color: 'var(--text-faint)' },
+        { label: 'partial month', mark: 'partial', color: 'var(--text-muted)', shape: 'square' },
+      ],
+      children: stub,
+    });
+    const [bar, line] = [...container.querySelectorAll('.legend .key')];
+    expect(bar?.querySelector('rect.faded')).not.toBeNull();
+    expect(bar?.querySelector('.hollow')).toBeNull();
+    expect(line?.querySelector('rect')).toBeNull();
+    expect(line?.querySelector('path.hollow')?.getAttribute('style')).toContain('var(--text-muted)');
+    expect(line?.querySelector('line')).not.toBeNull();
+  });
+
   it('says "no PRs match" in place of the chart when the selection is empty', () => {
     const { container } = render(ChartFrame, {
       title: 'PRs per week',
@@ -142,6 +172,7 @@ describe('BucketChart', () => {
       sharedScale: boolean;
       scale: 'linear' | 'logDays';
       unit: string;
+      height: number;
     }> = {},
   ) {
     const onselect = vi.fn<(bucket: number) => void>();
@@ -232,6 +263,8 @@ describe('BucketChart', () => {
     expect(bottom?.querySelectorAll('.bar')).toHaveLength(0);
     expect(bottom?.querySelectorAll('.line')).toHaveLength(1);
     expect(container.querySelectorAll('.axis-y')).toHaveLength(2);
+    // The line alone in its titled panel is named by the title, not an end label.
+    expect(container.querySelectorAll('.end-label')).toHaveLength(0);
     // Every bar sits above the break between the panels, every line point below it.
     const brk = Number(container.querySelector('.panel-base')?.getAttribute('y1'));
     const ys = (el: Element | null | undefined, re: RegExp) =>
@@ -272,6 +305,78 @@ describe('BucketChart', () => {
     const d = container.querySelector('.line')?.getAttribute('d') ?? '';
     expect(d.match(/[ML]/g)).toEqual(['M']);
     expect(container.querySelectorAll('.marker.hollow')).toHaveLength(2);
+  });
+
+  it('gives a panel at least its asked-for value ticks', () => {
+    // Ratios of 1.7 and 2.7 on a 0–3 scale, and a second panel of values under 1.
+    const ratios: BucketModel = {
+      ...counts,
+      bars: [],
+      lines: [
+        { key: 'a', label: 'a', color: 'var(--text-muted)', shape: 'circle', values: [1.7, 2.2, 2.7] },
+        { key: 'b', label: 'b', color: 'var(--text-muted)', shape: 'diamond', values: [0.4, 0.6, 0.5] },
+      ],
+    };
+    const { container } = setup({
+      model: ratios,
+      height: 200,
+      sharedScale: false,
+      panels: [
+        { keys: ['a'], unit: 'a', minTicks: 3 },
+        { keys: ['b'], unit: 'b', minTicks: 3 },
+      ],
+    });
+    const labels = [...container.querySelectorAll('.axis-y')].map((a) =>
+      [...a.querySelectorAll('text:not(.unit)')].map((t) => t.textContent),
+    );
+    expect(labels[0]).toEqual(['0', '1', '2', '3']);
+    expect(labels[1]?.length).toBeGreaterThanOrEqual(3);
+  });
+
+  it("says a panel's shorter unit where the chart is narrow", async () => {
+    const panels = [{ keys: ['merged'], unit: 'merged PRs, at the end of each week', narrowUnit: "merged PRs, at week's end" }];
+    const units = (c: HTMLElement) => [...c.querySelectorAll('.axis-y .unit')].map((u) => u.textContent);
+    const wide = setup({ panels });
+    expect(units(wide.container)).toEqual(['merged PRs, at the end of each week']);
+    wide.unmount();
+    vi.stubGlobal(
+      'ResizeObserver',
+      class {
+        constructor(private readonly report: (entries: unknown[]) => void) {}
+        observe() {
+          this.report([{ borderBoxSize: [{ inlineSize: 390 }], contentRect: { width: 390 } }]);
+        }
+        disconnect() {}
+      },
+    );
+    try {
+      const narrow = setup({ panels });
+      await tick();
+      expect(units(narrow.container)).toEqual(["merged PRs, at week's end"]);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it('names a line by its end label when it shares a titled panel with bars', () => {
+    const { container } = setup({ panels: [{ keys: ['not-disclosed', 'disclosed', 'merged'], unit: 'PRs' }] });
+    expect([...container.querySelectorAll('.end-label')].map((t) => t.textContent)).toEqual(['merged']);
+  });
+
+  it('neither draws a line marked undrawn nor scales to it, with or without panels', () => {
+    const hidden: BucketModel = {
+      ...counts,
+      lines: [...counts.lines, { key: 'hidden', label: 'hidden', color: 'var(--text-muted)', shape: 'square', values: [900, 900, 900], undrawn: true }],
+    };
+    const top = (c: HTMLElement) => [...c.querySelectorAll('.axis-y text:not(.unit)')].at(-1)?.textContent;
+    const bare = setup({ model: hidden });
+    expect(bare.container.querySelectorAll('.line')).toHaveLength(1);
+    expect(bare.container.querySelectorAll('.marker')).toHaveLength(3);
+    expect(top(bare.container)).toBe('3');
+    bare.unmount();
+    const paneled = setup({ model: hidden, panels: [{ keys: ['merged', 'hidden'], unit: 'merged' }] });
+    expect(paneled.container.querySelectorAll('.line')).toHaveLength(1);
+    expect(top(paneled.container)).toBe('1');
   });
 
   it('draws durations on a log scale from one hour, ticked at round durations', () => {
