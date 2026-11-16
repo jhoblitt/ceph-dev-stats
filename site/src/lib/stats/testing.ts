@@ -1,10 +1,19 @@
 // Builds small datasets for the statistics specs: each row names only the
 // columns a case is about, the rest take a neutral default.
 
+import events2025 from '../__fixtures__/data/events-2025.json';
+import events2026 from '../__fixtures__/data/events-2026.json';
 import rawMeta from '../__fixtures__/data/meta.json';
-import { type Dataset, type Meta, type PrColumns, parseMeta } from '../data';
+import prs2025 from '../__fixtures__/data/prs-2025.json';
+import prs2026 from '../__fixtures__/data/prs-2026.json';
+import { type Dataset, type Meta, type PrColumns, combine, parseMeta, parseYear } from '../data';
 
 export const META: Meta = parseMeta(rawMeta);
+
+/** The shared fixture's two years as one dataset: rows 0–1 are 2025's, 2–11 2026's. */
+export function fixture(): Dataset {
+  return combine(META, [parseYear(2025, prs2025, events2025), parseYear(2026, prs2026, events2026)]);
+}
 
 /** Epoch seconds of an ISO 8601 time. */
 export function at(iso: string): number {
