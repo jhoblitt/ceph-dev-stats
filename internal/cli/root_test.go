@@ -32,10 +32,4 @@ var _ = Describe("Run", func() {
 	It("rejects an unknown log format before running a subcommand", func() {
 		Expect(run("--log-format", "xml", "fetch")).To(MatchError(`unknown log format "xml"`))
 	})
-
-	It("says a subcommand is not implemented yet", func() {
-		for _, name := range []string{"rollup"} {
-			Expect(run(name)).To(MatchError(name+" is not implemented"), "subcommand %q", name)
-		}
-	})
 })

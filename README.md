@@ -130,8 +130,9 @@ make site-test      # typecheck and unit tests
 ```
 
 `site-build` and `site-test` install the dependencies first when
-`node_modules` is missing or older than the lockfile. `cephstats rollup` is
-not implemented yet, so `site-build` fails for now.
+`node_modules` is missing or older than the lockfile. With no records under
+`data/prs/`, `cephstats rollup` writes an empty dataset, so `site-build`
+works on a fresh clone.
 
 To work on the site without the Go side, `make site-dev-data` copies the
 test fixture into `site/public/data/`; then run `npm run dev` in `site/` for
