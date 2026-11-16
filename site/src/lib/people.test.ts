@@ -1,8 +1,19 @@
 import { describe, expect, it } from 'vitest';
 import { NAMED_A, NAMED_B, NAME_A, NAME_B, POOLED, deletedMeta } from './__fixtures__/deleted';
 import { parseMeta } from './data';
+import { POOLED_NOTE } from './handles';
 import { DAY } from './filters';
-import { AUTHOR_TABLE, REVIEWER_TABLE, type PeopleColumn, medianCell, shownPeople, sortPeople } from './people';
+import {
+  AUTHOR_TABLE,
+  REVIEWER_TABLE,
+  type PeopleColumn,
+  medianCell,
+  pooledAuthorLine,
+  pooledReviewerLine,
+  pooledRow,
+  shownPeople,
+  sortPeople,
+} from './people';
 import { openedIn } from './select';
 import { AUTHOR_COLUMNS, REVIEWER_COLUMNS } from './sort';
 import { type AuthorRow, type ReviewerRow, authorRows, reviewerRows } from './stats/people';
@@ -230,8 +241,39 @@ describe('the People tables with deleted accounts', () => {
     expect(names(byAuthor)).toEqual(['fixture-author-e', `(deleted) ${NAME_B}`, `(deleted) ${NAME_A}`, '(deleted, unknown)']);
   });
 
-  it('shows the deleted authors whether or not bot accounts are shown: none is a bot', () => {
-    expect(shownPeople(authorTable, meta, false)).toHaveLength(4);
+  it('ranks the named deleted authors whether or not bot accounts are shown, and never the pooled entry', () => {
+    for (const bots of [false, true]) {
+      expect(shownPeople(authorTable, meta, bots).map((r) => r.person)).toEqual([NAMED_A, NAMED_B, 0]);
+      expect(shownPeople(reviewerTable, meta, bots).map((r) => r.person)).toEqual([1]);
+    }
+  });
+
+  it('gives the pooled entry’s figures for the Authors table in one line, saying it is not ranked or counted and what it pools', () => {
+    const row = pooledRow(authorTable, meta);
+    expect(row?.person).toBe(POOLED);
+    expect(pooledAuthorLine(row as AuthorRow, meta)).toBe(
+      '(deleted, unknown), not ranked or counted among the authors above, opened 1 PR: 0 merged, 0 closed unmerged, ' +
+        '1 still open; 1 commit; 7 lines changed, 7 added and 0 deleted; median to first response too few (1 PR, fewer than 5), ' +
+        'to merge too few (1 PR, fewer than 5); 0% disclosing AI use (0 of 1 PR). ' +
+        `It pools ${POOLED_NOTE}.`,
+    );
+  });
+
+  it('gives the pooled entry’s figures for the Reviewers table in one line, saying it is not ranked or counted and what it pools', () => {
+    const row = pooledRow(reviewerTable, meta);
+    expect(row?.person).toBe(POOLED);
+    expect(pooledReviewerLine(row as ReviewerRow, meta)).toBe(
+      '(deleted, unknown), not ranked or counted among the reviewers above, reviewed or commented on 3 PRs: ' +
+        '1 review approving, 1 requesting changes, 0 commenting; 1 comment; 0 first responses; ' +
+        'median to its first response too few (3 PRs, fewer than 5). ' +
+        `It pools ${POOLED_NOTE}.`,
+    );
+  });
+
+  it('has no pooled line where the pooled entry did nothing in the selection', () => {
+    // Every PR but the pooled entry's own; on that one only person 1 commented.
+    expect(pooledRow(authorRows(d, openedIn(d, Uint32Array.from([0, 1, 2, 4]), period)), meta)).toBeNull();
+    expect(pooledRow(reviewerRows(d, Uint32Array.from([3]), period), meta)).toBeNull();
   });
 
   it('gives a named deleted author no row among the reviewers: their comments and reviews are the pooled entry’s', () => {

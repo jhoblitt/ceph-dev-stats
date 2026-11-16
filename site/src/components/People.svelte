@@ -4,12 +4,23 @@
   GitHub login, linked to their page there, or as a deleted account, with a
   control that filters the whole page by them. Bot accounts among the
   authors are left out until asked for; the data keeps no login for a bot's
-  comment or review, so the reviewers are never bots.
+  comment or review, so the reviewers are never bots. The pooled deleted
+  entry stands for many accounts, so it is not ranked or counted: a line
+  beneath each table gives its figures.
 -->
 <script lang="ts">
   import { formatCount } from '../lib/format';
+  import { isBot } from '../lib/handles';
   import { getPage, sectionsBusy, sectionsStale } from '../lib/page';
-  import { AUTHOR_TABLE, REVIEWER_TABLE, shownPeople, sortPeople } from '../lib/people';
+  import {
+    AUTHOR_TABLE,
+    REVIEWER_TABLE,
+    pooledAuthorLine,
+    pooledReviewerLine,
+    pooledRow,
+    shownPeople,
+    sortPeople,
+  } from '../lib/people';
   import { MAIN_TARGET_NOTE, periodRange } from '../lib/filters';
   import { openedIn } from '../lib/select';
   import { keepEqual } from '../lib/memo';
@@ -38,8 +49,10 @@
   const bots = $derived($selection.bots);
 
   const shownAuthors = $derived(sortPeople(shownPeople(authors, meta, bots), AUTHOR_TABLE, authorSort, meta));
-  const shownReviewers = $derived(sortPeople(reviewers, REVIEWER_TABLE, reviewerSort, meta));
-  const hiddenBots = $derived(bots ? 0 : authors.length - shownPeople(authors, meta, false).length);
+  const shownReviewers = $derived(sortPeople(shownPeople(reviewers, meta, true), REVIEWER_TABLE, reviewerSort, meta));
+  const hiddenBots = $derived(bots ? 0 : authors.filter((r) => isBot(meta, r.person)).length);
+  const pooledAuthor = $derived(pooledRow(authors, meta));
+  const pooledReviewer = $derived(pooledRow(reviewers, meta));
 
   // A count sorts the most first; a handle, from A.
   const onAuthorSort = (column: AuthorColumn) =>
@@ -85,6 +98,9 @@
           ontoggle={toggle('author')}
         />
       {/if}
+      {#if pooledAuthor !== null}
+        <p class="pooled">{pooledAuthorLine(pooledAuthor, meta)}</p>
+      {/if}
       <div class="notes">
         <p>
           Commits and lines are those of the pull requests a person opened, because the data does not record who wrote
@@ -119,6 +135,9 @@
           ontoggle={toggle('reviewer')}
         />
       {/if}
+      {#if pooledReviewer !== null}
+        <p class="pooled">{pooledReviewerLine(pooledReviewer, meta)}</p>
+      {/if}
       <div class="notes">
         <p>
           Nothing a person does on a pull request they opened is counted here, neither their comments on it nor their
@@ -140,8 +159,8 @@
         {#if meta.people_deleted.length > 0}
           <p>
             A deleted account’s pull requests can be credited to the name on their commits, but its comments and reviews
-            carry no name, so they are all in the “(deleted, unknown)” row, and no “(deleted)” author with a name has a row
-            here.
+            carry no name, so they are all counted for “(deleted, unknown)” beneath the table, and no “(deleted)” author with
+            a name has a row here.
           </p>
         {/if}
       </div>
@@ -183,6 +202,10 @@
     display: flex;
     flex-direction: column;
     gap: var(--space-3);
+  }
+
+  .pooled {
+    max-width: 48rem;
   }
 
   .bots {

@@ -3,7 +3,7 @@
 
 import type { Meta } from './data';
 import { formatCount, formatDays, formatShare } from './format';
-import { isBot, personHandle } from './handles';
+import { POOLED_NOTE, isBot, isPooledDeleted, personHandle } from './handles';
 import type { AuthorColumn, ReviewerColumn, Sort } from './sort';
 import { type AuthorRow, MIN_PRS, type Median, type ReviewerRow } from './stats/people';
 import { orderBy } from './table';
@@ -23,7 +23,8 @@ export interface PeopleColumn<C extends string, R> {
   cell(row: R, meta: Meta): Cell;
 }
 
-const prs = (n: number) => `${formatCount(n)} PR${n === 1 ? '' : 's'}`;
+const plural = (n: number, one: string, many = `${one}s`) => `${formatCount(n)} ${n === 1 ? one : many}`;
+const prs = (n: number) => plural(n, 'PR');
 
 /** A median's days, or null when it has no number to show. */
 export function medianKey(m: Median): number | null {
@@ -113,7 +114,44 @@ export function sortPeople<C extends string, R extends { person: number }>(
   return orderBy(byHandle, (r) => column.key(r, meta), sort.descending);
 }
 
-/** The rows shown: bot accounts only when `bots` is set. */
+/**
+ * The rows ranked and counted: bot accounts only when `bots` is set, and
+ * never the pooled deleted entry, which stands for many accounts and is
+ * given beneath the table instead.
+ */
 export function shownPeople<R extends { person: number }>(rows: readonly R[], meta: Meta, bots: boolean): R[] {
-  return bots ? [...rows] : rows.filter((r) => !isBot(meta, r.person));
+  return rows.filter((r) => !isPooledDeleted(meta, r.person) && (bots || !isBot(meta, r.person)));
+}
+
+/** The pooled deleted entry's row, or null when it has no activity in the selection. */
+export function pooledRow<R extends { person: number }>(rows: readonly R[], meta: Meta): R | null {
+  return rows.find((r) => isPooledDeleted(meta, r.person)) ?? null;
+}
+
+const median = (m: Median, outcome: string) => {
+  const c = medianCell(m, outcome);
+  return `${c.text} (${c.detail})`;
+};
+
+/** The line beneath the Authors table: the pooled entry's figures, which no row ranks, and what it pools. */
+export function pooledAuthorLine(r: AuthorRow, meta: Meta): string {
+  return (
+    `${personHandle(meta, r.person).text}, not ranked or counted among the authors above, opened ${prs(r.opened)}: ` +
+    `${formatCount(r.merged)} merged, ${formatCount(r.closed)} closed unmerged, ${formatCount(r.open)} still open; ` +
+    `${plural(r.commits, 'commit')}; ${plural(r.lines, 'line')} changed, ${formatCount(r.additions)} added and ` +
+    `${formatCount(r.deletions)} deleted; median to first response ${median(r.response, 'responded')}, ` +
+    `to merge ${median(r.merge, 'merged')}; ${formatShare(r.disclosed / r.opened)} disclosing AI use ` +
+    `(${formatCount(r.disclosed)} of ${prs(r.opened)}). It pools ${POOLED_NOTE}.`
+  );
+}
+
+/** The line beneath the Reviewers table: the pooled entry's figures, which no row ranks, and what it pools. */
+export function pooledReviewerLine(r: ReviewerRow, meta: Meta): string {
+  return (
+    `${personHandle(meta, r.person).text}, not ranked or counted among the reviewers above, reviewed or commented on ` +
+    `${prs(r.prs)}: ${plural(r.approved, 'review')} approving, ${formatCount(r.changes)} requesting changes, ` +
+    `${formatCount(r.commented)} commenting; ${plural(r.comments, 'comment')}; ` +
+    `${plural(r.firstResponses, 'first response')}; median to its first response ${median(r.response, 'responded')}. ` +
+    `It pools ${POOLED_NOTE}.`
+  );
 }
