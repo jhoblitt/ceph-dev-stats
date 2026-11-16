@@ -26,17 +26,48 @@ const tables = years.map((y) => parseTable(file(`table-${y.year}.json`), `table-
 
 
 describe('the rollup output for the hand-made dataset', () => {
-  it('is exactly meta.json and three files for each year', () => {
+  it('is exactly meta.json, index.json and three files for each year', () => {
     expect(meta.years).toEqual([2025, 2026]);
-    const expected = ['meta.json', ...meta.years.flatMap((y) => [`prs-${y}.json`, `events-${y}.json`, `table-${y}.json`])];
+    const expected = [
+      'meta.json',
+      'index.json',
+      ...meta.years.flatMap((y) => [`prs-${y}.json`, `events-${y}.json`, `table-${y}.json`]),
+    ];
     expect(Object.keys(files).map((k) => k.slice(DIR.length)).sort()).toEqual(expected.sort());
   });
 
   it('loads every year and table through the loader', () => {
-    expect(years.map((y) => y.prs.number.length)).toEqual([1, 7]);
-    expect(years.map((y) => y.events.pr.length)).toEqual([3, 27]);
-    expect(tables.map((t) => t.refs.length)).toEqual([3, 27]);
+    expect(years.map((y) => y.prs.number.length)).toEqual([1, 8]);
+    expect(years.map((y) => y.events.pr.length)).toEqual([1, 30]);
+    expect(tables.map((t) => t.refs.length)).toEqual([1, 30]);
     expect(meta.window_start).toBe(at(2026, 5, 15, 0));
+  });
+
+  it('files a PR under the year it finished in, or open under the year of fetched_through', () => {
+    const [y2025, y2026] = years;
+    // #64100 opened in 2025 and merged in 2026; #64150 closed at the last second of 2025.
+    expect([...y2025!.prs.number]).toEqual([64150]);
+    expect(y2025!.prs.closed[0]).toBe(at(2026, 1, 1, 0) - 1);
+    expect(y2026!.prs.number).toContain(64100);
+    for (const y of years) {
+      y.prs.closed.forEach((c, row) => {
+        const finished = c === -1 ? meta.fetched_through : c;
+        expect(new Date(finished * 1000).getUTCFullYear(), `#${y.prs.number[row]}`).toBe(y.year);
+      });
+    }
+  });
+
+  it('writes index.json as exactly numbers ascending and the year whose files hold each', () => {
+    const index = file('index.json') as Record<string, unknown>;
+    expect(Object.keys(index).sort()).toEqual(['numbers', 'years']);
+    const numbers = index['numbers'] as number[];
+    const yearOf = index['years'] as number[];
+    expect(numbers).toEqual([64100, 64150, 66200, 66300, 66400, 66500, 66600, 66700, 66800]);
+    expect(yearOf).toEqual([2026, 2025, 2026, 2026, 2026, 2026, 2026, 2026, 2026]);
+    numbers.forEach((n, i) => {
+      const y = years.find((d) => d.year === yearOf[i]);
+      expect(y?.prs.number, `#${n}`).toContain(n);
+    });
   });
 
   it('writes a first response before ready as ready', () => {

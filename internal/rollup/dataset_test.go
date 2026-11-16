@@ -82,6 +82,26 @@ var _ = Describe("the hand-made dataset", func() {
 		Expect(o.col(2025, "in_window")).To(ContainElement(int64(0)))
 	})
 
+	It("files a pull request under the year it finished in, not the year it opened in", func() {
+		Expect(o.fileYear(64100)).To(Equal(2026), "#64100, opened in 2025 and merged in 2026")
+		Expect(o.fileYear(64150)).To(Equal(2025), "#64150, closed at the last second of 2025")
+	})
+
+	It("indexes every pull request, ascending, under the year whose files hold it", func() {
+		x := o.index()
+		Expect(slices.IsSorted(x.Numbers)).To(BeTrue(), "numbers ascending")
+		var all []int
+		for _, y := range o.meta().Years {
+			for _, n := range o.col(y, "number") {
+				all = append(all, int(n))
+			}
+		}
+		Expect(x.Numbers).To(ConsistOf(all))
+		for i, n := range x.Numbers {
+			Expect(o.fileYear(n)).To(Equal(x.Years[i]), "#%d", n)
+		}
+	})
+
 	It("writes every column of a year file with one length", func() {
 		for _, y := range o.meta().Years {
 			rows := len(o.col(y, "number"))

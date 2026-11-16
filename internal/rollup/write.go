@@ -12,10 +12,10 @@ import (
 
 var (
 	// ownName matches the names Build gives its files.
-	ownName = regexp.MustCompile(`^(?:meta|(?:prs|events|table)-\d+)\.json$`)
+	ownName = regexp.MustCompile(`^(?:meta|index|(?:prs|events|table)-\d+)\.json$`)
 	// ownTemp matches the temporary files writeIfChanged creates, which a
 	// run that died can leave behind.
-	ownTemp = regexp.MustCompile(`^\.(?:meta|(?:prs|events|table)-\d+)\.json\.\d+\.tmp$`)
+	ownTemp = regexp.MustCompile(`^\.(?:meta|index|(?:prs|events|table)-\d+)\.json\.\d+\.tmp$`)
 )
 
 // Result names the files Write wrote and removed.
@@ -28,8 +28,8 @@ type Result struct {
 
 // Write writes files into dir, creating it, and rewrites only the files
 // whose bytes change. It removes every file in dir named as the rollup
-// names its files that files does not hold, such as a year that no longer
-// has records, and leaves every other file alone.
+// names its files that files does not hold, such as those of a year that
+// no longer holds a pull request, and leaves every other file alone.
 //
 // The site serves these files to everyone, so whatever the umask, each
 // file in files ends up mode 0644, whether Write rewrote it or found it

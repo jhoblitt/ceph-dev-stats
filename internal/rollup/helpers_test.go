@@ -1,8 +1,10 @@
 package rollup_test
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
+	"slices"
 	"strconv"
 	"time"
 
@@ -35,6 +37,17 @@ func loadInput() rollup.Input {
 }
 
 var opened = time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC)
+
+// windowStart and fetchedThrough are dataDir's meta.json, which every build
+// but those without meta.json reads instead of the fetch package's window.
+var (
+	windowStart    = time.Date(2026, 5, 15, 0, 0, 0, 0, time.UTC)
+	fetchedThrough = time.Date(2026, 11, 15, 6, 0, 0, 0, time.UTC)
+)
+
+func at(y int, mo time.Month, d, hh, mm, ss int) time.Time {
+	return time.Date(y, mo, d, hh, mm, ss, 0, time.UTC)
+}
 
 // h is opened plus n hours.
 func h(n int) time.Time { return opened.Add(time.Duration(n) * time.Hour) }
@@ -144,10 +157,12 @@ func (o output) lists(year int, name string) [][]int {
 	return v
 }
 
-// one is a number column's value for the only PR of opened's year.
+// one is a number column's value for the only PR, in the only year.
 func (o output) one(name string) int64 {
 	GinkgoHelper()
-	v := o.col(opened.Year(), name)
+	years := o.meta().Years
+	Expect(years).To(HaveLen(1), "years")
+	v := o.col(years[0], name)
 	Expect(v).To(HaveLen(1), "column %q", name)
 	return v[0]
 }
@@ -199,6 +214,61 @@ type tableJSON struct {
 	Tickets    [][]int        `json:"tickets"`
 	BackportOf []int          `json:"backport_of"`
 	KindSource []string       `json:"kind_source"`
+}
+
+type indexJSON struct {
+	Numbers []int `json:"numbers"`
+	Years   []int `json:"years"`
+}
+
+// index is index.json, decoded strictly: a field it should not have is an
+// error.
+func (o output) index() indexJSON {
+	GinkgoHelper()
+	Expect(o).To(HaveKey("index.json"))
+	dec := json.NewDecoder(bytes.NewReader(o["index.json"]))
+	dec.DisallowUnknownFields()
+	var x indexJSON
+	Expect(dec.Decode(&x)).To(Succeed(), "decoding index.json")
+	Expect(x.Years).To(HaveLen(len(x.Numbers)), "index.json's years against its numbers")
+	return x
+}
+
+// yearOf is the year index.json names for number, or 0 when it names none.
+func (o output) yearOf(number int) int {
+	GinkgoHelper()
+	x := o.index()
+	if i := slices.Index(x.Numbers, number); i >= 0 {
+		return x.Years[i]
+	}
+	return 0
+}
+
+// fileYear is the year whose prs file holds number, or 0 when none does.
+func (o output) fileYear(number int) int {
+	GinkgoHelper()
+	found := 0
+	for _, y := range o.meta().Years {
+		if slices.Contains(o.col(y, "number"), int64(number)) {
+			Expect(found).To(BeZero(), "#%d is in prs-%d.json and prs-%d.json", number, found, y)
+			found = y
+		}
+	}
+	return found
+}
+
+// yearFiles are the years Build wrote a file of kind for, ascending.
+func (o output) yearFiles(kind string) []int {
+	GinkgoHelper()
+	years := []int{}
+	for name := range o {
+		var y int
+		if n, err := fmt.Sscanf(name, kind+"-%d.json", &y); err == nil && n == 1 {
+			years = append(years, y)
+		}
+	}
+	slices.Sort(years)
+	return years
 }
 
 func (o output) table(year int) tableJSON {
