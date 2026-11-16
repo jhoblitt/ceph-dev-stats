@@ -33,6 +33,7 @@
   import { tableLoads } from '../lib/tables';
   import Person from './Person.svelte';
   import { onScreen } from './onscreen';
+  import SectionHead from './SectionHead.svelte';
 
   const { selection, data, view, loader } = getPage();
 
@@ -108,11 +109,14 @@
 
 <section
   id="table"
+  tabindex="-1"
   aria-labelledby="table-heading"
   class:stale={sectionsStale($view, $data)}
   aria-busy={sectionsBusy($view, $data) ? 'true' : undefined}
   {@attach onScreen(() => (shown = true))}>
-  <h2 id="table-heading">Pull requests</h2>
+  <SectionHead name="pull-requests">
+    <h2 id="table-heading">Pull requests</h2>
+  </SectionHead>
 
   {#if empty}
     <p class="muted">no PRs match</p>

@@ -32,6 +32,7 @@
   import PeriodBrush from './charts/PeriodBrush.svelte';
   import Tooltip from './charts/Tooltip.svelte';
   import { measureWidth } from './charts/measure';
+  import SectionHead from './SectionHead.svelte';
 
   const { selection, data, view } = getPage();
   const zoom = periodZoom(getPage());
@@ -166,8 +167,10 @@
   const title = 'Days to merge or close, each PR opened in the period';
 </script>
 
-<section id="dots" aria-labelledby="dots-heading" class:stale={sectionsStale($view, $data)} aria-busy={sectionsBusy($view, $data) ? 'true' : undefined}>
-  <h2 id="dots-heading">Each PR</h2>
+<section id="dots" tabindex="-1" aria-labelledby="dots-heading" class:stale={sectionsStale($view, $data)} aria-busy={sectionsBusy($view, $data) ? 'true' : undefined}>
+  <SectionHead name="each-pr">
+    <h2 id="dots-heading">Each PR</h2>
+  </SectionHead>
 
   <ChartFrame
     {title}

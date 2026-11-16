@@ -60,6 +60,15 @@ a:hover {
   border-radius: var(--radius-sm);
 }
 
+/* A section a link names: the page moves to it and focuses it, which is not drawn as a control's focus. */
+section[tabindex='-1'] {
+  scroll-margin-top: var(--space-4);
+}
+
+section[tabindex='-1']:focus {
+  outline: none;
+}
+
 .num {
   font-family: var(--font-num);
   font-variant-numeric: tabular-nums;
