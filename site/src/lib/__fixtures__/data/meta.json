@@ -54,6 +54,28 @@
       "name": "/config check ok"
     }
   ],
+  "kinds": [
+    {
+      "id": "bugfix",
+      "name": "Bug fix"
+    },
+    {
+      "id": "feature",
+      "name": "Feature"
+    },
+    {
+      "id": "cleanup",
+      "name": "Cleanup"
+    },
+    {
+      "id": "docs",
+      "name": "Documentation"
+    },
+    {
+      "id": "other",
+      "name": "Other"
+    }
+  ],
   "disclosure": [
     "none",
     "description",

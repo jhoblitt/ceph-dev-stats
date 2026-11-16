@@ -12,7 +12,7 @@ export const META: Meta = parseMeta(rawMeta);
 
 /** The shared fixture's two years as one dataset: rows 0–1 are 2025's, 2–11 2026's. */
 export function fixture(): Dataset {
-  return combine(META, [parseYear(2025, prs2025, events2025), parseYear(2026, prs2026, events2026)]);
+  return combine(META, [parseYear(2025, prs2025, events2025, META), parseYear(2026, prs2026, events2026, META)]);
 }
 
 /** Epoch seconds of an ISO 8601 time. */
@@ -68,6 +68,7 @@ export function dataset(rows: readonly Row[], events: readonly Event[] = [], met
     families: rows.map((r) => r.families ?? []),
     components: rows.map((r) => r.components ?? []),
     standing: i32((r) => r.standing ?? -1),
+    kind: i32((r) => r.kind ?? -1),
   };
   const sorted = [...events].sort((a, b) => a.pr - b.pr || a.at - b.at);
   const kind = (name: string) => {
@@ -86,7 +87,7 @@ export function dataset(rows: readonly Row[], events: readonly Event[] = [], met
       sub: Int32Array.from(sorted, (e) => e.sub ?? -1),
       actor: Int32Array.from(sorted, (e) => e.actor ?? -1),
     },
-    years: [{ year: 2026, first: 0, count: rows.length }],
+    years: [{ year: 2026, first: 0, count: rows.length, firstEvent: 0, eventCount: sorted.length }],
   };
 }
 

@@ -7,6 +7,7 @@
     SIZE_BANDS,
     STANDING_BANDS,
     TARGETS,
+    UNKNOWN_KIND,
     dayOf,
     findChoice,
   } from '../lib/filters';
@@ -47,6 +48,13 @@
       value: filters.component ?? '',
       options: [all, ...meta.components.map((c) => ({ id: c.id, label: c.name }))],
       change: (v) => set({ component: v === '' ? null : v }),
+    },
+    {
+      id: 'kind',
+      label: 'Kind',
+      value: filters.kind ?? '',
+      options: [all, ...meta.kinds.map((k) => ({ id: k.id, label: k.name })), UNKNOWN_KIND],
+      change: (v) => set({ kind: v === '' ? null : v }),
     },
     {
       id: 'size',

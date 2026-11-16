@@ -46,6 +46,9 @@ export const DISCLOSURES = [
 ] as const satisfies readonly Choice<string>[];
 export type Disclosure = (typeof DISCLOSURES)[number]['id'];
 
+/** The Kind filter's choice for the PRs whose kind is unknown (`kind` -1); the others are meta's `kinds`. */
+export const UNKNOWN_KIND = { id: 'unknown', label: 'unknown' } as const satisfies Choice<string>;
+
 /**
  * The open backlog's age bands: the bands a chart selection can name beside
  * its week. Their bounds belong to the backlog statistic.
@@ -69,6 +72,8 @@ export interface Filters {
   size: SizeBand | null;
   standing: StandingBand | null;
   disclosure: Disclosure | null;
+  /** A kind id from meta, `UNKNOWN_KIND.id`, or null for every kind. */
+  kind: string | null;
   /** Leave out the PRs that are a draft now. */
   excludeDrafts: boolean;
   /** Keep only the PRs reopened at least once. */

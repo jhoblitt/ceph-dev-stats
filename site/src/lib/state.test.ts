@@ -26,6 +26,7 @@ const defaults: AppState = {
     size: null,
     standing: null,
     disclosure: null,
+    kind: null,
     excludeDrafts: false,
     reopenedOnly: false,
   },
@@ -59,6 +60,7 @@ describe('round trip through the hash', () => {
       size: '101-1000',
       standing: 'unknown',
       disclosure: 'not-disclosed',
+      kind: 'docs',
       excludeDrafts: true,
       reopenedOnly: true,
     },
@@ -80,6 +82,12 @@ describe('round trip through the hash', () => {
     ['size band', { filters: { ...defaults.filters, size: 'le10' } }],
     ['standing band', { filters: { ...defaults.filters, standing: 'first' } }],
     ['disclosure', { filters: { ...defaults.filters, disclosure: 'disclosed' } }],
+    ['kind bugfix', { filters: { ...defaults.filters, kind: 'bugfix' } }],
+    ['kind feature', { filters: { ...defaults.filters, kind: 'feature' } }],
+    ['kind cleanup', { filters: { ...defaults.filters, kind: 'cleanup' } }],
+    ['kind docs', { filters: { ...defaults.filters, kind: 'docs' } }],
+    ['kind other', { filters: { ...defaults.filters, kind: 'other' } }],
+    ['kind unknown', { filters: { ...defaults.filters, kind: 'unknown' } }],
     ['drafts', { filters: { ...defaults.filters, excludeDrafts: true } }],
     ['reopened', { filters: { ...defaults.filters, reopenedOnly: true } }],
     ['week', { week: '2026-11-09' }],
@@ -98,6 +106,13 @@ describe('round trip through the hash', () => {
     const params = new URLSearchParams(hashFromState(withFilters({ from: '2026-06-01' }), meta).split('?')[1]);
     expect(params.get('from')).toBe('2026-06-01');
     expect(params.has('to')).toBe(false);
+  });
+
+  it('writes the kind as its id after the component, or unknown', () => {
+    expect(hashFromState(withFilters({ component: 'rgw', kind: 'feature' }), meta)).toBe(
+      '#/?target=main&component=rgw&kind=feature',
+    );
+    expect(hashFromState(withFilters({ kind: 'unknown' }), meta)).toBe('#/?target=main&kind=unknown');
   });
 
   it('puts the route in the hash path', () => {
@@ -119,6 +134,10 @@ describe('unknown values fall back to their defaults', () => {
     ['size band', '#/?size=huge'],
     ['standing band', '#/?standing=veteran'],
     ['disclosure', '#/?disclosure=ai-written'],
+    ['kind', '#/?kind=refactor'],
+    ['kind named rather than given by id', '#/?kind=Bug%20fix'],
+    ['kind named like a prototype key', '#/?kind=__proto__'],
+    ['kind that is empty', '#/?kind='],
     ['drafts', '#/?drafts=maybe'],
     ['reopened', '#/?reopened=yes'],
     ['band', '#/?band=old'],

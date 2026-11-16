@@ -23,5 +23,6 @@
   "disclosure": [0,0],
   "families": [[],[]],
   "components": [[3],[2]],
-  "standing": [-1,-1]
+  "standing": [-1,-1],
+  "kind": [0,-1]
 }
