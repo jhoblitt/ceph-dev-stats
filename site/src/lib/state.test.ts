@@ -33,6 +33,7 @@ const defaults: AppState = {
   week: null,
   band: null,
   pr: null,
+  sort: { column: 'opened', descending: true },
 };
 
 function withFilters(patch: Partial<AppState['filters']>): AppState {
@@ -67,6 +68,7 @@ describe('round trip through the hash', () => {
     week: '2026-06-01',
     band: '30-90',
     pr: 66600,
+    sort: { column: 'size', descending: false },
   };
 
   it('preserves every field at once', () => {
@@ -93,6 +95,8 @@ describe('round trip through the hash', () => {
     ['week', { week: '2026-11-09' }],
     ['band', { band: 'lt7' }],
     ['pr', { pr: 64010 }],
+    ['sort ascending', { sort: { column: 'title', descending: false } }],
+    ['sort descending', { sort: { column: 'reopened', descending: true } }],
   ] satisfies [string, Partial<AppState>][])('preserves %s', (_name, patch) => {
     const state = { ...defaults, ...patch };
     expect(stateFromHash(hashFromState(state, meta), meta)).toEqual(state);
@@ -113,6 +117,14 @@ describe('round trip through the hash', () => {
       '#/?target=main&component=rgw&kind=feature',
     );
     expect(hashFromState(withFilters({ kind: 'unknown' }), meta)).toBe('#/?target=main&kind=unknown');
+  });
+
+  it('writes the table sort last, as a column or a minus and a column, and leaves out the default', () => {
+    expect(hashFromState({ ...defaults, pr: 66600, sort: { column: 'size', descending: false } }, meta)).toBe(
+      '#/?target=main&pr=66600&sort=size',
+    );
+    expect(hashFromState({ ...defaults, sort: { column: 'title', descending: true } }, meta)).toBe('#/?target=main&sort=-title');
+    expect(hashFromState({ ...defaults, sort: { column: 'opened', descending: true } }, meta)).toBe('#/?target=main');
   });
 
   it('puts the route in the hash path', () => {
@@ -148,6 +160,8 @@ describe('unknown values fall back to their defaults', () => {
     ['pr with a fraction', '#/?pr=66600.5'],
     ['week that is not a Monday', '#/?week=2026-06-02'],
     ['week that is not a date', '#/?week=soon'],
+    ['sort by an unknown column', '#/?sort=colour'],
+    ['sort that is a bare minus', '#/?sort=-'],
     ['an unknown parameter', '#/?colour=blue'],
   ])('%s', (_name, hash) => {
     expect(stateFromHash(hash, meta)).toEqual(defaults);

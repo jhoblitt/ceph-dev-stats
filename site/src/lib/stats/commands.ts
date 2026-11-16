@@ -1,19 +1,13 @@
 // How much the PRs of a selection lean on bot commands.
 
 import { type Dataset, PR_STATE } from '../data';
+import { nearestRank } from './measures';
 
 export interface CommandUse {
   /** The share of the PRs with at least one bot command; null with none selected. */
   share: number | null;
   /** The bot commands each merged PR took; null when none of the PRs merged. */
   merged: { mean: number; median: number; p90: number } | null;
-}
-
-/** The least value at or under which a share `q` of the sorted values lie. */
-function quantile(sorted: Int32Array, q: number): number {
-  // q × n can round just above a whole number it equals.
-  const rank = Math.max(1, Math.ceil(q * sorted.length - 1e-9));
-  return sorted[rank - 1] as number;
 }
 
 /** Bot-command use over the rows, from the `bot_commands` column. */
@@ -34,6 +28,6 @@ export function commandUse(data: Dataset, rows: Uint32Array): CommandUse {
   const sorted = counts.subarray(0, merged).sort();
   return {
     share: rows.length === 0 ? null : withCommand / rows.length,
-    merged: merged === 0 ? null : { mean: sum / merged, median: quantile(sorted, 0.5), p90: quantile(sorted, 0.9) },
+    merged: merged === 0 ? null : { mean: sum / merged, median: nearestRank(sorted, 0.5), p90: nearestRank(sorted, 0.9) },
   };
 }

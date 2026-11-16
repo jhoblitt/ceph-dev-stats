@@ -3,7 +3,7 @@
 //
 //   #/<route>?target=backports&from=2026-06-01&to=2026-08-31&component=rgw&kind=bugfix
 //     &size=11-100&standing=first&disclosure=disclosed&drafts=exclude&reopened=only
-//     &week=2026-06-01&band=lt7&pr=66600
+//     &week=2026-06-01&band=lt7&pr=66600&sort=-size
 //
 // <route> is empty for the report or `methods`. The target is always written;
 // the period only when it differs from the whole window, so a link to the
@@ -28,6 +28,7 @@ import {
   periodRange,
 } from './filters';
 import { bucketEnd, bucketStart, stepFor } from './stats/buckets';
+import { DEFAULT_SORT, type Sort, parseSort, sameSort, sortParam } from './sort';
 
 export const ROUTES = ['report', 'methods'] as const;
 export type Route = (typeof ROUTES)[number];
@@ -44,6 +45,8 @@ export interface AppState {
   band: AgeBand | null;
   /** The number of the PR whose timeline is open. */
   pr: number | null;
+  /** The PR table's order. */
+  sort: Sort;
 }
 
 const KEYS = [
@@ -60,6 +63,7 @@ const KEYS = [
   'week',
   'band',
   'pr',
+  'sort',
 ] as const;
 type Key = (typeof KEYS)[number];
 
@@ -99,7 +103,7 @@ export function defaultFilters(meta: Meta): Filters {
 }
 
 export function defaultState(meta: Meta): AppState {
-  return { route: 'report', filters: defaultFilters(meta), week: null, band: null, pr: null };
+  return { route: 'report', filters: defaultFilters(meta), week: null, band: null, pr: null, sort: DEFAULT_SORT };
 }
 
 function isRoute(s: string): s is Route {
@@ -158,6 +162,7 @@ export function validateState(raw: RawState, meta: Meta): AppState {
     week: validWeek(p.week, filters),
     band: findChoice(AGE_BANDS, p.band),
     pr: p.pr !== undefined && PR_NUMBER.test(p.pr) ? Number(p.pr) : null,
+    sort: parseSort(p.sort),
   };
 }
 
@@ -183,6 +188,7 @@ export function hashFromState(state: AppState, meta: Meta): string {
   if (state.week !== null) parts.push(`week=${enc(state.week)}`);
   if (state.band !== null) parts.push(`band=${enc(state.band)}`);
   if (state.pr !== null) parts.push(`pr=${state.pr}`);
+  if (!sameSort(state.sort, DEFAULT_SORT)) parts.push(`sort=${enc(sortParam(state.sort))}`);
   return `#/${state.route === 'report' ? '' : state.route}?${parts.join('&')}`;
 }
 

@@ -1,0 +1,274 @@
+// The LLM-use section's charts and its side-by-side comparison, from the
+// statistics library's results. Every figure of the comparison is the
+// library's, over the two sub-selections; nothing here computes one.
+
+import { type BucketModel, type LineSeries, type Panel } from './charts';
+import { COLOURS } from './colours';
+import type { Dataset, Named } from './data';
+import { dayOf } from './filters';
+import { bucketName, formatCount, formatMean, formatShare } from './format';
+import { curveQuantiles } from './review';
+import { outcomeCurve } from './stats/curve';
+import { type DisclosureCounts, type Distribution, distribution, mergedWithin } from './stats/measures';
+import type { Weekly } from './stats/weekly';
+
+const plural = (n: number, noun: string) => `${formatCount(n)} ${noun}${n === 1 ? '' : 's'}`;
+
+/** A model value, a share in percent, written as the page writes shares. */
+export function percent(v: number): string {
+  return formatShare(v / 100);
+}
+
+/** The value axis reads in percent, so a share is drawn as one. */
+function shareLine(key: string, label: string, color: string, values: readonly (number | null)[]): LineSeries {
+  return {
+    key,
+    label,
+    color,
+    shape: 'circle',
+    values: values.map((v) => (v === null ? null : v * 100)),
+    missing: values.map((v) => (v === null ? 'no PRs opened' : null)),
+  };
+}
+
+/** The share of the PRs opened in each bucket that disclose, as one line in the disclosed colour. */
+export function shareModel(shares: Weekly<number | null>): BucketModel {
+  return {
+    step: shares.step,
+    buckets: shares.week,
+    bars: [],
+    lines: [shareLine('disclosed', 'disclosing', COLOURS.disclosed, shares.values['disclosed'] ?? [])],
+  };
+}
+
+/** A family gets a panel of its own when at least this share of the PRs opened name it. */
+export const OWN_PANEL_SHARE = 0.02;
+
+/** The family id for a disclosure that names no tool: a different thing from a tool, so never folded. */
+const UNSPECIFIED = 'unspecified';
+
+/** Which families, by index into meta's `families`, get a panel of their own and which share one. */
+export interface Fold {
+  /** Most named first, ties by name. */
+  own: number[];
+  /** Named by fewer than `OWN_PANEL_SHARE` of the PRs opened, most named first. */
+  folded: number[];
+  /** "unspecified", always its own last panel when any PR has it. */
+  unspecified: number | null;
+}
+
+function byUse(families: readonly Named[], counts: DisclosureCounts): number[] {
+  return families
+    .map((_, i) => i)
+    .filter((i) => (counts.families[i] ?? 0) > 0)
+    .sort(
+      (a, b) =>
+        (counts.families[b] ?? 0) - (counts.families[a] ?? 0) ||
+        (families[a]?.name ?? '').localeCompare(families[b]?.name ?? '', 'en'),
+    );
+}
+
+/**
+ * Splits the families named in the selection into those drawn alone and
+ * those folded into one panel. A fold of a single family would only rename
+ * it, so a family alone below the threshold keeps its own panel.
+ */
+export function foldFamilies(families: readonly Named[], counts: DisclosureCounts): Fold {
+  const used = byUse(families, counts);
+  const unspecified = used.find((i) => families[i]?.id === UNSPECIFIED) ?? null;
+  const tools = used.filter((i) => i !== unspecified);
+  const small = (i: number) => (counts.families[i] ?? 0) / counts.rows < OWN_PANEL_SHARE;
+  const folded = tools.filter(small);
+  if (folded.length < 2) return { own: tools, folded: [], unspecified };
+  return { own: tools.filter((i) => !small(i)), folded, unspecified };
+}
+
+export interface FamilyChart {
+  /** One line per panel: the families alone, the folded ones as `other`, then "unspecified". */
+  model: BucketModel;
+  panels: Panel[];
+  /** Every family on its own, for the table view. */
+  table: BucketModel;
+  /**
+   * The folded families with their counts, "OpenAI 58, Cursor 28", or null
+   * when none is folded. Printed beside the chart: a panel's title is one
+   * line of SVG and would run off a phone's screen.
+   */
+  folded: string | null;
+}
+
+/**
+ * The share of the PRs opened in each bucket that name each tool family, on
+ * one scale and in the disclosed colour, since every such PR discloses.
+ * `other` is the share naming any folded family and `otherCount` how many PRs
+ * did over the period. Each panel's title gives its count and share.
+ */
+export function familiesModel(
+  shares: Weekly<number | null>,
+  other: Weekly<number | null>,
+  otherCount: number,
+  fold: Fold,
+  families: readonly Named[],
+  counts: DisclosureCounts,
+): FamilyChart {
+  const share = (n: number) => `${plural(n, 'PR')}, ${formatShare(n / counts.rows)} of those opened`;
+  const alone = (i: number) => {
+    const f = families[i] as Named;
+    const n = counts.families[i] ?? 0;
+    return { line: shareLine(f.id, f.name, COLOURS.disclosed, shares.values[f.id] ?? []), panel: { keys: [f.id], unit: `${f.name}: ${share(n)}` } };
+  };
+  const parts = fold.own.map(alone);
+  const folded =
+    fold.folded.length === 0
+      ? null
+      : fold.folded.map((i) => `${families[i]?.name} ${formatCount(counts.families[i] ?? 0)}`).join(', ');
+  if (folded !== null) {
+    parts.push({
+      line: shareLine('other', 'other named tools', COLOURS.disclosed, other.values['any'] ?? []),
+      panel: { keys: ['other'], unit: `Other named tools: ${share(otherCount)}` },
+    });
+  }
+  if (fold.unspecified !== null) parts.push(alone(fold.unspecified));
+  const every = byUse(families, counts).filter((i) => i !== fold.unspecified);
+  if (fold.unspecified !== null) every.push(fold.unspecified);
+  const base = { step: shares.step, buckets: shares.week, bars: [] };
+  return {
+    model: { ...base, lines: parts.map((p) => p.line) },
+    panels: parts.map((p) => p.panel),
+    table: { ...base, lines: every.map((i) => alone(i).line) },
+    folded,
+  };
+}
+
+/**
+ * The text alternative of a chart of shares by bucket: each line's range and
+ * the bucket where it peaked, then the buckets with no PRs opened.
+ */
+export function describeShares(model: BucketModel): string {
+  if (model.buckets.length === 0) return '';
+  const first = model.buckets[0] as number;
+  const last = model.buckets.at(-1) as number;
+  const out = [`By ${model.step}, ${plural(model.buckets.length, model.step)} from ${dayOf(first)} to ${dayOf(last)}.`];
+  for (const l of model.lines) {
+    const known = l.values.flatMap((v, i) => (v === null ? [] : [{ v, i }]));
+    if (known.length === 0) continue;
+    let peak = known[0] as { v: number; i: number };
+    for (const k of known) if (k.v > peak.v) peak = k;
+    const low = Math.min(...known.map((k) => k.v));
+    const label = l.label.charAt(0).toUpperCase() + l.label.slice(1);
+    const where = bucketName(model.buckets[peak.i] as number, model.step);
+    out.push(`${label}: from ${percent(low)} to ${percent(peak.v)}, highest in the ${where}.`);
+  }
+  const none = model.lines[0]?.values.filter((v) => v === null).length ?? 0;
+  if (none > 0) out.push(`No PRs opened in ${plural(none, model.step)}.`);
+  const partial = model.partial?.filter((c) => c !== null).length ?? 0;
+  if (partial > 0) out.push(`${plural(partial, model.step)} cut short by the period or the data.`);
+  return out.join(' ');
+}
+
+/** The rows that do not disclose and those that do, each in the order given. */
+export function byDisclosure(data: Dataset, rows: Uint32Array): { notDisclosed: Uint32Array; disclosed: Uint32Array } {
+  const none = data.meta.disclosure.indexOf('none');
+  const p = data.prs;
+  return {
+    notDisclosed: rows.filter((r) => p.disclosure[r] === none),
+    disclosed: rows.filter((r) => p.disclosure[r] !== none),
+  };
+}
+
+/** One group's figure, written, and what it rests on: "of 843 PRs", "from the 610 opened at least 30 days ago". */
+export interface Cell {
+  text: string;
+  /** Null where there is nothing to rest on. */
+  basis: string | null;
+}
+
+/** The days by which the comparison reads the share merged. */
+export const HORIZONS = [7, 30, 90] as const;
+/** Fewer PRs of a group followed to a horizon than this, and the share there is not given. */
+export const MIN_FOLLOWED = 30;
+
+type HorizonKey = `merged${(typeof HORIZONS)[number]}`;
+
+/** One figure for both groups: not disclosed first, disclosed second. */
+export interface ComparisonRow {
+  key: 'lines' | 'files' | 'firstCommit' | HorizonKey | 'botReviews';
+  label: string;
+  cells: readonly [Cell, Cell];
+}
+
+const NO_PRS: Cell = { text: 'no PRs', basis: null };
+const NOTHING: Cell = { text: 'no PR to measure', basis: null };
+
+function spread(d: Distribution): string {
+  return `median ${formatCount(d.median)} · 90th percentile ${formatCount(d.p90)}`;
+}
+
+const of = (n: number) => `of ${plural(n, 'PR')}`;
+
+/**
+ * Of the PRs opened at least `h` days before the data was fetched, the share
+ * merged within `h` days of opening: every one of them has a known outcome
+ * at `h`, so the share and the count beside it are about the same PRs. With
+ * fewer than `MIN_FOLLOWED` of them the cell says so instead.
+ */
+function mergedBy(data: Dataset, rows: Uint32Array, h: number): Cell {
+  const { followed, share } = mergedWithin(data, rows, h);
+  const since = `opened at least ${h} days ago`;
+  if (share === null || followed < MIN_FOLLOWED) {
+    return { text: 'too few to say', basis: followed === 0 ? `none ${since}` : `only ${formatCount(followed)} ${since}` };
+  }
+  return { text: formatShare(share), basis: `from the ${formatCount(followed)} ${since}` };
+}
+
+function groupCells(data: Dataset, rows: Uint32Array): Record<ComparisonRow['key'], Cell> {
+  const keys = Object.keys(LABELS) as ComparisonRow['key'][];
+  if (rows.length === 0) return Object.fromEntries(keys.map((k) => [k, NO_PRS])) as Record<ComparisonRow['key'], Cell>;
+  const lines = distribution(data, rows, 'lines') as Distribution;
+  const files = distribution(data, rows, 'files') as Distribution;
+  const bots = distribution(data, rows, 'botReviews') as Distribution;
+  const first = outcomeCurve(data, rows, 'firstCommitToOpened');
+  const fq = curveQuantiles(first, 'firstCommitToOpened');
+  const horizon = (h: number) => mergedBy(data, rows, h);
+  return {
+    lines: { text: spread(lines), basis: of(lines.count) },
+    files: { text: spread(files), basis: of(files.count) },
+    firstCommit:
+      first.days.length === 0 ? NOTHING : { text: `median ${fq.median} · 90th percentile ${fq.p90}`, basis: of(first.counts.done) },
+    merged7: horizon(7),
+    merged30: horizon(30),
+    merged90: horizon(90),
+    botReviews: { text: `${formatShare(bots.nonzero)} had one · mean ${formatMean(bots.mean)} a PR`, basis: of(bots.count) },
+  };
+}
+
+const LABELS: Record<ComparisonRow['key'], string> = {
+  lines: 'Lines changed',
+  files: 'Files changed',
+  firstCommit: 'First commit to opened',
+  merged7: 'Merged within 7 days of opening',
+  merged30: 'Merged within 30 days of opening',
+  merged90: 'Merged within 90 days of opening',
+  botReviews: 'With a bot review',
+};
+
+/**
+ * The PRs that do not disclose against those that do, figure by figure: size,
+ * first commit to opened, the share merged by fixed days, and bot reviews.
+ * `rows` are the PRs opened in the period. No median time to merge: the
+ * groups differ in age, and a median late on the curve rests on a few of the
+ * oldest PRs of a group. The shares merged by a fixed day are plain counts
+ * among the PRs old enough, not curve values, so each says whose it is.
+ */
+export function comparison(data: Dataset, rows: Uint32Array): ComparisonRow[] {
+  const { notDisclosed, disclosed } = byDisclosure(data, rows);
+  const a = groupCells(data, notDisclosed);
+  const b = groupCells(data, disclosed);
+  return (Object.keys(LABELS) as ComparisonRow['key'][]).map((key) => ({ key, label: LABELS[key], cells: [a[key], b[key]] }));
+}
+
+/** The comparison as sentences, for its text alternative. */
+export function comparisonSummary(rows: readonly ComparisonRow[]): string {
+  const cell = (c: Cell) => (c.basis === null ? c.text : `${c.text} (${c.basis})`);
+  return rows.map((r) => `${r.label}: not disclosed ${cell(r.cells[0])}; disclosed ${cell(r.cells[1])}.`).join(' ');
+}
