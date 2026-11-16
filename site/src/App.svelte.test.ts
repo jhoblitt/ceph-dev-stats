@@ -7,7 +7,7 @@ import rawMeta from './lib/__fixtures__/data/meta.json';
 import { BASE, fixtureFetch, withEarlierYear } from './lib/__fixtures__/fetch';
 import { DataLoader, type Fetch, parseMeta } from './lib/data';
 import { type Page, createDataStore, createViewStore, firstYears } from './lib/page';
-import { type HashLocation, createStateStore } from './lib/state';
+import { DEFAULT_MONTHS, type HashLocation, createStateStore } from './lib/state';
 
 const meta = parseMeta(rawMeta);
 
@@ -304,5 +304,22 @@ describe('filter bar', () => {
     render(App, (await page('')).props);
     expect(screen.getByRole('button', { name: 'Last 6 months' }).getAttribute('aria-pressed')).toBe('true');
     expect(screen.queryByRole('button', { name: /^All, from/ })).toBeNull();
+  });
+
+  /** The labels of the period's one-choice buttons. */
+  const presets = () => [...document.querySelectorAll('.presets button')].map((b) => b.textContent?.trim());
+
+  it('names the default period by the months it reaches back', async () => {
+    render(App, (await page('')).props);
+    expect(presets()).toEqual([`Last ${DEFAULT_MONTHS} months`]);
+  });
+
+  it('offers one choice, the whole window, when the window is shorter than the default reach', async () => {
+    const short = parseMeta({ ...rawMeta, window_start: Date.UTC(2026, 8, 1) / 1000 });
+    const { props, loc } = await page('', {}, short);
+    render(App, props);
+    expect(presets()).toEqual(['All, from 1 Sep 2026']);
+    expect(screen.getByRole('button', { name: 'All, from 1 Sep 2026' }).getAttribute('aria-pressed')).toBe('true');
+    expect(loc.hash()).toBe('#/?target=main');
   });
 });

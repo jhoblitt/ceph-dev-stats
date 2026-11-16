@@ -12,7 +12,7 @@
   } from '../lib/filters';
   import { GHOST, findLogin } from '../lib/handles';
   import { getPage } from '../lib/page';
-  import { dataDays, defaultFilters } from '../lib/state';
+  import { DEFAULT_MONTHS, dataDays, defaultFilters, monthsBefore } from '../lib/state';
   import { formatDate } from '../lib/timeline-axis';
 
   const { meta, selection } = getPage();
@@ -23,11 +23,13 @@
 
   // A period the reader can reach in one choice: the default, and the whole
   // window when it reaches further back, which the date inputs reach only
-  // a field at a time.
-  const presets = [
-    { label: 'Last 6 months', from: recent.from, to: recent.to },
-    ...(first < recent.from ? [{ label: `All, from ${formatDate(meta.window_start)}`, from: first, to: last }] : []),
-  ];
+  // a field at a time. A window shorter than the default's reach is the
+  // default itself, so it is one choice, named for what it is.
+  const whole = { label: `All, from ${formatDate(meta.window_start)}`, from: first, to: last };
+  const presets =
+    monthsBefore(last, DEFAULT_MONTHS) < first
+      ? [whole]
+      : [{ label: `Last ${DEFAULT_MONTHS} months`, from: recent.from, to: recent.to }, ...(first < recent.from ? [whole] : [])];
 
   function set(patch: Partial<Filters>) {
     selection.update((s) => ({ ...s, filters: { ...s.filters, ...patch } }));
