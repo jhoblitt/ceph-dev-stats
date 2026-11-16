@@ -3,10 +3,9 @@
   stock is measured once, at the bucket's end. Each layer of each bucket is a
   hit target: hovering or focusing it shows the bucket's every layer, the
   arrow keys move between buckets (left, right) and layers (up, down), and a
-  click, Enter or Space chooses it. Given a section's time axis, the chart
-  takes its columns from it, so a bucket sits at the same x as in the
-  section's other charts on that axis, and it keeps their margin for end
-  labels though it names nothing there itself.
+  click, Enter or Space chooses it. The chart takes its columns from
+  `timeColumns`, as every chart over the period does, so a bucket sits at
+  the same x as in the other charts.
 -->
 <script lang="ts">
   import { scaleLinear } from 'd3-scale';
@@ -14,7 +13,6 @@
   import { type AreaModel, areaReadout } from '../../lib/charts';
   import { bucketName, formatCount } from '../../lib/format';
   import { PLOT_LEFT as LEFT, type Tick, bucketTicks, timeColumns } from '../../lib/plot';
-  import type { TimeAxis } from '../../lib/timeaxis.svelte';
   import AxisX from './AxisX.svelte';
   import AxisY from './AxisY.svelte';
   import Tooltip from './Tooltip.svelte';
@@ -30,11 +28,9 @@
     /** Called with a bucket's first instant and a layer's key when that layer of that bucket is chosen. */
     onselect: (bucket: number, key: string) => void;
     height?: number;
-    /** The time axis this chart shares with the others its section stacks over the period. */
-    timeAxis?: TimeAxis;
   }
 
-  let { model, label, unit, selected, onselect, height = 220, timeAxis }: Props = $props();
+  let { model, label, unit, selected, onselect, height = 220 }: Props = $props();
 
   let measured = $state(0);
   const width = $derived(measured > 0 ? measured : 640);
@@ -43,7 +39,7 @@
   const base = $derived(height - 24);
 
   const n = $derived(model.buckets.length);
-  const x = $derived(timeColumns(width, n, timeAxis?.endLabels ?? false));
+  const x = $derived(timeColumns(width, n));
   // Each layer's lower and upper edge per bucket.
   const bands = $derived.by(() => {
     const below = model.buckets.map(() => 0);

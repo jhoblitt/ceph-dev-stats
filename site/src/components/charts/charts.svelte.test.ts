@@ -2,8 +2,9 @@
 import { fireEvent, render, screen, within } from '@testing-library/svelte';
 import { createRawSnippet, tick } from 'svelte';
 import { describe, expect, it, vi } from 'vitest';
-import type { AreaModel, BucketModel, CurveModel, Panel } from '../../lib/charts';
+import { type AreaModel, type BucketModel, type CurveModel, type Panel, bucketLegend } from '../../lib/charts';
 import { formatCount, formatDays } from '../../lib/format';
+import { PLOT_RIGHT } from '../../lib/plot';
 import BucketChart from './BucketChart.svelte';
 import ChartFrame from './ChartFrame.svelte';
 import StackedArea from './StackedArea.svelte';
@@ -263,8 +264,6 @@ describe('BucketChart', () => {
     expect(bottom?.querySelectorAll('.bar')).toHaveLength(0);
     expect(bottom?.querySelectorAll('.line')).toHaveLength(1);
     expect(container.querySelectorAll('.axis-y')).toHaveLength(2);
-    // The line alone in its titled panel is named by the title, not an end label.
-    expect(container.querySelectorAll('.end-label')).toHaveLength(0);
     // Every bar sits above the break between the panels, every line point below it.
     const brk = Number(container.querySelector('.panel-base')?.getAttribute('y1'));
     const ys = (el: Element | null | undefined, re: RegExp) =>
@@ -358,9 +357,13 @@ describe('BucketChart', () => {
     }
   });
 
-  it('names a line by its end label when it shares a titled panel with bars', () => {
+  it('leaves a line sharing a titled panel with bars to the legend, and runs the plot to its right edge', () => {
     const { container } = setup({ panels: [{ keys: ['not-disclosed', 'disclosed', 'merged'], unit: 'PRs' }] });
-    expect([...container.querySelectorAll('.end-label')].map((t) => t.textContent)).toEqual(['merged']);
+    const svg = container.querySelector('svg[role="group"]') as SVGElement;
+    // The only words in the plot are its axes'.
+    expect([...svg.querySelectorAll('text')].filter((t) => t.closest('.axis-x, .axis-y') === null)).toEqual([]);
+    expect(Number(svg.querySelector('.axis-y line')?.getAttribute('x2'))).toBe(Number(svg.getAttribute('width')) - PLOT_RIGHT);
+    expect(bucketLegend(counts)).toContainEqual({ label: 'merged', mark: 'line', color: 'var(--series-3)', shape: 'circle' });
   });
 
   it('neither draws a line marked undrawn nor scales to it, with or without panels', () => {
@@ -504,7 +507,7 @@ describe('StepCurve', () => {
     expect(end).toHaveLength(2);
     // The line ends where its end marker sits, at day 40, short of the axis end, day 80.
     expect(lastX(container.querySelector('.line')?.getAttribute('d'))).toBeCloseTo(markerX(end[0]), 2);
-    expect(markerX(end[0])).toBeLessThan(640 - 132 - 1);
+    expect(markerX(end[0])).toBeLessThan(640 - 12 - 1);
     const slider = screen.getByRole('slider', { name: 'Time to merge' });
     await fireEvent.focus(slider);
     await fireEvent.keyDown(slider, { key: 'End' });

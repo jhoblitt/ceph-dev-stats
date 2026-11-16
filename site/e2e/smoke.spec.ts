@@ -319,6 +319,44 @@ test('no two labels of a time axis touch, from a phone to a wide screen', async 
   }
 });
 
+/**
+ * The charts drawn across the page over the period, by title, section by
+ * section. Not here: the outcome curves, whose axis is a duration, the wait
+ * charts set side by side with them, and the dot plot, whose dots sit at
+ * their instants rather than in a bucket's column.
+ */
+const OVER_THE_PERIOD = [
+  /^PRs opened, merged and closed unmerged, per /,
+  /^Open PRs at the end of each /,
+  /^Review capacity against arrivals, per /,
+  /^Human and bot reviews per /,
+  /^Bot commands per /,
+  /^Share of PRs opened that disclose LLM use, per /,
+  /^Share of PRs opened naming each tool, per /,
+];
+
+test('every chart over the period has the same plot edges, down the whole page', async ({ page }) => {
+  for (const width of [1280, 390]) {
+    await page.setViewportSize({ width, height: 900 });
+    await open(page);
+    const edges: { chart: string; left: number; right: number }[] = [];
+    for (const name of OVER_THE_PERIOD) {
+      const plots = page.getByRole('figure', { name }).locator('svg[role="group"]');
+      await expect(plots.first(), `${width}px: ${name}`).toBeVisible();
+      // A plot's edges: its value axis's gridlines, where the page draws them.
+      const drawn = await plots.evaluateAll((svgs) =>
+        svgs.map((svg) => {
+          const r = (svg.querySelector('.axis-y line') as SVGLineElement).getBoundingClientRect();
+          return { left: r.left, right: r.right };
+        }),
+      );
+      drawn.forEach((e, k) => edges.push({ chart: `${name.source} #${k}`, left: Math.round(e.left), right: Math.round(e.right) }));
+    }
+    const first = edges[0]!;
+    for (const e of edges) expect(e, `${width}px`).toEqual({ ...first, chart: e.chart });
+  }
+});
+
 test('the filter bar lines its fields up, row by row, on a wide screen and a phone', async ({ page }) => {
   for (const width of [1280, 390]) {
     await page.setViewportSize({ width, height: 900 });

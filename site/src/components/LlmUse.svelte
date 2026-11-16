@@ -19,15 +19,12 @@
   import { sectionHash } from '../lib/state';
   import { disclosureCounts, familiesShare, namingAny } from '../lib/stats/measures';
   import { weekly } from '../lib/stats/weekly';
-  import { TimeAxis } from '../lib/timeaxis.svelte';
   import BucketChart from './charts/BucketChart.svelte';
   import ChartFrame from './charts/ChartFrame.svelte';
   import Key from './charts/Key.svelte';
   import ReviewsRecordedNote from './ReviewsRecordedNote.svelte';
 
   const { meta, selection, data, view } = getPage();
-  // The charts below stacked over the period share one time axis, so a bucket is at the same x in each.
-  const timeAxis = new TimeAxis();
 
   const dataset = $derived($view.dataset);
   const filters = $derived($view.filters);
@@ -97,7 +94,6 @@
       height={200}
       {selected}
       onselect={onbucket}
-      {timeAxis}
     />
   </ChartFrame>
 
@@ -117,7 +113,6 @@
       height={Math.max(160, 40 + families.panels.length * 84)}
       {selected}
       onselect={onbucket}
-      {timeAxis}
     />
   </ChartFrame>
 
