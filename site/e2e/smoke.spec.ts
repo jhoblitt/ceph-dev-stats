@@ -319,6 +319,69 @@ test('no two labels of a time axis touch, from a phone to a wide screen', async 
   }
 });
 
+test('the filter bar lines its fields up, row by row, on a wide screen and a phone', async ({ page }) => {
+  for (const width of [1280, 390]) {
+    await page.setViewportSize({ width, height: 900 });
+    await open(page);
+    const bar = await page.locator('.filter-bar').evaluate((el) => {
+      const box = (e: Element) => e.getBoundingClientRect();
+      // Each field: its label (a group's legend), and its controls.
+      type Field = { name: string; label: DOMRect | null; controls: DOMRect[] };
+      const fields: Field[] = [];
+      // A group's controls on its legend's line are its field; those it wraps onto later lines stand alone.
+      for (const fs of el.querySelectorAll(':scope > fieldset')) {
+        const name = fs.querySelector('legend')?.textContent?.trim() ?? '';
+        const controls = [...fs.querySelectorAll('input[type="date"], .presets button, .segmented')].map(box);
+        const line = Math.min(...controls.map((c) => c.bottom));
+        fields.push({ name, label: box(fs.querySelector('legend') as Element), controls: controls.filter((c) => c.top < line) });
+        for (const c of controls.filter((c) => c.top >= line)) fields.push({ name: `${name}, wrapped`, label: null, controls: [c] });
+      }
+      for (const f of el.querySelectorAll(':scope > .field, .people > .field')) {
+        fields.push({
+          name: f.querySelector('label')?.textContent?.trim() ?? '',
+          label: box(f.querySelector('label') as Element),
+          controls: [box(f.querySelector('select, input') as Element)],
+        });
+      }
+      const topOf = (f: Field) => f.label?.top ?? Math.min(...f.controls.map((c) => c.top));
+      // A visual row: the fields whose spans, label to control, overlap.
+      const rows: { lo: number; hi: number; fields: Field[] }[] = [];
+      for (const f of fields.sort((a, b) => topOf(a) - topOf(b))) {
+        const lo = topOf(f);
+        const hi = Math.max(...f.controls.map((c) => c.bottom));
+        const row = rows.find((r) => r.lo < hi && lo < r.hi);
+        if (row) {
+          row.fields.push(f);
+          row.lo = Math.min(row.lo, lo);
+          row.hi = Math.max(row.hi, hi);
+        } else rows.push({ lo, hi, fields: [f] });
+      }
+      const segmented = el.querySelector('.segmented') as Element;
+      const options = [...segmented.querySelectorAll('label')].map((o) => box(o).right);
+      return {
+        rows: rows.map((r) => ({
+          names: r.fields.map((f) => f.name).join(', '),
+          labels: r.fields.flatMap((f) => (f.label === null ? [] : [f.label.top])),
+          tops: r.fields.flatMap((f) => f.controls.map((c) => c.top)),
+          heights: r.fields.flatMap((f) => f.controls.map((c) => c.height)),
+        })),
+        slack: box(segmented).right - Math.max(...options),
+        sideways: document.scrollingElement!.scrollWidth > window.innerWidth,
+      };
+    });
+    const spread = (xs: number[]) => Math.max(...xs) - Math.min(...xs);
+    for (const row of bar.rows) {
+      if (row.labels.length > 0) expect(spread(row.labels), `${width}px, labels of ${row.names}`).toBeLessThanOrEqual(1);
+      expect(spread(row.tops), `${width}px, control tops of ${row.names}`).toBeLessThanOrEqual(1);
+      expect(spread(row.heights), `${width}px, control heights of ${row.names}`).toBeLessThanOrEqual(0.5);
+    }
+    // One control height across the bar, and a segmented control as wide as its options.
+    expect(spread(bar.rows.flatMap((r) => r.heights)), `${width}px, control heights`).toBeLessThanOrEqual(0.5);
+    expect(bar.slack, `${width}px, the Target control's empty slack`).toBeLessThanOrEqual(1);
+    expect(bar.sideways, `${width}px, sideways scroll`).toBe(false);
+  }
+});
+
 test('the footer shows a version and the repository link', async ({ page }) => {
   await open(page);
   const footer = page.getByRole('contentinfo');

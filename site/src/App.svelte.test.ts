@@ -366,7 +366,7 @@ describe('filter bar', () => {
     render(App, (await page('#/?target=nope&component=nope&disclosure=ai')).props);
     expect((screen.getByRole('radio', { name: 'main' }) as HTMLInputElement).checked).toBe(true);
     expect((screen.getByLabelText('Component') as HTMLSelectElement).value).toBe('');
-    expect((screen.getByLabelText('Disclosure') as HTMLSelectElement).value).toBe('');
+    expect((screen.getByLabelText('AI use disclosure') as HTMLSelectElement).value).toBe('');
     expect((screen.getByLabelText('From') as HTMLInputElement).value).toBe('2026-05-15');
     expect((screen.getByLabelText('To') as HTMLInputElement).value).toBe('2026-11-15');
   });
@@ -400,9 +400,9 @@ describe('filter bar', () => {
     expect(loc.hash()).toBe('#/?target=backports&size=gt1000&reopened=only');
   });
 
-  it('says what was disclosed in each Disclosure choice', async () => {
+  it('says what was disclosed in the AI use disclosure filter, its label and each choice', async () => {
     render(App, (await page('')).props);
-    const disclosure = screen.getByLabelText('Disclosure') as HTMLSelectElement;
+    const disclosure = screen.getByLabelText('AI use disclosure') as HTMLSelectElement;
     expect([...disclosure.options].map((o) => [o.value, o.text])).toEqual([
       ['', 'all'],
       ['disclosed', 'AI use disclosed'],
