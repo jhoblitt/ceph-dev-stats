@@ -160,6 +160,18 @@ var _ = Describe("Run", func() {
 		return firsts
 	}
 
+	// searched returns the search of each request that asked GitHub's
+	// search for the window's count, in order.
+	searched := func() []string {
+		var out []string
+		for _, r := range server.Requests() {
+			if s, ok := r.Variables["search"].(string); ok {
+				out = append(out, s)
+			}
+		}
+		return out
+	}
+
 	// logged returns the log records with message msg.
 	logged := func(msg string) []map[string]any {
 		GinkgoHelper()
@@ -808,7 +820,7 @@ var _ = Describe("Run", func() {
 		for _, r := range server.Requests()[first:] {
 			ops = append(ops, r.Operation)
 		}
-		Expect(ops).To(HaveEach(BeElementOf(ghapi.PullRequests.Name, ghapi.Counts.Name)))
+		Expect(ops).To(HaveEach(BeElementOf(ghapi.PullRequests.Name, ghapi.Counts.Name, ghapi.SearchCount.Name)))
 		Expect(os.ReadFile(filepath.Join(cacheDir, "raw", "3.json"))).To(Equal(before))
 	})
 
@@ -1062,9 +1074,8 @@ var _ = Describe("Run", func() {
 		}))
 		Expect(logged("asking every author's prior pull requests again")).To(BeEmpty())
 
-		counts := server.Operations(ghapi.Counts.Name)
-		Expect(counts).To(HaveLen(1))
-		Expect(counts[0].Variables).To(HaveKeyWithValue("search", "repo:ceph/ceph is:pr created:>=2026-05-15"))
+		Expect(server.Operations(ghapi.Counts.Name)).To(HaveLen(1))
+		Expect(searched()).To(Equal([]string{"repo:ceph/ceph is:pr created:>=2026-05-15"}))
 		Expect(readJSON(filepath.Join(cacheDir, "meta.json"))).To(Equal(map[string]any{
 			"window_start":            "2026-05-15T00:00:00Z",
 			"walk_started":            "2026-11-15T12:00:00Z",
@@ -1164,7 +1175,7 @@ var _ = Describe("Run", func() {
 		Expect(readJSON(filepath.Join(cacheDir, "authors.json"))).To(HaveKeyWithValue("authors", HaveLen(27)))
 	})
 
-	It("asks for the baselines and counts from ceph/ceph's creation by default", func() {
+	It("asks for the baselines and counts from ceph/ceph's creation by default, by the listing alone", func() {
 		window = time.Time{}
 		serve(pr(1, 1, "OPEN"))
 
@@ -1175,9 +1186,9 @@ var _ = Describe("Run", func() {
 		Expect(baselines[0].Variables).To(Equal(map[string]any{
 			"q0": "repo:ceph/ceph is:pr author:alice created:<2011-09-01",
 		}))
-		counts := server.Operations(ghapi.Counts.Name)
-		Expect(counts).To(HaveLen(1))
-		Expect(counts[0].Variables).To(HaveKeyWithValue("search", "repo:ceph/ceph is:pr created:>=2011-09-01"))
+		Expect(server.Operations(ghapi.Counts.Name)).To(HaveLen(1))
+		Expect(searched()).To(BeEmpty())
+		Expect(readJSON(filepath.Join(cacheDir, fetch.MetaFile))).To(HaveKeyWithValue("opened_in_window_source", "listing"))
 	})
 
 	Describe("GitHub's counts", func() {
@@ -1190,8 +1201,8 @@ var _ = Describe("Run", func() {
 			server.SetCounts(2, map[string]int{"alice": 0})
 		})
 
-		DescribeTable("count the pull requests opened in the window, recording which count it is, and the open ones by the listing",
-			func(start time.Time, opened float64, source string) {
+		DescribeTable("count the pull requests opened in the window, recording which count it is, and the open ones by the listing, asking the search only for a window the listing cannot count",
+			func(start time.Time, opened float64, source string, searches []string) {
 				window = start
 
 				Expect(run(fetch.WindowStart)).To(Succeed())
@@ -1204,19 +1215,58 @@ var _ = Describe("Run", func() {
 					"open":                    1.0,
 					"deleted_authors_named":   true,
 				}))
+				Expect(server.Operations(ghapi.Counts.Name)).To(HaveLen(1))
+				Expect(searched()).To(Equal(searches))
 			},
 			Entry("by the listing's total when the window starts at the repository's creation",
-				created, 3.0, "listing"),
+				created, 3.0, "listing", nil),
 			Entry("by the listing's total when the window starts before the repository's creation",
-				time.Date(2011, 9, 1, 0, 0, 0, 0, time.UTC), 3.0, "listing"),
+				time.Date(2011, 9, 1, 0, 0, 0, 0, time.UTC), 3.0, "listing", nil),
 			Entry("by the search when the window starts a day after the repository's creation",
-				created.Add(24*time.Hour), 2.0, "search"),
+				created.Add(24*time.Hour), 2.0, "search", []string{"repo:ceph/ceph is:pr created:>=2011-09-02"}),
 		)
 
-		DescribeTable("is an error naming what the reply lacks, and writes no meta.json",
-			func(body, missing string) {
+		Context("when GitHub's search fails", func() {
+			BeforeEach(func() {
 				server.Intercept(func(_ int, r fetchtest.Request) *fetchtest.Reply {
-					if r.Operation == ghapi.Counts.Name {
+					if _, ok := r.Variables["search"]; ok {
+						return &fetchtest.Reply{Status: 200, Body: `{"errors":[{"message":"Something went wrong while executing your query."}]}`}
+					}
+					return nil
+				})
+			})
+
+			It("counts a window that starts at the repository's creation by the listing, never asking the search", func() {
+				window = created
+
+				Expect(run(fetch.WindowStart)).To(Succeed())
+
+				Expect(readJSON(metaPath())).To(And(
+					HaveKeyWithValue("opened_in_window", 3.0),
+					HaveKeyWithValue("opened_in_window_source", "listing"),
+					HaveKeyWithValue("open", 1.0),
+				))
+				Expect(server.Operations(ghapi.Counts.Name)).To(HaveLen(1))
+				Expect(searched()).To(BeEmpty())
+			})
+
+			It("is an error naming the search for a window that starts later, and writes no meta.json", func() {
+				window = created.Add(24 * time.Hour)
+
+				err := run(fetch.WindowStart)
+
+				Expect(err).To(MatchError(And(ContainSubstring("GitHub's search"), ContainSubstring("Something went wrong"))))
+				Expect(server.Operations(ghapi.Counts.Name)).To(HaveLen(1))
+				Expect(searched()).To(HaveLen(1))
+				Expect(metaPath()).NotTo(BeAnExistingFile())
+			})
+		})
+
+		DescribeTable("is an error naming what the reply lacks, and writes no meta.json",
+			func(op, body, missing string) {
+				window = created.Add(24 * time.Hour)
+				server.Intercept(func(_ int, r fetchtest.Request) *fetchtest.Reply {
+					if r.Operation == op {
 						return &fetchtest.Reply{Status: 200, Body: body}
 					}
 					return nil
@@ -1228,27 +1278,27 @@ var _ = Describe("Run", func() {
 				Expect(err).NotTo(MatchError(ghapi.ErrUnavailable))
 				Expect(metaPath()).NotTo(BeAnExistingFile())
 			},
-			Entry("without createdAt",
-				`{"data":{"search":{"issueCount":2},"repository":{"total":{"totalCount":3},"open":{"totalCount":1}}}}`,
+			Entry("without createdAt", ghapi.Counts.Name,
+				`{"data":{"repository":{"total":{"totalCount":3},"open":{"totalCount":1}}}}`,
 				"reply without repository.createdAt"),
-			Entry("with a null createdAt",
-				`{"data":{"search":{"issueCount":2},"repository":{"createdAt":null,"total":{"totalCount":3},"open":{"totalCount":1}}}}`,
+			Entry("with a null createdAt", ghapi.Counts.Name,
+				`{"data":{"repository":{"createdAt":null,"total":{"totalCount":3},"open":{"totalCount":1}}}}`,
 				"reply without repository.createdAt"),
-			Entry("without the total",
-				`{"data":{"search":{"issueCount":2},"repository":{"createdAt":"2011-09-01T17:30:00Z","open":{"totalCount":1}}}}`,
+			Entry("without the total", ghapi.Counts.Name,
+				`{"data":{"repository":{"createdAt":"2011-09-01T17:30:00Z","open":{"totalCount":1}}}}`,
 				"reply without repository.pullRequests.totalCount"),
-			Entry("with a total without its count",
-				`{"data":{"search":{"issueCount":2},"repository":{"createdAt":"2011-09-01T17:30:00Z","total":{},"open":{"totalCount":1}}}}`,
+			Entry("with a total without its count", ghapi.Counts.Name,
+				`{"data":{"repository":{"createdAt":"2011-09-01T17:30:00Z","total":{},"open":{"totalCount":1}}}}`,
 				"reply without repository.pullRequests.totalCount"),
-			Entry("without the open total",
-				`{"data":{"search":{"issueCount":2},"repository":{"createdAt":"2011-09-01T17:30:00Z","total":{"totalCount":3}}}}`,
+			Entry("without the open total", ghapi.Counts.Name,
+				`{"data":{"repository":{"createdAt":"2011-09-01T17:30:00Z","total":{"totalCount":3}}}}`,
 				"reply without repository.pullRequests(states: OPEN).totalCount"),
-			Entry("without the search's count",
-				`{"data":{"search":{},"repository":{"createdAt":"2011-09-01T17:30:00Z","total":{"totalCount":3},"open":{"totalCount":1}}}}`,
-				"reply without search.issueCount"),
-			Entry("without repository",
-				`{"data":{"search":{"issueCount":2}}}`,
+			Entry("without repository", ghapi.Counts.Name,
+				`{"data":{}}`,
 				"reply without repository.createdAt"),
+			Entry("without the search's count", ghapi.SearchCount.Name,
+				`{"data":{"search":{}}}`,
+				"reply without search.issueCount"),
 		)
 	})
 })

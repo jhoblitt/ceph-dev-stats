@@ -531,29 +531,23 @@ func staleReason(window time.Time) string {
 // counts asks GitHub how many pull requests were opened in the window and
 // how many are open now. A window that starts no later than the
 // repository's creation holds every pull request, so the listing's total
-// counts it exactly; a later one only the search can count, and GitHub's
-// search has been seen to omit pull requests its listing returns.
+// counts it exactly and the search is not asked; a later one only the
+// search can count, and GitHub's search has been seen to omit pull requests
+// its listing returns.
 func (w *walker) counts(ctx context.Context) (Meta, error) {
-	vars := map[string]any{
-		"owner": Owner, "name": Name,
-		"search": fmt.Sprintf("repo:%s/%s is:pr created:>=%s", Owner, Name, w.cfg.WindowStart.Format(time.DateOnly)),
-	}
 	type total struct {
 		TotalCount *int `json:"totalCount"`
 	}
 	// Pointers, so that a reply without a field is an error rather than a
 	// count of 0 or a repository created at the zero time.
 	var resp struct {
-		Search *struct {
-			IssueCount *int `json:"issueCount"`
-		} `json:"search"`
 		Repository *struct {
 			CreatedAt *time.Time `json:"createdAt"`
 			Total     *total     `json:"total"`
 			Open      *total     `json:"open"`
 		} `json:"repository"`
 	}
-	if err := w.client.Do(ctx, ghapi.Counts, vars, &resp); err != nil {
+	if err := w.client.Do(ctx, ghapi.Counts, map[string]any{"owner": Owner, "name": Name}, &resp); err != nil {
 		return Meta{}, fmt.Errorf("counting pull requests: %w", err)
 	}
 	repo := resp.Repository
@@ -565,8 +559,6 @@ func (w *walker) counts(ctx context.Context) (Meta, error) {
 		missing = "repository.pullRequests.totalCount"
 	case repo.Open == nil || repo.Open.TotalCount == nil:
 		missing = "repository.pullRequests(states: OPEN).totalCount"
-	case resp.Search == nil || resp.Search.IssueCount == nil:
-		missing = "search.issueCount"
 	}
 	if missing != "" {
 		return Meta{}, fmt.Errorf("counting pull requests: reply without %s", missing)
@@ -574,18 +566,45 @@ func (w *walker) counts(ctx context.Context) (Meta, error) {
 	m := Meta{
 		WindowStart:          w.cfg.WindowStart,
 		WalkStarted:          w.started,
-		OpenedInWindow:       *resp.Search.IssueCount,
-		OpenedInWindowSource: record.SourceSearch,
+		OpenedInWindow:       *repo.Total.TotalCount,
+		OpenedInWindowSource: record.SourceListing,
 		Open:                 *repo.Open.TotalCount,
 	}
-	if !w.cfg.WindowStart.After(*repo.CreatedAt) {
-		m.OpenedInWindow, m.OpenedInWindowSource = *repo.Total.TotalCount, record.SourceListing
-	}
-	w.log.InfoContext(ctx, "counted pull requests",
+	attrs := []slog.Attr{
 		slog.Time("window_start", w.cfg.WindowStart),
 		slog.Time("repository_created", *repo.CreatedAt),
 		slog.Int("listing_total", *repo.Total.TotalCount),
-		slog.Int("search_count", *resp.Search.IssueCount),
-		slog.String("opened_in_window_source", string(m.OpenedInWindowSource)))
+	}
+	if w.cfg.WindowStart.After(*repo.CreatedAt) {
+		n, err := w.searchCount(ctx)
+		if err != nil {
+			return Meta{}, err
+		}
+		m.OpenedInWindow, m.OpenedInWindowSource = n, record.SourceSearch
+		attrs = append(attrs, slog.Int("search_count", n))
+	}
+	attrs = append(attrs, slog.String("opened_in_window_source", string(m.OpenedInWindowSource)))
+	w.log.LogAttrs(ctx, slog.LevelInfo, "counted pull requests", attrs...)
 	return m, nil
+}
+
+// searchCount asks GitHub's search how many pull requests were opened from
+// the window start on.
+func (w *walker) searchCount(ctx context.Context) (int, error) {
+	const what = "counting pull requests opened in the window by GitHub's search"
+	vars := map[string]any{
+		"search": fmt.Sprintf("repo:%s/%s is:pr created:>=%s", Owner, Name, w.cfg.WindowStart.Format(time.DateOnly)),
+	}
+	var resp struct {
+		Search *struct {
+			IssueCount *int `json:"issueCount"`
+		} `json:"search"`
+	}
+	if err := w.client.Do(ctx, ghapi.SearchCount, vars, &resp); err != nil {
+		return 0, fmt.Errorf("%s: %w", what, err)
+	}
+	if resp.Search == nil || resp.Search.IssueCount == nil {
+		return 0, fmt.Errorf("%s: reply without search.issueCount", what)
+	}
+	return *resp.Search.IssueCount, nil
 }

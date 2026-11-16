@@ -52,7 +52,7 @@ type Reply struct {
 	Body   string
 }
 
-// Server answers PullRequests, the connection pages, Counts,
+// Server answers PullRequests, the connection pages, Counts, SearchCount,
 // AuthorBaselines, CommitNames and CommitNamesPage from the pull requests it
 // holds. Cursors are offsets; lists are ordered by updatedAt then number,
 // both descending. A held pull request's CommitNames are its commits' names
@@ -98,7 +98,7 @@ func (s *Server) After(f func(n int, r Request)) {
 	s.after = f
 }
 
-// SetCounts sets the issueCount of the Counts search, which need not be the
+// SetCounts sets the issueCount SearchCount answers, which need not be the
 // number of pull requests the server holds, and the AuthorBaselines answers
 // by login.
 func (s *Server) SetCounts(searchCount int, priorPRs map[string]int) {
@@ -207,13 +207,14 @@ func (s *Server) answer(r Request) (map[string]any, error) {
 			}
 		}
 		return map[string]any{
-			"search": map[string]any{"issueCount": s.searchCount},
 			"repository": map[string]any{
 				"createdAt": s.createdAt,
 				"total":     map[string]any{"totalCount": len(s.prs)},
 				"open":      map[string]any{"totalCount": open},
 			},
 		}, nil
+	case ghapi.SearchCount.Name:
+		return map[string]any{"search": map[string]any{"issueCount": s.searchCount}}, nil
 	case ghapi.AuthorBaselines(0).Name:
 		out := map[string]any{}
 		for i := 0; ; i++ {

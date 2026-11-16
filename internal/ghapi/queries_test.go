@@ -29,7 +29,7 @@ var _ = Describe("queries", func() {
 	}
 
 	all := func() []ghapi.Query {
-		qs := []ghapi.Query{ghapi.PullRequests, ghapi.Counts, ghapi.AuthorBaselines(3), ghapi.CommitNames(3), ghapi.CommitNamesPage}
+		qs := []ghapi.Query{ghapi.PullRequests, ghapi.Counts, ghapi.SearchCount, ghapi.AuthorBaselines(3), ghapi.CommitNames(3), ghapi.CommitNamesPage}
 		for _, c := range ghapi.Connections {
 			qs = append(qs, ghapi.ConnectionPage(c))
 		}
@@ -85,11 +85,16 @@ var _ = Describe("queries", func() {
 		}
 	})
 
-	It("asks for the repository's creation and its listing's totals beside the search", func() {
-		Expect(ghapi.Counts.Text).To(ContainSubstring("search(query: $search, type: ISSUE, first: 1) { issueCount }"))
+	It("asks for the repository's creation and its listing's totals, and not the search", func() {
 		Expect(ghapi.Counts.Text).To(ContainSubstring("createdAt"))
 		Expect(ghapi.Counts.Text).To(ContainSubstring("total: pullRequests { totalCount }"))
 		Expect(ghapi.Counts.Text).To(ContainSubstring("open: pullRequests(states: OPEN) { totalCount }"))
+		Expect(ghapi.Counts.Text).NotTo(ContainSubstring("search"))
+	})
+
+	It("asks for the search's count alone", func() {
+		Expect(ghapi.SearchCount.Text).To(ContainSubstring("search(query: $search, type: ISSUE, first: 1) { issueCount }"))
+		Expect(ghapi.SearchCount.Text).NotTo(ContainSubstring("repository"))
 	})
 
 	It("asks for one aliased pull request per number, each with the first page of its commits' names", func() {

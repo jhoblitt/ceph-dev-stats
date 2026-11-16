@@ -101,18 +101,24 @@ func ConnectionPage(c Connection) Query {
 `}
 }
 
-// Counts asks for the number of pull requests a search matches, the
-// repository's creation time, and its listing's totals of pull requests,
-// aliased total, and of open ones, aliased open. Variables: owner, name,
-// search.
-var Counts = Query{Name: "Counts", Text: `query Counts($owner: String!, $name: String!, $search: String!) {
+// Counts asks for the repository's creation time and its listing's totals
+// of pull requests, aliased total, and of open ones, aliased open.
+// Variables: owner, name.
+var Counts = Query{Name: "Counts", Text: `query Counts($owner: String!, $name: String!) {
   ` + rateLimitFields + `
-  search(query: $search, type: ISSUE, first: 1) { issueCount }
   repository(owner: $owner, name: $name) {
     createdAt
     total: pullRequests { totalCount }
     open: pullRequests(states: OPEN) { totalCount }
   }
+}
+`}
+
+// SearchCount asks for the number of issues and pull requests a search
+// matches. Variables: search.
+var SearchCount = Query{Name: "SearchCount", Text: `query SearchCount($search: String!) {
+  ` + rateLimitFields + `
+  search(query: $search, type: ISSUE, first: 1) { issueCount }
 }
 `}
 
