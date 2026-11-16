@@ -301,6 +301,29 @@ var _ = Describe("Build", func() {
 			Expect(err).To(MatchError(And(ContainSubstring("42"), ContainSubstring(`"locked"`))))
 		})
 
+		DescribeTable("is an error naming the pull request for a lifecycle event kind a record does not hold",
+			func(kind string) {
+				r := pr(42)
+				r.Events = []record.Event{event(h(1), kind)}
+				in := loadInput()
+				in.Records = []record.Record{r}
+				_, err := rollup.Build(in)
+				Expect(err).To(MatchError(And(ContainSubstring("42"), ContainSubstring(`"`+kind+`"`))))
+			},
+			Entry("one the site does not know", "locked"),
+			Entry("a comment's kind, which the site knows", "comment_other"),
+			Entry("a review's kind", "review_approved"),
+		)
+
+		It("is an error naming the pull request for a review state it does not know", func() {
+			r := pr(42)
+			r.Reviews = []record.Review{review(h(1), "carol", "pending")}
+			in := loadInput()
+			in.Records = []record.Record{r}
+			_, err := rollup.Build(in)
+			Expect(err).To(MatchError(And(ContainSubstring("42"), ContainSubstring(`"pending"`))))
+		})
+
 		It("indexes the disclosure, its families and the components, lists ascending", func() {
 			r := pr(1)
 			r.Labels = []string{"cephfs", "rgw", "needs-review"}

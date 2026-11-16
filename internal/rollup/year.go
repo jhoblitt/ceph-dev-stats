@@ -216,8 +216,8 @@ func (b *builder) events(r *record.Record, p *classify.PR) ([]event, error) {
 		}
 	}
 	for _, le := range r.Events {
-		if _, ok := b.eventKinds[le.Kind]; !ok {
-			return nil, fmt.Errorf("pull request %d has an event of kind %q, which the site does not know", r.Number, le.Kind)
+		if !slices.Contains(lifecycleKinds, le.Kind) {
+			return nil, fmt.Errorf("pull request %d has a lifecycle event of kind %q, which is not one a record holds", r.Number, le.Kind)
 		}
 		if le.Kind == record.KindClosed && merges[epoch(le.At)] {
 			continue
@@ -233,8 +233,8 @@ func (b *builder) events(r *record.Record, p *classify.PR) ([]event, error) {
 }
 
 // reviewKind is the event kind of a review by a human other than the
-// author. A dismissed review no
-// longer carries a verdict, so it counts as a comment.
+// author. A dismissed review no longer carries a verdict, so it counts as
+// a comment.
 func reviewKind(number int, state string) (string, error) {
 	switch state {
 	case record.ReviewApproved:
