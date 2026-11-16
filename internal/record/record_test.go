@@ -249,7 +249,7 @@ var _ = Describe("meta", func() {
 			Repo:           "ceph/ceph",
 			WindowStart:    time.Date(2026, 5, 15, 0, 0, 0, 0, time.UTC),
 			FetchedThrough: time.Date(2026, 11, 15, 12, 0, 1, 0, time.UTC),
-			GitHubCounts:   record.Counts{OpenedInWindow: 4985, Open: 2019},
+			GitHubCounts:   record.Counts{OpenedInWindow: 4985, OpenedInWindowSource: record.SourceSearch, Open: 2019},
 		}
 	})
 
@@ -262,11 +262,32 @@ var _ = Describe("meta", func() {
   "fetched_through": "2026-11-15T12:00:01Z",
   "github_counts": {
     "opened_in_window": 4985,
+    "opened_in_window_source": "search",
     "open": 2019
   }
 }
 `))
 		Expect(record.ReadMeta(dataDir)).To(Equal(meta))
+	})
+
+	DescribeTable("takes the count of pull requests opened in the window to be",
+		func(source, want record.CountSource) {
+			Expect(source.OrSearch()).To(Equal(want))
+		},
+		Entry("the search, for a meta.json written before it recorded the source, when every count was the search's",
+			record.CountSource(""), record.SourceSearch),
+		Entry("the search, when meta.json says so", record.SourceSearch, record.SourceSearch),
+		Entry("the listing, when meta.json says so", record.SourceListing, record.SourceListing),
+	)
+
+	It("reads a meta.json written before it recorded the source without one", func() {
+		Expect(os.WriteFile(path, []byte(`{"repo":"ceph/ceph","fetched_through":"2026-11-15T12:00:01Z","github_counts":{"opened_in_window":4985,"open":2019}}`), 0o600)).To(Succeed())
+
+		m, err := record.ReadMeta(dataDir)
+
+		Expect(err).NotTo(HaveOccurred())
+		Expect(m.GitHubCounts).To(Equal(record.Counts{OpenedInWindow: 4985, Open: 2019}))
+		Expect(m.GitHubCounts.OpenedInWindowSource.OrSearch()).To(Equal(record.SourceSearch))
 	})
 
 	It("leaves an unchanged meta alone", func() {

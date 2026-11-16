@@ -17,6 +17,7 @@ import (
 	"github.com/jhoblitt/ceph-dev-stats/internal/fetch/fetchtest"
 	"github.com/jhoblitt/ceph-dev-stats/internal/ghapi"
 	"github.com/jhoblitt/ceph-dev-stats/internal/record"
+	"github.com/jhoblitt/ceph-dev-stats/internal/tables"
 )
 
 var _ = Describe("fetch", func() {
@@ -246,6 +247,30 @@ var _ = Describe("fetch", func() {
 				prior[rec.Number] = rec.PriorPRs
 			}
 			Expect(prior).To(Equal(map[int]*int{1: new(0), 2: new(1)}))
+		})
+
+		// The server's repository was created at the window start and its
+		// search counts one pull request fewer than it holds, as GitHub's
+		// search has been seen to do.
+		It("counts the window by the listing when it starts at the repository's creation, and the source reaches check through data/meta.json", func() {
+			for _, name := range []string{tables.ToolsFile, tables.BotsFile, tables.CommandsFile, tables.LabelsFile, tables.KindsFile} {
+				b, err := os.ReadFile(filepath.Join("..", "..", "data", name))
+				Expect(err).NotTo(HaveOccurred())
+				Expect(os.WriteFile(filepath.Join(dataDir, name), b, 0o600)).To(Succeed())
+			}
+			server.SetCounts(1, map[string]int{"alice": 0})
+
+			Expect(run()).To(Succeed())
+			Expect(cli.Run(context.Background(), []string{"extract", "--cache-dir", cacheDir, "--data", dataDir},
+				&bytes.Buffer{}, &bytes.Buffer{}, stderr)).To(Succeed())
+			stdout := &bytes.Buffer{}
+			Expect(cli.Run(context.Background(), []string{"check", "--data", dataDir, "--report"},
+				&bytes.Buffer{}, stdout, stderr)).To(Succeed())
+
+			Expect(record.ReadMeta(dataDir)).To(HaveField("GitHubCounts", record.Counts{
+				OpenedInWindow: 2, OpenedInWindowSource: record.SourceListing, Open: 0,
+			}))
+			Expect(stdout.String()).To(HavePrefix("Counts: 2 opened in the window (GitHub's listing: 2), 0 open (GitHub's listing: 0)\n"))
 		})
 	})
 })

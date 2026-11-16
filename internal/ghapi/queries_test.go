@@ -85,6 +85,13 @@ var _ = Describe("queries", func() {
 		}
 	})
 
+	It("asks for the repository's creation and its listing's totals beside the search", func() {
+		Expect(ghapi.Counts.Text).To(ContainSubstring("search(query: $search, type: ISSUE, first: 1) { issueCount }"))
+		Expect(ghapi.Counts.Text).To(ContainSubstring("createdAt"))
+		Expect(ghapi.Counts.Text).To(ContainSubstring("total: pullRequests { totalCount }"))
+		Expect(ghapi.Counts.Text).To(ContainSubstring("open: pullRequests(states: OPEN) { totalCount }"))
+	})
+
 	It("asks for one aliased search per author", func() {
 		q := ghapi.AuthorBaselines(25)
 		Expect(strings.Count(q.Text, "search(")).To(Equal(25))

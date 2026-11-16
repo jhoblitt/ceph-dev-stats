@@ -14,6 +14,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/jhoblitt/ceph-dev-stats/internal/fetch"
 	"github.com/jhoblitt/ceph-dev-stats/internal/ghapi"
@@ -57,18 +58,20 @@ type Reply struct {
 type Server struct {
 	*httptest.Server
 
-	mu             sync.Mutex
-	prs            map[int]*fetch.Entry
-	requests       []Request
-	intercept      func(n int, r Request) *Reply
-	after          func(n int, r Request)
-	openedInWindow int
-	priorPRs       map[string]int
+	mu          sync.Mutex
+	prs         map[int]*fetch.Entry
+	requests    []Request
+	intercept   func(n int, r Request) *Reply
+	after       func(n int, r Request)
+	searchCount int
+	priorPRs    map[string]int
+	createdAt   time.Time
 }
 
-// NewServer starts a server holding prs. Close it when done.
+// NewServer starts a server holding prs, in a repository created at
+// fetch.WindowStart. Close it when done.
 func NewServer(prs ...fetch.Entry) *Server {
-	s := &Server{prs: map[int]*fetch.Entry{}, priorPRs: map[string]int{}}
+	s := &Server{prs: map[int]*fetch.Entry{}, priorPRs: map[string]int{}, createdAt: fetch.WindowStart}
 	for i := range prs {
 		pr := prs[i]
 		s.prs[pr.Number] = &pr
@@ -93,13 +96,21 @@ func (s *Server) After(f func(n int, r Request)) {
 	s.after = f
 }
 
-// SetCounts sets the Counts search result and the AuthorBaselines answers
+// SetCounts sets the issueCount of the Counts search, which need not be the
+// number of pull requests the server holds, and the AuthorBaselines answers
 // by login.
-func (s *Server) SetCounts(openedInWindow int, priorPRs map[string]int) {
+func (s *Server) SetCounts(searchCount int, priorPRs map[string]int) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.openedInWindow = openedInWindow
+	s.searchCount = searchCount
 	s.priorPRs = priorPRs
+}
+
+// SetCreatedAt sets the repository's createdAt that Counts answers.
+func (s *Server) SetCreatedAt(t time.Time) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.createdAt = t
 }
 
 // Update applies f to the held pull request number.
@@ -194,8 +205,12 @@ func (s *Server) answer(r Request) (map[string]any, error) {
 			}
 		}
 		return map[string]any{
-			"search":     map[string]any{"issueCount": s.openedInWindow},
-			"repository": map[string]any{"pullRequests": map[string]any{"totalCount": open}},
+			"search": map[string]any{"issueCount": s.searchCount},
+			"repository": map[string]any{
+				"createdAt": s.createdAt,
+				"total":     map[string]any{"totalCount": len(s.prs)},
+				"open":      map[string]any{"totalCount": open},
+			},
 		}, nil
 	case ghapi.AuthorBaselines(0).Name:
 		out := map[string]any{}

@@ -21,6 +21,7 @@ import (
 	"github.com/jhoblitt/ceph-dev-stats/internal/fetch"
 	"github.com/jhoblitt/ceph-dev-stats/internal/fetch/fetchtest"
 	"github.com/jhoblitt/ceph-dev-stats/internal/ghapi"
+	"github.com/jhoblitt/ceph-dev-stats/internal/record"
 )
 
 const token = "ghp_spec-token-never-written"
@@ -28,6 +29,9 @@ const token = "ghp_spec-token-never-written"
 var (
 	base      = time.Date(2026, 11, 1, 0, 0, 0, 0, time.UTC)
 	walkStart = time.Date(2026, 11, 15, 12, 0, 0, 0, time.UTC)
+	// created is the repository's createdAt in the counts specs: later in
+	// the day than the default window start.
+	created = time.Date(2011, 9, 1, 17, 30, 0, 0, time.UTC)
 )
 
 func at(hours int) time.Time { return base.Add(time.Duration(hours) * time.Hour) }
@@ -762,10 +766,11 @@ var _ = Describe("Run", func() {
 		Expect(counts).To(HaveLen(1))
 		Expect(counts[0].Variables).To(HaveKeyWithValue("search", "repo:ceph/ceph is:pr created:>=2026-05-15"))
 		Expect(readJSON(filepath.Join(cacheDir, "meta.json"))).To(Equal(map[string]any{
-			"window_start":     "2026-05-15T00:00:00Z",
-			"walk_started":     "2026-11-15T12:00:00Z",
-			"opened_in_window": 42.0,
-			"open":             2.0,
+			"window_start":            "2026-05-15T00:00:00Z",
+			"walk_started":            "2026-11-15T12:00:00Z",
+			"opened_in_window":        42.0,
+			"opened_in_window_source": "search",
+			"open":                    2.0,
 		}))
 	})
 
@@ -872,6 +877,120 @@ var _ = Describe("Run", func() {
 		counts := server.Operations(ghapi.Counts.Name)
 		Expect(counts).To(HaveLen(1))
 		Expect(counts[0].Variables).To(HaveKeyWithValue("search", "repo:ceph/ceph is:pr created:>=2011-09-01"))
+	})
+
+	Describe("GitHub's counts", func() {
+		metaPath := func() string { return filepath.Join(cacheDir, fetch.MetaFile) }
+
+		BeforeEach(func() {
+			// Three pull requests, one open; the search counts two of them.
+			serve(pr(3, 3, "OPEN"), pr(2, 2, "CLOSED"), pr(1, 1, "MERGED"))
+			server.SetCreatedAt(created)
+			server.SetCounts(2, map[string]int{"alice": 0})
+		})
+
+		DescribeTable("count the pull requests opened in the window, recording which count it is, and the open ones by the listing",
+			func(start time.Time, opened float64, source string) {
+				window = start
+
+				Expect(run(fetch.WindowStart)).To(Succeed())
+
+				Expect(readJSON(metaPath())).To(Equal(map[string]any{
+					"window_start":            start.Format(time.RFC3339),
+					"walk_started":            "2026-11-15T12:00:00Z",
+					"opened_in_window":        opened,
+					"opened_in_window_source": source,
+					"open":                    1.0,
+				}))
+			},
+			Entry("by the listing's total when the window starts at the repository's creation",
+				created, 3.0, "listing"),
+			Entry("by the listing's total when the window starts before the repository's creation",
+				time.Date(2011, 9, 1, 0, 0, 0, 0, time.UTC), 3.0, "listing"),
+			Entry("by the search when the window starts a day after the repository's creation",
+				created.Add(24*time.Hour), 2.0, "search"),
+		)
+
+		DescribeTable("is an error naming what the reply lacks, and writes no meta.json",
+			func(body, missing string) {
+				server.Intercept(func(_ int, r fetchtest.Request) *fetchtest.Reply {
+					if r.Operation == ghapi.Counts.Name {
+						return &fetchtest.Reply{Status: 200, Body: body}
+					}
+					return nil
+				})
+
+				err := run(fetch.WindowStart)
+
+				Expect(err).To(MatchError(And(ContainSubstring("counting pull requests"), ContainSubstring(missing))))
+				Expect(err).NotTo(MatchError(ghapi.ErrUnavailable))
+				Expect(metaPath()).NotTo(BeAnExistingFile())
+			},
+			Entry("without createdAt",
+				`{"data":{"search":{"issueCount":2},"repository":{"total":{"totalCount":3},"open":{"totalCount":1}}}}`,
+				"reply without repository.createdAt"),
+			Entry("with a null createdAt",
+				`{"data":{"search":{"issueCount":2},"repository":{"createdAt":null,"total":{"totalCount":3},"open":{"totalCount":1}}}}`,
+				"reply without repository.createdAt"),
+			Entry("without the total",
+				`{"data":{"search":{"issueCount":2},"repository":{"createdAt":"2011-09-01T17:30:00Z","open":{"totalCount":1}}}}`,
+				"reply without repository.pullRequests.totalCount"),
+			Entry("with a total without its count",
+				`{"data":{"search":{"issueCount":2},"repository":{"createdAt":"2011-09-01T17:30:00Z","total":{},"open":{"totalCount":1}}}}`,
+				"reply without repository.pullRequests.totalCount"),
+			Entry("without the open total",
+				`{"data":{"search":{"issueCount":2},"repository":{"createdAt":"2011-09-01T17:30:00Z","total":{"totalCount":3}}}}`,
+				"reply without repository.pullRequests(states: OPEN).totalCount"),
+			Entry("without the search's count",
+				`{"data":{"search":{},"repository":{"createdAt":"2011-09-01T17:30:00Z","total":{"totalCount":3},"open":{"totalCount":1}}}}`,
+				"reply without search.issueCount"),
+			Entry("without repository",
+				`{"data":{"search":{"issueCount":2}}}`,
+				"reply without repository.createdAt"),
+		)
+	})
+})
+
+var _ = Describe("ReadMeta", func() {
+	var cacheDir string
+
+	BeforeEach(func() {
+		cacheDir = GinkgoT().TempDir()
+	})
+
+	write := func(content string) {
+		GinkgoHelper()
+		Expect(os.WriteFile(filepath.Join(cacheDir, fetch.MetaFile), []byte(content), 0o600)).To(Succeed())
+	}
+
+	It("reads the counts and their source", func() {
+		write(`{"window_start":"2011-09-01T00:00:00Z","walk_started":"2026-11-15T12:00:00Z","opened_in_window":73914,"opened_in_window_source":"listing","open":2035}`)
+
+		Expect(fetch.ReadMeta(cacheDir)).To(Equal(fetch.Meta{
+			WindowStart:          fetch.WindowStart,
+			WalkStarted:          walkStart,
+			OpenedInWindow:       73914,
+			OpenedInWindowSource: record.SourceListing,
+			Open:                 2035,
+		}))
+	})
+
+	It("reads a meta.json written before it recorded the source as counted by the search, as every count then was", func() {
+		write(`{"window_start":"2011-09-01T00:00:00Z","walk_started":"2026-11-15T12:00:00Z","opened_in_window":72447,"open":2035}`)
+
+		Expect(fetch.ReadMeta(cacheDir)).To(HaveField("OpenedInWindowSource", record.SourceSearch))
+	})
+
+	It("is an error matching fs.ErrNotExist when there is none", func() {
+		_, err := fetch.ReadMeta(cacheDir)
+		Expect(err).To(MatchError(fs.ErrNotExist))
+	})
+
+	It("is an error naming the file when it is malformed", func() {
+		write(`{"walk_started":"yesterday"}`)
+
+		_, err := fetch.ReadMeta(cacheDir)
+		Expect(err).To(MatchError(ContainSubstring(filepath.Join(cacheDir, fetch.MetaFile))))
 	})
 })
 

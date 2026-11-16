@@ -98,7 +98,11 @@ func Run(ctx context.Context, cfg Config) error {
 			Repo:           fetch.Owner + "/" + fetch.Name,
 			WindowStart:    cfg.WindowStart,
 			FetchedThrough: utc(src.meta.WalkStarted),
-			GitHubCounts:   record.Counts{OpenedInWindow: src.meta.OpenedInWindow, Open: src.meta.Open},
+			GitHubCounts: record.Counts{
+				OpenedInWindow:       src.meta.OpenedInWindow,
+				OpenedInWindowSource: src.meta.OpenedInWindowSource,
+				Open:                 src.meta.Open,
+			},
 		}); err != nil {
 			return err
 		}
@@ -256,8 +260,7 @@ func readSources(cfg Config) (sources, error) {
 
 	var src sources
 	metaPath := filepath.Join(cfg.CacheDir, fetch.MetaFile)
-	var m fetch.Meta
-	err = fetch.ReadJSON(metaPath, &m)
+	m, err := fetch.ReadMeta(cfg.CacheDir)
 	switch {
 	case errors.Is(err, fs.ErrNotExist):
 	case err != nil:

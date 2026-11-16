@@ -10,6 +10,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/jhoblitt/ceph-dev-stats/internal/record"
 )
 
 // GhostLogin is the login a null author is stored under: GitHub returns a
@@ -119,7 +121,23 @@ type Meta struct {
 	WindowStart    time.Time `json:"window_start"`
 	WalkStarted    time.Time `json:"walk_started"`
 	OpenedInWindow int       `json:"opened_in_window"`
-	Open           int       `json:"open"`
+	// OpenedInWindowSource is which of GitHub's counts OpenedInWindow is:
+	// the listing's total when the window starts no later than the
+	// repository's creation, and otherwise the search's.
+	OpenedInWindowSource record.CountSource `json:"opened_in_window_source,omitzero"`
+	Open                 int                `json:"open"`
+}
+
+// ReadMeta reads cacheDir/meta.json. A meta.json written before it recorded
+// OpenedInWindowSource reads as counted by the search, as every count then
+// was. A missing file is an error that matches fs.ErrNotExist.
+func ReadMeta(cacheDir string) (Meta, error) {
+	var m Meta
+	if err := ReadJSON(filepath.Join(cacheDir, MetaFile), &m); err != nil {
+		return Meta{}, err
+	}
+	m.OpenedInWindowSource = m.OpenedInWindowSource.OrSearch()
+	return m, nil
 }
 
 // Baselines is .cache/authors.json: each author's count of pull requests

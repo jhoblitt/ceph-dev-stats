@@ -48,9 +48,10 @@ environment variable.
   with no `unspecified` family, a trailer or label no table accounts for,
   a counted disclosure that names no tool family, a ticket type
   `kinds.yaml` does not map, or record counts more than 0.5% from
-  GitHub's. A candidate line can name a person, so the failure names a
-  trailer or disclosure problem only by its trailer key, how many lines and
-  which pull requests. `--report` also prints those lines, neighboring
+  GitHub's, naming which of GitHub's counts it compared with. A candidate
+  line can name a person, so the failure names a trailer or disclosure
+  problem only by its trailer key, how many lines and which pull
+  requests. `--report` also prints those lines, neighboring
   candidate lines that match a disclosure phrase only when joined, and
   what the tables do not match yet.
 - `rollup` classifies the records in `data/` with the hand-edited tables
@@ -74,7 +75,7 @@ are derived from it by `cephstats rollup` and are not committed.
 |---|---|---|
 | `prs/YYYY-MM.jsonl` | one record per pull request, in the file of the month it was opened: its times, state, size, labels, commits, lifecycle events, reviews and comments, and the lines that might disclose LLM use or say what kind of change it is | `extract` |
 | `authors.json` | for each author, how many pull requests they opened before `meta.json`'s `window_start`: the baseline their `prior_prs` starts from, and 0 for everyone once that is 2011-09-01. `extract` adds the cache's baselines to it while `meta.json` is of the window `extract` derives for, and otherwise replaces it with them | `extract` |
-| `meta.json` | the window start, when the last walk began, and GitHub's counts at its end: the pull requests opened since the window start, and those open | `extract` |
+| `meta.json` | the window start, when the last walk began, and GitHub's counts at its end: the pull requests opened since the window start, and those open. The open ones are the total of the repository's pull-request listing. So are those opened since the window start when it is no later than the repository's creation, since every pull request is then in the window; for a later window they are the count of a search, which has been seen to omit pull requests the listing returns. `opened_in_window_source` says which, `listing` or `search`; a `meta.json` without it is from the search | `extract` |
 | `tickets.json` | the type of each tracker ticket a record references, and the ticket a Backport ticket was copied from | `tickets` |
 | `tools.yaml` | what counts as a disclosure, and which tool it names | by hand |
 | `bots.yaml` | accounts GitHub types as users whose comments are automated | by hand |

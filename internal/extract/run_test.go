@@ -165,11 +165,36 @@ var _ = Describe("Run", func() {
   "fetched_through": "2026-11-15T12:00:00Z",
   "github_counts": {
     "opened_in_window": 4985,
+    "opened_in_window_source": "search",
     "open": 2019
   }
 }
-`))
+`), "the cache's meta.json records no source, as fetch wrote it when every count was the search's")
 	})
+
+	DescribeTable("copies the source of GitHub's count of pull requests opened in the window into data/meta.json",
+		func(source string, want record.CountSource) {
+			cache(fixture("backport"))
+			baselines(map[string]int{"alice-example": 12})
+			meta := map[string]any{
+				"window_start": windowInForce(), "walk_started": day(11, 15),
+				"opened_in_window": 73914, "open": 2035,
+			}
+			if source != "" {
+				meta["opened_in_window_source"] = source
+			}
+			writeJSON(filepath.Join(cacheDir, fetch.MetaFile), meta)
+
+			run()
+
+			Expect(record.ReadMeta(dataDir)).To(HaveField("GitHubCounts", record.Counts{
+				OpenedInWindow: 73914, OpenedInWindowSource: want, Open: 2035,
+			}))
+		},
+		Entry("the listing", "listing", record.SourceListing),
+		Entry("the search", "search", record.SourceSearch),
+		Entry("the search, for a cache meta.json that records none", "", record.SourceSearch),
+	)
 
 	It("writes nothing with an empty cache", func() {
 		run()
