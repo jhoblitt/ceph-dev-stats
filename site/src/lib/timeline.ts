@@ -6,7 +6,7 @@
 
 import { TIMELINE_COLOURS as C } from './colours';
 import { type Commit, type Dataset, PR_STATE, type TableYear, locateEvent, locateRow } from './data';
-import { DAY, DISCLOSED, NOT_DISCLOSED, baseNote, isDevelopmentBranch } from './filters';
+import { DAY, DISCLOSED, NOT_DISCLOSED, baseNote } from './filters';
 import { formatCount, formatDays } from './format';
 import { type Handle, isBot, personHandle } from './handles';
 import { commitUrl, eventUrl, prUrl } from './links';
@@ -357,7 +357,10 @@ export function prTimeline(data: Dataset, row: number, table: TableYear): PrTime
   marks.sort((a, b) => a.at - b.at);
 
   const base = meta.bases[p.base[row] as number] ?? '';
-  const target = isDevelopmentBranch(base) ? 'main' : 'backports';
+  // A PR is worded as a backport only when it links the original it
+  // backports: off the development branch alone, it may be a feature
+  // branch's, or a backport that does not say what it copies.
+  const target = (table.backport_of[index] ?? 0) > 0 ? 'backports' : 'main';
   const open = disposition.state === 'open';
   const span = (key: SpanKey, from: number, to: number, days: number | null, soFar: boolean): TimelineSpan => {
     const title = spanTitle(key, target);

@@ -6,6 +6,7 @@ import {
   LAYOUT,
   MARK_STYLES,
   ROWS,
+  describeTimeline,
   markName,
   prTimeline,
   reopenedText,
@@ -261,8 +262,36 @@ describe('prTimeline', () => {
       ['openedToLastCommit', 0, OPENED, OPENED],
       ['afterLastCommit', 6, OPENED - 86400, OPENED + 5 * 86400],
     ]);
-    // The PR is to a branch other than main, so its first span measures the original work.
-    expect(tl.spans[0]?.text).toBe('Original work to backport opened: 30 days');
+    // On a branch other than main, but linking no original: not worded as a backport.
+    expect(tl.spans[0]?.text).toBe('First commit to opened: 30 days');
+  });
+
+  describe('the backport wording, only for a PR that links the original it backports', () => {
+    const bases = { bases: ['main', 'squid', 'wip-feature-x'] };
+    const row = (base: number): Row => ({ number: 26000, created: OPENED, first_commit: OPENED - 30 * DAY, state: 1, closed: OPENED + DAY, base });
+    const linking = (original: number): TableYear => ({ ...table(1, []), backport_of: [original] });
+    const titles = (base: number, original: number) =>
+      prTimeline(dataset([row(base)], [], bases), 0, linking(original)).spans.map((s) => s.text);
+    const NEUTRAL = ['First commit to opened: 30 days', 'Opened to last commit: unknown', 'Last commit to final disposition: unknown'];
+
+    it('words a release-branch PR that links its original as a backport', () => {
+      const tl = prTimeline(dataset([row(1)], [], bases), 0, linking(25000));
+      expect(tl.spans[0]?.text).toBe('Original work to backport opened: 30 days');
+      expect(describeTimeline(tl)).toContain('Original work to backport opened: 30 days');
+    });
+
+    it('gives a release-branch PR that links none the neutral titles', () => {
+      expect(titles(1, 0)).toEqual(NEUTRAL);
+      expect(describeTimeline(prTimeline(dataset([row(1)], [], bases), 0, linking(0)))).not.toContain('backport');
+    });
+
+    it('gives a feature-branch PR the neutral titles', () => {
+      expect(titles(2, 0)).toEqual(NEUTRAL);
+    });
+
+    it('leaves a development-branch PR as it was', () => {
+      expect(titles(0, 0)).toEqual(NEUTRAL);
+    });
   });
 
   describe('a PR on master, the development branch before its rename to main', () => {
@@ -273,7 +302,7 @@ describe('prTimeline', () => {
       const tl = prTimeline(dataset([row(1)], [], bases), 0, table(1, []));
       expect(tl.spans[0]?.text).toBe('First commit to opened: 30 days');
       expect(prTimeline(dataset([row(0)], [], bases), 0, table(1, [])).spans[0]?.text).toBe('First commit to opened: 30 days');
-      expect(prTimeline(dataset([row(2)], [], bases), 0, table(1, [])).spans[0]?.text).toBe('Original work to backport opened: 30 days');
+      expect(prTimeline(dataset([row(2)], [], bases), 0, table(1, [])).spans[0]?.text).toBe('First commit to opened: 30 days');
     });
 
     it('keeps its branch’s name and says that it is the development branch', () => {
