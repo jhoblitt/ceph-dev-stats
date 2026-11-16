@@ -1,10 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import table2025 from '../__fixtures__/data/table-2025.json';
 import table2026 from '../__fixtures__/data/table-2026.json';
 import { type TableYear, parseTable, parseYear } from '../data';
-import prs2025 from '../__fixtures__/data/prs-2025.json';
 import prs2026 from '../__fixtures__/data/prs-2026.json';
-import events2025 from '../__fixtures__/data/events-2025.json';
 import events2026 from '../__fixtures__/data/events-2026.json';
 import { META, at, dataset, fixture } from '../stats/testing';
 import {
@@ -24,61 +21,74 @@ import {
   noCommits,
   peopleFigures,
   standingUnknown,
-  windowPeriod,
 } from './figures';
 
 // The fixture's rows: 0 #64010 and 1 #65220 opened in 2025, before the
 // window; 2 #66100 opened in 2026 before the window; 3–11 opened in it.
 // Rows 1 (reef), 7 (squid) and 11 (tentacle) are not on main. Its window
-// is 2026-05-15 to 2026-11-15, the day fetched_through falls on.
+// is 2026-05-15 to 2026-11-15, the day fetched_through falls on, and
+// the specs take that as the period too, unless they say otherwise.
 const data = fixture();
-const rows = baseRows(data);
+const DAYS = { from: '2026-05-15', to: '2026-11-15' };
+const rows = baseRows(data, DAYS);
 
 function fixtureTables(): Map<number, TableYear> {
-  const y2025 = parseYear(2025, prs2025, events2025, META);
   const y2026 = parseYear(2026, prs2026, events2026, META);
-  return new Map([
-    [2025, parseTable(table2025, 'table-2025.json', y2025, META)],
-    [2026, parseTable(table2026, 'table-2026.json', y2026, META)],
-  ]);
+  return new Map([[2026, parseTable(table2026, 'table-2026.json', y2026, META)]]);
 }
 
 const START = at('2026-05-15T00:00:00Z');
 const END = at('2026-11-16T00:00:00Z');
-
-describe('windowPeriod', () => {
-  it('runs from the window start to the end of the day the data runs to', () => {
-    expect(windowPeriod(META)).toEqual({ start: START, end: END });
-  });
-});
+const PERIOD = { start: START, end: END };
+/** A window two years longer than the period, as the full history's is longer than its default period. */
+const EARLY = { window_start: at('2024-05-15T00:00:00Z') };
 
 describe('baseRows', () => {
-  it('keeps every PR open at some point in the window, on every branch', () => {
+  it('keeps every PR open at some point in the period, on every branch', () => {
     expect([...rows]).toEqual([0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]);
   });
 
-  it('leaves out a PR finished before the window and one opened after the data ends', () => {
+  it('leaves out a PR finished before the period and one opened after it ends', () => {
     const d = dataset([
       { created: at('2026-01-01T00:00:00Z'), closed: at('2026-05-14T23:59:59Z'), state: 1 },
       { created: at('2026-01-01T00:00:00Z'), closed: START, state: 2 },
       { created: at('2026-11-16T00:00:00Z') },
     ]);
-    expect([...baseRows(d)]).toEqual([1]);
+    expect([...baseRows(d, DAYS)]).toEqual([1]);
+  });
+
+  it('selects over the period it is given, not the window', () => {
+    const d = dataset(
+      [
+        { created: at('2025-01-01T00:00:00Z'), closed: at('2025-03-01T00:00:00Z'), state: 1 },
+        { created: at('2025-01-01T00:00:00Z') },
+        { created: at('2026-06-01T00:00:00Z') },
+      ],
+      [],
+      EARLY,
+    );
+    expect([...baseRows(d, DAYS)]).toEqual([1, 2]);
+    expect([...baseRows(d, { from: '2024-05-15', to: '2026-11-15' })]).toEqual([0, 1, 2]);
   });
 });
 
 describe('coverage', () => {
-  it('counts the records, those open in the window and those opened in it', () => {
-    expect(coverage(data, rows)).toEqual({ records: 12, active: 12, openedInWindow: 9, closedBeforeWindow: 0 });
+  it('counts those open in the period and those opened in it', () => {
+    expect(coverage(data, rows, PERIOD)).toEqual({ active: 12, openedInPeriod: 9 });
   });
 
-  it('counts a PR finished before the window apart', () => {
-    const d = dataset([
-      { created: at('2026-01-01T00:00:00Z'), closed: at('2026-02-01T00:00:00Z'), state: 1, in_window: 0 },
-      { created: at('2026-01-01T00:00:00Z'), in_window: 0 },
-      { created: at('2026-06-01T00:00:00Z') },
-    ]);
-    expect(coverage(d, baseRows(d))).toEqual({ records: 3, active: 2, openedInWindow: 1, closedBeforeWindow: 1 });
+  it('counts a PR opened in the window before the period, still open, as opened before the period, not in it', () => {
+    const d = dataset(
+      [
+        { created: at('2025-01-01T00:00:00Z'), in_window: 1 },
+        { created: at('2026-05-14T23:59:59Z'), in_window: 1 },
+        { created: START },
+        { created: at('2026-11-15T23:59:59Z') },
+      ],
+      [],
+      EARLY,
+    );
+    expect(coverage(d, baseRows(d, DAYS), PERIOD)).toEqual({ active: 4, openedInPeriod: 2 });
   });
 });
 
@@ -95,7 +105,7 @@ describe('firstCommitUnknown', () => {
 
   it('does not count a PR with no commits', () => {
     const d = dataset([{ created: START, commits: 0 }, { created: START, commits: 2 }]);
-    expect(firstCommitUnknown(d, baseRows(d))).toEqual({ main: 1, other: 0 });
+    expect(firstCommitUnknown(d, baseRows(d, DAYS))).toEqual({ main: 1, other: 0 });
   });
 });
 
@@ -103,13 +113,13 @@ describe('noCommits', () => {
   it('counts the PRs with no commits, by target', () => {
     expect(noCommits(data, rows)).toEqual({ main: 0, other: 0 });
     const d = dataset([{ created: START, commits: 0 }, { created: START, commits: 0, base: 1 }, { created: START }]);
-    expect(noCommits(d, baseRows(d))).toEqual({ main: 1, other: 1 });
+    expect(noCommits(d, baseRows(d, DAYS))).toEqual({ main: 1, other: 1 });
   });
 });
 
 describe('standingUnknown', () => {
   it('counts unknown standing, and how many of those PRs were opened before the window', () => {
-    expect(standingUnknown(data, rows)).toEqual({ unknown: 3, openedBefore: 3 });
+    expect(standingUnknown(data, rows, META.window_start)).toEqual({ unknown: 3, openedBefore: 3 });
   });
 
   it('tells an unknown standing inside the window from one before it', () => {
@@ -118,7 +128,19 @@ describe('standingUnknown', () => {
       { created: START, standing: 4 },
       { created: at('2026-01-01T00:00:00Z'), in_window: 0, standing: -1 },
     ]);
-    expect(standingUnknown(d, baseRows(d))).toEqual({ unknown: 2, openedBefore: 1 });
+    expect(standingUnknown(d, baseRows(d, DAYS), START)).toEqual({ unknown: 2, openedBefore: 1 });
+  });
+
+  it('counts an unknown standing opened before the period but in the window as opened in the window', () => {
+    const d = dataset(
+      [
+        { created: at('2025-01-01T00:00:00Z'), standing: -1 },
+        { created: at('2024-01-01T00:00:00Z'), in_window: 0, standing: -1 },
+      ],
+      [],
+      EARLY,
+    );
+    expect(standingUnknown(d, baseRows(d, DAYS), EARLY.window_start)).toEqual({ unknown: 2, openedBefore: 1 });
   });
 });
 
@@ -150,15 +172,15 @@ describe('familyCounts', () => {
 });
 
 describe('commentCounts', () => {
-  it('counts the comments made in the window and the bot commands among them', () => {
-    // Two of 2025's comments are from before the window: a comment by
+  it('counts the comments made in the period and the bot commands among them', () => {
+    // Two of 2025's comments are from before the period: a comment by
     // another person on #64010 and a bot account's on #65220.
-    expect(commentCounts(data, rows)).toEqual({ comments: 11, commands: 3, commandsByAuthor: 2, botAccount: 1 });
+    expect(commentCounts(data, rows, PERIOD)).toEqual({ comments: 11, commands: 3, commandsByAuthor: 2, botAccount: 1 });
   });
 
   it('counts no comment for a selection without events', () => {
     const d = dataset([{ created: START }]);
-    expect(commentCounts(d, baseRows(d))).toEqual({ comments: 0, commands: 0, commandsByAuthor: 0, botAccount: 0 });
+    expect(commentCounts(d, baseRows(d, DAYS), PERIOD)).toEqual({ comments: 0, commands: 0, commandsByAuthor: 0, botAccount: 0 });
   });
 });
 
@@ -175,14 +197,14 @@ describe('kindSources', () => {
 
   it('throws when a year it needs has no table', () => {
     const tables = fixtureTables();
-    tables.delete(2025);
-    expect(() => kindSources(data, tables, rows)).toThrow(/2025/);
+    tables.delete(2026);
+    expect(() => kindSources(data, tables, rows)).toThrow(/2026/);
   });
 });
 
 describe('eventRefs', () => {
-  it('counts each kind of event in the window, and those with nothing to link to', () => {
-    const byKind = Object.fromEntries(eventRefs(data, fixtureTables(), rows).map((r) => [r.kind, r]));
+  it('counts each kind of event in the period, and those with nothing to link to', () => {
+    const byKind = Object.fromEntries(eventRefs(data, fixtureTables(), rows, PERIOD).map((r) => [r.kind, r]));
     expect(byKind['force_push']).toEqual({ kind: 'force_push', events: 7, missing: 0 });
     expect(byKind['reopened']).toEqual({ kind: 'reopened', events: 1, missing: 1 });
     expect(byKind['bot_account']).toEqual({ kind: 'bot_account', events: 1, missing: 1 });
@@ -191,7 +213,7 @@ describe('eventRefs', () => {
   });
 
   it('lists the kinds in meta order and leaves out a kind with no event', () => {
-    const kinds = eventRefs(data, fixtureTables(), rows).map((r) => r.kind);
+    const kinds = eventRefs(data, fixtureTables(), rows, PERIOD).map((r) => r.kind);
     expect(kinds).toEqual([
       'comment_other',
       'comment_author',
@@ -228,26 +250,26 @@ describe('eventRefs', () => {
       backport_of: [0],
       kind_source: [''],
     };
-    // The events sort by time: the one before the window holds the empty
+    // The events sort by time: the one before the period holds the empty
     // first ref and is not counted.
-    expect(eventRefs(d, new Map([[2026, table]]), baseRows(d))).toEqual([
+    expect(eventRefs(d, new Map([[2026, table]]), baseRows(d, DAYS), PERIOD)).toEqual([
       { kind: 'force_push', events: 2, missing: 1 },
     ]);
   });
 });
 
 describe('defaultRows', () => {
-  it("keeps the report's default view: PRs on main open at some point in the window", () => {
-    expect([...defaultRows(data)]).toEqual([0, 2, 3, 4, 5, 6, 8, 9, 10]);
+  it("keeps the report's default view: PRs on main open at some point in the period", () => {
+    expect([...defaultRows(data, DAYS)]).toEqual([0, 2, 3, 4, 5, 6, 8, 9, 10]);
   });
 });
 
 describe('peopleFigures', () => {
-  // On the default view the People tables count the PRs opened in the window
+  // On the default view the People tables count the PRs opened in the period
   // on main (rows 3, 4, 5, 6, 8, 9, 10) for the Authors table, and every
-  // event in the window on rows 0, 2–6 and 8–10 for the Reviewers table.
+  // event in the period on rows 0, 2–6 and 8–10 for the Reviewers table.
   it('counts the authors, the bot accounts hidden among them and the reviewers, as the People tables do', () => {
-    const f = peopleFigures(data, defaultRows(data));
+    const f = peopleFigures(data, defaultRows(data, DAYS), PERIOD);
     // Authors d (rows 3 and 10), e, f, g, a and i.
     expect(f.authors).toBe(6);
     expect(f.botAuthors).toBe(0);
@@ -258,7 +280,7 @@ describe('peopleFigures', () => {
   });
 
   it('finds the largest pull request and its share of all lines changed', () => {
-    const f = peopleFigures(data, defaultRows(data));
+    const f = peopleFigures(data, defaultRows(data, DAYS), PERIOD);
     // #67000 is 1,500 + 700 lines of the 30 + 4 + 1,050 + 70 + 250 + 2,200 + 90 = 3,694.
     expect(f.largestLines).toBe(2200);
     expect(f.largestShare).toBeCloseTo(2200 / 3694, 10);
@@ -274,13 +296,13 @@ describe('peopleFigures', () => {
       [],
       { people_bots: [1] },
     );
-    const f = peopleFigures(d, defaultRows(d));
+    const f = peopleFigures(d, defaultRows(d, DAYS), PERIOD);
     expect(f.largestLines).toBe(300);
     expect(f.largestShare).toBe(300 / 400);
   });
 
   it('hides a bot account among the authors and counts it apart', () => {
-    const f = peopleFigures(data, baseRows(data));
+    const f = peopleFigures(data, baseRows(data, DAYS), PERIOD);
     // On every branch the authors add h (row 7) and the bot j (row 11).
     expect(f.authors).toBe(7);
     expect(f.botAuthors).toBe(1);
@@ -288,7 +310,7 @@ describe('peopleFigures', () => {
 
   it('gives no largest pull request when no PR was opened in the period', () => {
     const d = dataset([{ created: at('2026-01-01T00:00:00Z'), in_window: 0, author: 0 }]);
-    const f = peopleFigures(d, defaultRows(d));
+    const f = peopleFigures(d, defaultRows(d, DAYS), PERIOD);
     expect(f.authors).toBe(0);
     expect(f.largestLines).toBe(0);
     expect(f.largestShare).toBeNull();
@@ -296,17 +318,26 @@ describe('peopleFigures', () => {
 });
 
 describe('disclosureGroups', () => {
-  const g = disclosureGroups(data, defaultRows(data));
+  const g = disclosureGroups(data, defaultRows(data, DAYS), PERIOD);
 
   it('splits the default view into the PRs that do not disclose and those that do', () => {
     expect(g.notDisclosed.prs).toBe(6);
     expect(g.disclosed.prs).toBe(3);
   });
 
-  it('gives the share of each group opened in the window', () => {
+  it('gives the share of each group opened in the period', () => {
     // Rows 0 and 2 were opened before it.
-    expect(g.notDisclosed.openedInWindow).toBeCloseTo(4 / 6, 10);
-    expect(g.disclosed.openedInWindow).toBe(1);
+    expect(g.notDisclosed.openedInPeriod).toBeCloseTo(4 / 6, 10);
+    expect(g.disclosed.openedInPeriod).toBe(1);
+  });
+
+  it('counts a PR opened in the window before the period as opened before the period', () => {
+    const d = dataset(
+      [{ created: at('2025-01-01T00:00:00Z'), in_window: 1 }, { created: at('2026-06-01T00:00:00Z') }],
+      [],
+      EARLY,
+    );
+    expect(disclosureGroups(d, defaultRows(d, DAYS), PERIOD).notDisclosed.openedInPeriod).toBe(1 / 2);
   });
 
   it('gives the median lines changed, a nearest-rank median', () => {
@@ -334,8 +365,8 @@ describe('disclosureGroups', () => {
 
   it('gives an empty group nothing to divide', () => {
     const d = dataset([{ created: at('2026-06-01T00:00:00Z'), author: 0 }]);
-    const e = disclosureGroups(d, defaultRows(d));
-    expect(e.disclosed).toEqual({ prs: 0, openedInWindow: null, medianLines: null, medianAgeDays: null, topAuthors: null, kinds: null });
+    const e = disclosureGroups(d, defaultRows(d, DAYS), PERIOD);
+    expect(e.disclosed).toEqual({ prs: 0, openedInPeriod: null, medianLines: null, medianAgeDays: null, topAuthors: null, kinds: null });
     expect(e.notDisclosed.prs).toBe(1);
   });
 });

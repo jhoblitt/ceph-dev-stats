@@ -11,10 +11,6 @@ import (
 	"github.com/jhoblitt/ceph-dev-stats/internal/rollup"
 )
 
-// metaWindow is testdata/data/meta.json's window_start, which Build takes
-// over fetch.WindowStart.
-var metaWindow = time.Date(2026, 5, 15, 0, 0, 0, 0, time.UTC)
-
 func event(at time.Time, kind string) record.Event { return record.Event{At: at, Kind: kind} }
 
 func review(at time.Time, by, state string) record.Review {
@@ -210,10 +206,10 @@ var _ = Describe("Build", func() {
 			func(created time.Time, want int64) {
 				r := pr(1)
 				r.Created = created
-				Expect(build(r).col(created.Year(), "in_window")).To(Equal([]int64{want}))
+				Expect(build(r).one("in_window")).To(Equal(want))
 			},
-			Entry("opened at the window start", metaWindow, int64(1)),
-			Entry("opened a second before it", metaWindow.Add(-time.Second), int64(0)),
+			Entry("opened at the window start", windowStart, int64(1)),
+			Entry("opened a second before it", windowStart.Add(-time.Second), int64(0)),
 		)
 
 		It("counts human reviews, bot reviews and bot commands", func() {
@@ -568,6 +564,7 @@ var _ = Describe("Build", func() {
 		It("indexes authors and actors by first appearance over the records in number order", func() {
 			a, b, c := pr(3), pr(1), pr(2)
 			a.Created = time.Date(2025, 12, 1, 0, 0, 0, 0, time.UTC)
+			a.State, a.Updated = record.StateClosed, time.Date(2025, 12, 2, 0, 0, 0, 0, time.UTC)
 			a.Author = record.Actor{Login: "carol"}
 			a.Comments = []record.Comment{{At: h(1), By: "alice"}, {At: h(2), By: "erin"}}
 			b.Author = record.Actor{Login: "bob"}
@@ -603,10 +600,11 @@ var _ = Describe("Build", func() {
 		It("carries the window, the years and every dictionary", func() {
 			old := pr(1)
 			old.Created = time.Date(2025, 11, 3, 0, 0, 0, 0, time.UTC)
+			old.State, old.Updated = record.StateMerged, time.Date(2025, 11, 4, 0, 0, 0, 0, time.UTC)
 			m := build(pr(2), old).meta()
 			Expect(m.Repo).To(Equal("ceph/ceph"))
-			Expect(m.WindowStart).To(Equal(epoch(metaWindow)))
-			Expect(m.FetchedThrough).To(Equal(epoch(time.Date(2026, 11, 15, 6, 0, 0, 0, time.UTC))))
+			Expect(m.WindowStart).To(Equal(epoch(windowStart)))
+			Expect(m.FetchedThrough).To(Equal(epoch(fetchedThrough)))
 			Expect(m.Years).To(Equal([]int{2025, 2026}))
 			Expect(m.Components).To(Equal([]named{{"cephfs", "CephFS"}, {"rbd", "RBD"}, {"rgw", "RGW"}}))
 			Expect(m.Families).To(Equal([]named{{"claude", "Claude"}, {"copilot", "GitHub Copilot"}, {"unspecified", "unspecified"}}))
@@ -623,7 +621,8 @@ var _ = Describe("Build", func() {
 
 		It("writes a valid empty dataset when there are no records", func() {
 			o := build()
-			Expect(o).To(HaveLen(1))
+			Expect(o).To(HaveLen(2))
+			Expect(string(o["index.json"])).To(Equal(`{"numbers":[],"years":[]}`))
 			m := o.meta()
 			Expect(m.Years).To(BeEmpty())
 			Expect(string(o["meta.json"])).To(ContainSubstring(`"years":[]`))
@@ -640,6 +639,22 @@ var _ = Describe("Build", func() {
 			Expect(m.Repo).To(Equal("ceph/ceph"))
 			Expect(m.WindowStart).To(Equal(epoch(fetch.WindowStart)))
 			Expect(m.FetchedThrough).To(Equal(epoch(h(30))))
+		})
+
+		It("files an open pull request without meta.json under the year of the latest update", func() {
+			open, late := pr(1), pr(2)
+			open.Created = at(2024, time.March, 1, 0, 0, 0)
+			open.Updated = at(2024, time.March, 2, 0, 0, 0)
+			late.State = record.StateClosed
+			late.Created = at(2027, time.January, 2, 0, 0, 0)
+			late.Updated = at(2027, time.January, 3, 0, 0, 0)
+			late.Events = []record.Event{event(at(2027, time.January, 3, 0, 0, 0), record.KindClosed)}
+			in := loadInput()
+			in.Records, in.Meta = []record.Record{open, late}, nil
+			o := buildInput(in)
+			Expect(o.meta().Years).To(Equal([]int{2027}))
+			Expect(o.fileYear(1)).To(Equal(2027))
+			Expect(o.yearOf(1)).To(Equal(2027))
 		})
 
 		It("dates an empty dataset without meta.json at the window start", func() {

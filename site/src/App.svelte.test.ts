@@ -1,13 +1,13 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen, within } from '@testing-library/svelte';
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/svelte';
 import { get } from 'svelte/store';
 import { beforeAll, describe, expect, it } from 'vitest';
 import App from './App.svelte';
 import rawMeta from './lib/__fixtures__/data/meta.json';
-import { BASE, fixtureFetch } from './lib/__fixtures__/fetch';
-import { DataLoader, parseMeta } from './lib/data';
-import { type Page, createDataStore, createViewStore, yearsForState } from './lib/page';
-import { type HashLocation, createStateStore } from './lib/state';
+import { BASE, fixtureFetch, withEarlierYear } from './lib/__fixtures__/fetch';
+import { DataLoader, type Fetch, parseMeta } from './lib/data';
+import { type Page, createDataStore, createViewStore, firstYears } from './lib/page';
+import { DEFAULT_MONTHS, type HashLocation, createStateStore } from './lib/state';
 
 const meta = parseMeta(rawMeta);
 
@@ -28,13 +28,13 @@ function memoryLocation(initial: string): HashLocation & { hash: () => string } 
   };
 }
 
-async function page(hash: string, files: Record<string, unknown> = {}) {
+async function page(hash: string, files: Record<string, unknown> = {}, m = meta, wrap = (f: Fetch) => f) {
   const loc = memoryLocation(hash);
-  const selection = createStateStore(meta, loc);
-  const loader = new DataLoader(meta, BASE, fixtureFetch(files).fetch);
-  const years = yearsForState(meta, get(selection));
+  const selection = createStateStore(m, loc);
+  const loader = new DataLoader(m, BASE, wrap(fixtureFetch(files).fetch));
+  const years = firstYears(m, get(selection));
   const data = createDataStore(loader, selection, years, await loader.load(years));
-  const p: Page = { meta, selection, data, view: createViewStore(selection, data), loader };
+  const p: Page = { meta: m, selection, data, view: createViewStore(selection, data), loader };
   return { props: { page: p }, loc };
 }
 
@@ -48,10 +48,193 @@ describe('App', () => {
   });
 
   it('names a year file that failed, and still draws every section', async () => {
-    render(App, (await page('', { 'prs-2025.json': undefined })).props);
+    const earlier = withEarlierYear();
+    const twoYears = parseMeta(earlier['meta.json']);
+    render(App, (await page('#/?from=2025-03-01', { ...earlier, 'prs-2025.json': undefined }, twoYears)).props);
     const alert = screen.getByRole('alert');
-    expect(alert.textContent).toMatch(/PRs opened in 2025: prs-2025\.json, HTTP 404/);
+    expect(alert.textContent).toMatch(/PRs finished in 2025: prs-2025\.json, HTTP 404/);
     for (const name of SECTIONS) expect(screen.getByRole('heading', { level: 2, name })).toBeTruthy();
+  });
+
+  it('shows no figure, only that it is loading, when the report is reached from the methods page before its years land', async () => {
+    const earlier = withEarlierYear();
+    const twoYears = parseMeta(earlier['meta.json']);
+    const held: (() => void)[] = [];
+    const hold = (f: Fetch): Fetch => (url) =>
+      url.includes('-2025') ? new Promise((go) => held.push(() => go(f(url)))) : f(url);
+    const { props } = await page('#/methods?from=2025-03-01', earlier, twoYears, hold);
+    render(App, props);
+    // As following the Statistics link does: the same address, on the report.
+    props.page.selection.update((s) => ({ ...s, route: 'report' }));
+    await waitFor(() => expect(held.length).toBeGreaterThan(0));
+    await waitFor(() => expect(screen.getByRole('heading', { level: 1, name: 'Ceph pull requests' })).toBeTruthy());
+
+    expect(screen.getByText('Loading the data for this period…')).toBeTruthy();
+    expect(document.querySelector('.waiting')?.getAttribute('aria-busy')).toBe('true');
+    expect(screen.queryByText(/no PRs match/)).toBeNull();
+    expect(screen.queryByRole('heading', { level: 2, name: 'Velocity' })).toBeNull();
+
+    for (const go of held.splice(0)) go();
+    await waitFor(() => expect(screen.getByRole('heading', { level: 2, name: 'Velocity' })).toBeTruthy());
+    expect(document.querySelector('.waiting')).toBeNull();
+    const table = within(screen.getByRole('region', { name: /^Pull requests$/ }));
+    expect(table.getByRole('status').textContent).toMatch(/^10 PRs open at some point in the period/);
+  });
+
+  it('keeps the last period that loaded whole when a year an earlier start needs fails, says so, and comes back', async () => {
+    const earlier = withEarlierYear();
+    const twoYears = parseMeta(earlier['meta.json']);
+    render(App, (await page('', { ...earlier, 'events-2025.json': undefined }, twoYears)).props);
+    const status = () => screen.getByText((_, el) => el?.classList.contains('loading') === true);
+    const table = () => within(screen.getByRole('region', { name: /^Pull requests$/ }));
+    const count = table().getByRole('status').textContent;
+
+    await fireEvent.click(screen.getByRole('button', { name: 'All, from 1 Jan 2025' }));
+    await waitFor(() => expect(screen.getByRole('alert').textContent).toMatch(/events-2025\.json, HTTP 404/));
+    expect(status().textContent).toBe(
+      'The data for the period chosen could not be loaded, so everything below is still for 2026-05-15 to 2026-11-15, with the filters then chosen. Try again fetches what failed.',
+    );
+    expect(table().getByRole('status').textContent).toBe(count);
+    expect(screen.getByRole('region', { name: 'Velocity' }).classList.contains('stale')).toBe(true);
+
+    await fireEvent.click(screen.getByRole('button', { name: 'Last 6 months' }));
+    await waitFor(() => expect(status().textContent).toBe(''));
+    expect(screen.getByRole('region', { name: 'Velocity' }).classList.contains('stale')).toBe(false);
+  });
+
+  it('says, while an earlier start’s years load, which period the figures below are still for', async () => {
+    const earlier = withEarlierYear();
+    const twoYears = parseMeta(earlier['meta.json']);
+    const held: (() => void)[] = [];
+    const hold = (f: Fetch): Fetch => (url) =>
+      url.includes('-2025') ? new Promise((go) => held.push(() => go(f(url)))) : f(url);
+    render(App, (await page('', earlier, twoYears, hold)).props);
+    const status = () => screen.getByText((_, el) => el?.classList.contains('loading') === true);
+
+    await fireEvent.click(screen.getByRole('button', { name: 'All, from 1 Jan 2025' }));
+    await waitFor(() => expect(held.length).toBeGreaterThan(0));
+    expect(status().textContent).toBe(
+      'Loading the data for this period; everything below is still for 2026-05-15 to 2026-11-15, with the filters then chosen.',
+    );
+    for (const go of held.splice(0)) go();
+    await waitFor(() => expect(status().textContent).toBe(''));
+  });
+
+  describe('trying a year that failed again', () => {
+    const earlier = withEarlierYear();
+    const twoYears = parseMeta(earlier['meta.json']);
+    const status = () => document.querySelector('p.loading') as HTMLElement;
+    const table = () => within(screen.getByRole('region', { name: /^Pull requests$/ }));
+    const button = () => within(screen.getByRole('alert')).getByRole('button', { name: /^Try(ing)? again/ });
+
+    /** The page with `events-2025.json` failing until `reach`; fetches of it after `hold` wait for `release`. */
+    async function flakyPage() {
+      let reachable = false;
+      let holding = false;
+      const held: (() => void)[] = [];
+      const flaky = (f: Fetch): Fetch => (url) => {
+        if (!url.endsWith('events-2025.json')) return f(url);
+        const answer = () => (reachable ? f(url) : Promise.resolve(new Response('', { status: 503 })));
+        return holding ? new Promise((go) => held.push(() => go(answer()))) : answer();
+      };
+      render(App, (await page('', earlier, twoYears, flaky)).props);
+      await fireEvent.click(screen.getByRole('button', { name: 'All, from 1 Jan 2025' }));
+      await waitFor(() => expect(screen.getByRole('alert').textContent).toMatch(/events-2025\.json, HTTP 503/));
+      return {
+        reach: () => (reachable = true),
+        hold: () => (holding = true),
+        release: () => {
+          holding = false;
+          held.splice(0).forEach((go) => go());
+        },
+        held,
+      };
+    }
+
+    it('says only what trying again does', async () => {
+      await flakyPage();
+      expect(status().textContent).toBe(
+        'The data for the period chosen could not be loaded, so everything below is still for 2026-05-15 to 2026-11-15, with the filters then chosen. Try again fetches what failed.',
+      );
+      expect(button().textContent).toBe('Try again');
+    });
+
+    it('says while it runs that it is trying, keeps the focus there, and says when it failed again', async () => {
+      const f = await flakyPage();
+      button().focus();
+      f.hold();
+      await fireEvent.click(button());
+      await waitFor(() => expect(f.held.length).toBe(1));
+      expect(button().textContent).toBe('Trying again…');
+      expect(button().getAttribute('aria-disabled')).toBe('true');
+      expect(button().hasAttribute('disabled')).toBe(false);
+      expect(document.activeElement).toBe(button());
+      // A second press while it runs asks nothing more.
+      await fireEvent.click(button());
+      expect(f.held.length).toBe(1);
+
+      f.release();
+      await waitFor(() => expect(button().textContent).toBe('Try again'));
+      expect(button().getAttribute('aria-disabled')).toBeNull();
+      expect(document.activeElement).toBe(button());
+      expect(screen.getByRole('alert').textContent).toMatch(/Tried again at \d\d:\d\d; it still could not be loaded\./);
+    });
+
+    it('moves the focus to the status line when it succeeds, which says the data has loaded', async () => {
+      const f = await flakyPage();
+      f.reach();
+      button().focus();
+      await fireEvent.click(button());
+      await waitFor(() => expect(screen.queryByRole('alert')).toBeNull());
+      expect(status().textContent).toBe('All the data for this period has loaded.');
+      expect(status().getAttribute('role')).toBe('status');
+      expect(status().getAttribute('tabindex')).toBe('-1');
+      await waitFor(() => expect(document.activeElement).toBe(status()));
+      expect(table().getByRole('status').textContent).toMatch(/^10 PRs open at some point in the period/);
+    });
+
+    it('offers no try again when the file arrived but could not be read, and says what will help', async () => {
+      const broken = { ...earlier, 'events-2025.json': { ...(earlier['events-2025.json'] as object), kind: [99] } };
+      render(App, (await page('', broken, twoYears)).props);
+      await fireEvent.click(screen.getByRole('button', { name: 'All, from 1 Jan 2025' }));
+      await waitFor(() => expect(screen.getByRole('alert').textContent).toMatch(/events-2025\.json/));
+      expect(within(screen.getByRole('alert')).queryByRole('button')).toBeNull();
+      expect(status().textContent).toBe(
+        'The data for the period chosen could not be loaded, so everything below is still for 2026-05-15 to 2026-11-15, with the filters then chosen. A file arrived but could not be read, so trying again would not help; reloading the page after the data is next published may.',
+      );
+    });
+
+    it('marks every section while it runs after a first load that lost its only year', async () => {
+      let reachable = false;
+      const held: (() => void)[] = [];
+      let holding = false;
+      const flaky = (f: Fetch): Fetch => (url) => {
+        if (!url.endsWith('events-2026.json')) return f(url);
+        const answer = () => (reachable ? f(url) : Promise.resolve(new Response('', { status: 503 })));
+        return holding ? new Promise((go) => held.push(() => go(answer()))) : answer();
+      };
+      render(App, (await page('', {}, meta, flaky)).props);
+      expect(screen.getByRole('alert').textContent).toMatch(/everything below leaves these years out/);
+      const velocity = () => screen.getByRole('region', { name: 'Velocity' });
+      expect(velocity().classList.contains('stale')).toBe(false);
+
+      reachable = true;
+      holding = true;
+      await fireEvent.click(button());
+      await waitFor(() => expect(held.length).toBe(1));
+      for (const name of ['Velocity', 'Review', 'LLM use', 'Each PR', 'Pull requests', 'People']) {
+        const s = screen.getByRole('region', { name });
+        expect(s.classList.contains('stale'), name).toBe(true);
+        expect(s.getAttribute('aria-busy'), name).toBe('true');
+      }
+      expect(screen.getByRole('region', { name: 'Timelines' }).getAttribute('aria-busy')).toBe('true');
+
+      holding = false;
+      held.splice(0).forEach((go) => go());
+      await waitFor(() => expect(screen.queryByRole('alert')).toBeNull());
+      expect(velocity().classList.contains('stale')).toBe(false);
+      expect(velocity().getAttribute('aria-busy')).toBeNull();
+    });
   });
 
   it('shows one PR only when a PR is selected', async () => {
@@ -214,6 +397,64 @@ describe('filter bar', () => {
     from.value = '2026-01-01';
     await fireEvent.change(from);
     expect(from.value).toBe('2026-05-15');
+    expect(loc.hash()).toBe('#/?target=main');
+  });
+
+  describe('over a window longer than the default six months', () => {
+    const long = parseMeta({ ...rawMeta, window_start: Date.UTC(2025, 0, 1) / 1000 });
+    const pressed = (name: string) => screen.getByRole('button', { name }).getAttribute('aria-pressed');
+
+    it('keeps a typed start before the default but inside the window', async () => {
+      const { props, loc } = await page('', {}, long);
+      render(App, props);
+      const from = screen.getByLabelText('From') as HTMLInputElement;
+      expect(from.value).toBe('2026-05-15');
+      expect(from.min).toBe('2025-01-01');
+      from.value = '2025-03-01';
+      await fireEvent.change(from);
+      expect(from.value).toBe('2025-03-01');
+      expect(loc.hash()).toBe('#/?target=main&from=2025-03-01');
+    });
+
+    it('moves the period to the whole window and back to the last six months in one choice each', async () => {
+      const { props, loc } = await page('#/?from=2026-07-01&to=2026-08-31', {}, long);
+      render(App, props);
+      expect(pressed('Last 6 months')).toBe('false');
+      expect(pressed('All, from 1 Jan 2025')).toBe('false');
+
+      await fireEvent.click(screen.getByRole('button', { name: 'All, from 1 Jan 2025' }));
+      expect(loc.hash()).toBe('#/?target=main&from=2025-01-01');
+      expect((screen.getByLabelText('From') as HTMLInputElement).value).toBe('2025-01-01');
+      expect((screen.getByLabelText('To') as HTMLInputElement).value).toBe('2026-11-15');
+      expect(pressed('All, from 1 Jan 2025')).toBe('true');
+
+      await fireEvent.click(screen.getByRole('button', { name: 'Last 6 months' }));
+      expect(loc.hash()).toBe('#/?target=main');
+      expect(pressed('Last 6 months')).toBe('true');
+      expect(pressed('All, from 1 Jan 2025')).toBe('false');
+    });
+  });
+
+  it('offers no choice of the whole window when it is no longer than the default', async () => {
+    render(App, (await page('')).props);
+    expect(screen.getByRole('button', { name: 'Last 6 months' }).getAttribute('aria-pressed')).toBe('true');
+    expect(screen.queryByRole('button', { name: /^All, from/ })).toBeNull();
+  });
+
+  /** The labels of the period's one-choice buttons. */
+  const presets = () => [...document.querySelectorAll('.presets button')].map((b) => b.textContent?.trim());
+
+  it('names the default period by the months it reaches back', async () => {
+    render(App, (await page('')).props);
+    expect(presets()).toEqual([`Last ${DEFAULT_MONTHS} months`]);
+  });
+
+  it('offers one choice, the whole window, when the window is shorter than the default reach', async () => {
+    const short = parseMeta({ ...rawMeta, window_start: Date.UTC(2026, 8, 1) / 1000 });
+    const { props, loc } = await page('', {}, short);
+    render(App, props);
+    expect(presets()).toEqual(['All, from 1 Sep 2026']);
+    expect(screen.getByRole('button', { name: 'All, from 1 Sep 2026' }).getAttribute('aria-pressed')).toBe('true');
     expect(loc.hash()).toBe('#/?target=main');
   });
 });

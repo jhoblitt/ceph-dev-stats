@@ -11,7 +11,7 @@
   } from '../lib/charts';
   import { dayStart, periodRange } from '../lib/filters';
   import { formatCount, formatDays } from '../lib/format';
-  import { getPage } from '../lib/page';
+  import { getPage, sectionsBusy, sectionsStale } from '../lib/page';
   import {
     capacityLegend,
     capacityModel,
@@ -181,7 +181,7 @@
   </ChartFrame>
 {/snippet}
 
-<section id="review" aria-labelledby="review-heading" class:stale={$data.loading}>
+<section id="review" aria-labelledby="review-heading" class:stale={sectionsStale($view, $data)} aria-busy={sectionsBusy($view, $data) ? 'true' : undefined}>
   <h2 id="review-heading">Review</h2>
 
   <ChartFrame

@@ -5,7 +5,7 @@ The Review section's first chart sets the human review done each week against th
 ## The four panels
 
 - **People giving reviews**: the distinct people who submitted a human review that week, approving, requesting changes or commenting, on any selected pull request. A conversation comment alone does not make someone one of them, though it counts in the Reviewers table of [the People tables](#people-tables).
-- **PRs opened per person giving reviews**: the pull requests opened in the window that week, divided by the people giving reviews. A week with no one giving reviews has no value, marked "no one giving reviews", rather than zero or infinity.
+- **PRs opened per person giving reviews**: the selected pull requests opened that week, divided by the people giving reviews. A week with no one giving reviews has no value, marked "no one giving reviews", rather than zero or infinity.
 - **Human reviews per PR opened**: the human reviews done that week on any selected pull request, divided by the pull requests opened that week. A week with none opened has no value, marked "no PRs opened".
 - **PRs waiting for a first response**, counted at the week's end: the selected pull requests open at that moment, out of draft, and with no first human response yet.
 

@@ -63,7 +63,7 @@ var _ = Describe("Write's permissions", func() {
 	expectPublic := func() {
 		GinkgoHelper()
 		Expect(modes()).To(Equal(map[string]string{
-			"meta.json": public, "prs-2026.json": public, "events-2026.json": public,
+			"meta.json": public, "index.json": public, "prs-2026.json": public, "events-2026.json": public,
 		}))
 		Expect(mode(dir)).To(Equal(publicDir), "the output directory")
 		Expect(mode(filepath.Dir(dir))).To(Equal(publicDir), "the output directory's parent, which Write also created")
@@ -71,7 +71,7 @@ var _ = Describe("Write's permissions", func() {
 	}
 
 	It("writes every file readable by everyone and creates its directories listable by everyone", func() {
-		_, err := rollup.Write(dir, files("meta.json", "prs-2026.json", "events-2026.json"))
+		_, err := rollup.Write(dir, files("meta.json", "index.json", "prs-2026.json", "events-2026.json"))
 		Expect(err).NotTo(HaveOccurred())
 		expectPublic()
 	})
@@ -84,17 +84,17 @@ var _ = Describe("Write's permissions", func() {
 		old := syscall.Umask(0o077)
 		DeferCleanup(func() { syscall.Umask(old) })
 
-		_, err := rollup.Write(dir, files("meta.json", "prs-2026.json", "events-2026.json"))
+		_, err := rollup.Write(dir, files("meta.json", "index.json", "prs-2026.json", "events-2026.json"))
 		Expect(err).NotTo(HaveOccurred())
 		expectPublic()
 	})
 
 	It("leaves every file readable by everyone after a second run over its output", func() {
-		_, err := rollup.Write(dir, files("meta.json", "prs-2026.json", "events-2026.json"))
+		_, err := rollup.Write(dir, files("meta.json", "index.json", "prs-2026.json", "events-2026.json"))
 		Expect(err).NotTo(HaveOccurred())
 
-		changed := files("meta.json", "prs-2026.json", "events-2026.json")
-		changed[1].Data = []byte(`{"changed":true}`)
+		changed := files("meta.json", "index.json", "prs-2026.json", "events-2026.json")
+		changed[2].Data = []byte(`{"changed":true}`)
 		res, err := rollup.Write(dir, changed)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(res.Written).To(Equal([]string{"prs-2026.json"}))

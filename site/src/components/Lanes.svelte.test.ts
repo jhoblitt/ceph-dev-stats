@@ -54,9 +54,9 @@ async function lanes(hash: string, files: Record<string, unknown> = {}) {
 describe('Lanes', () => {
   it('draws at most 200 lanes and says how many of how many', async () => {
     const { section } = await lanes('#/?target=main', manyPrs(250));
-    // 250 opened in 2026 and one still open from 2025, all on main.
+    // 250 opened in 2026, all on main, in place of the fixture's 2026 file.
     expect(
-      section.getByText('The first 200 of 251 PRs open at some point in the period, in the PR table’s order, by Opened, descending.'),
+      section.getByText('The first 200 of 250 PRs open at some point in the period, in the PR table’s order, by Opened, descending.'),
     ).toBeTruthy();
     const list = section.getByRole("list", { name: /PRs in the lanes/ });
     const links = within(list).getAllByRole('link');
@@ -100,17 +100,16 @@ describe('Lanes', () => {
 
   it('lists the PR table’s first 200 rows in the order the table is sorted, and says so', async () => {
     const { section, loc } = await lanes('#/?target=main&sort=number', manyPrs(250));
-    expect(section.getByText('The first 200 of 251 PRs open at some point in the period, in the PR table’s order, by PR, ascending.')).toBeTruthy();
+    expect(section.getByText('The first 200 of 250 PRs open at some point in the period, in the PR table’s order, by PR, ascending.')).toBeTruthy();
     const links = () => within(section.getByRole('list', { name: /PRs in the lanes/ })).getAllByRole('link');
-    // By number, #64010 from 2025, active in the period, comes first, then #70000 up.
-    expect(links()[0]?.textContent).toBe('#64010');
-    expect(links()[1]?.textContent).toBe('#70000');
-    expect(links().at(-1)?.textContent).toBe('#70198');
+    expect(links()[0]?.textContent).toBe('#70000');
+    expect(links()[1]?.textContent).toBe('#70001');
+    expect(links().at(-1)?.textContent).toBe('#70199');
     const table = within(screen.getByRole('region', { name: 'Pull requests' }));
     await fireEvent.click(table.getByRole('button', { name: /^PR/ }));
     expect(loc.hash()).toBe('#/?target=main&sort=-number');
     expect(links()[0]?.textContent).toBe('#70249');
-    expect(section.getByText('The first 200 of 251 PRs open at some point in the period, in the PR table’s order, by PR, descending.')).toBeTruthy();
+    expect(section.getByText('The first 200 of 250 PRs open at some point in the period, in the PR table’s order, by PR, descending.')).toBeTruthy();
   });
 
   it('follows a week chosen in a chart, as the PR table does', async () => {

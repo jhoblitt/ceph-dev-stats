@@ -54,8 +54,8 @@ var _ = Describe("rollup", func() {
 			Expect(os.ReadFile(filepath.Join(outDir, n))).To(Equal(want), n)
 		}
 		Expect(stderr.String()).To(ContainSubstring(`"msg":"rollup finished"`))
-		Expect(stderr.String()).To(ContainSubstring(`"records":8`))
-		Expect(stderr.String()).To(ContainSubstring(`"written":7`))
+		Expect(stderr.String()).To(ContainSubstring(`"records":9`))
+		Expect(stderr.String()).To(ContainSubstring(`"written":8`))
 	})
 
 	It("writes an empty dataset from the seed tables alone, removing a stale year", func() {
@@ -70,7 +70,7 @@ var _ = Describe("rollup", func() {
 
 		Expect(run(dataDir)).To(Succeed())
 
-		Expect(names(outDir)).To(Equal([]string{"meta.json"}))
+		Expect(names(outDir)).To(Equal([]string{"index.json", "meta.json"}))
 		b, err := os.ReadFile(filepath.Join(outDir, "meta.json"))
 		Expect(err).NotTo(HaveOccurred())
 		var meta struct {

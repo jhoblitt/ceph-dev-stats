@@ -54,13 +54,16 @@ environment variable.
   candidate lines that match a disclosure phrase only when joined, and
   what the tables do not match yet.
 - `rollup` classifies the records in `data/` with the hand-edited tables
-  and `data/tickets.json`, and writes the site's data files: `meta.json`,
-  and `prs-<year>.json`, `events-<year>.json` and `table-<year>.json` for
-  each year a pull request was opened in. They go to `site/public/data/`,
-  or the directory `--out` names, and are not committed (see
-  [Site](#site)). Only the files whose content changes are rewritten, and
-  a year's files are removed once it has no records. It does not run
-  `check`.
+  and `data/tickets.json`, and writes the site's data files: `meta.json`;
+  `prs-<year>.json`, `events-<year>.json` and `table-<year>.json` for each
+  year, holding the pull requests that finished in it, with those still
+  open under the year of `fetched_through`, each with all of its events
+  and its table row; and `index.json`, the year each pull request is filed
+  under, by number, which the site reads to find a pull request outside
+  the years it has loaded. They go to `site/public/data/`, or the
+  directory `--out` names, and are not committed (see [Site](#site)). Only
+  the files whose content changes are rewritten, and a year's files are
+  removed once it no longer holds a pull request. It does not run `check`.
 
 ## Data
 

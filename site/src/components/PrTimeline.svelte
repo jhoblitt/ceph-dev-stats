@@ -5,12 +5,14 @@
   address names on arrival leaves the reader where the page starts. Both the
   panel and the timeline need that PR's year of the table file, and it is
   loaded only once the section is on screen: a link naming a PR must not
-  fetch the large file at page load.
+  fetch the large file at page load. A PR in none of the years the period
+  loads is looked up in index.json and shown from its own year, which no
+  chart, lane or table counts.
 -->
 <script lang="ts">
   import { tick } from 'svelte';
   import { get } from 'svelte/store';
-  import { locateRow } from '../lib/data';
+  import { DataError, type Found, locateRow } from '../lib/data';
   import { getPage } from '../lib/page';
   import { prUrl } from '../lib/links';
   import { tableLoads } from '../lib/tables';
@@ -23,16 +25,58 @@
   const loads = tableLoads(loader);
 
   const pr = $derived($selection.pr);
-  const dataset = $derived($view.dataset);
-  const row = $derived(pr === null ? -1 : rowOf(dataset, pr));
+  const loaded = $derived($view.dataset);
+  const loadedRow = $derived(pr === null ? -1 : rowOf(loaded, pr));
+
+  let shown = $state(false);
+
+  // A PR in none of the years the period loads, looked up in the index and
+  // shown from its own year, which joins no figure. The lookup waits for the
+  // section to be on screen, as the table file does: the index is large.
+  type Away =
+    | { pr: number; status: 'looking' }
+    | { pr: number; status: 'found'; found: Found }
+    | { pr: number; status: 'missing' }
+    | { pr: number; status: 'error'; message: string };
+  let away = $state<Away | null>(null);
+  $effect(() => {
+    if (pr === null || loadedRow !== -1 || $data.loading || !shown) return;
+    const want = pr;
+    away = { pr: want, status: 'looking' };
+    const settle = (next: Away) => {
+      if (away?.pr === want) away = next;
+    };
+    loader.find(want).then(
+      (found) => settle(found === null ? { pr: want, status: 'missing' } : { pr: want, status: 'found', found }),
+      (err: unknown) =>
+        settle({
+          pr: want,
+          status: 'error',
+          message: err instanceof DataError ? `${err.file}: ${err.detail}` : String(err),
+        }),
+    );
+  });
+  const elsewhere = $derived(loadedRow === -1 && away?.pr === pr ? away : null);
+  const looking = $derived(loadedRow === -1 && ($data.loading || elsewhere === null || elsewhere.status === 'looking'));
+
+  const dataset = $derived(loadedRow !== -1 ? loaded : elsewhere?.status === 'found' ? elsewhere.found.dataset : loaded);
+  const row = $derived(loadedRow !== -1 ? loadedRow : elsewhere?.status === 'found' ? elsewhere.found.row : -1);
   const located = $derived(row === -1 ? null : locateRow(dataset, row));
   const year = $derived(located?.year ?? null);
-  let shown = $state(false);
   const table = $derived(year === null || !shown ? null : loader.table(year));
 
   $effect(() => {
     if (shown && year !== null) loads.request(year);
   });
+
+  /** Whether a PR the panel offers to show is in the data: in the loaded years, or failing that in the index. */
+  const isPr = (number: number): Promise<boolean> =>
+    rowOf(loaded, number) !== -1 || rowOf(dataset, number) !== -1
+      ? Promise.resolve(true)
+      : loader.yearOf(number).then(
+          (y) => y !== null,
+          () => false,
+        );
 
   /** Whether the ascending `rows` hold `r`. */
   function holds(rows: Uint32Array, r: number): boolean {
@@ -45,7 +89,7 @@
     }
     return rows[lo] === r;
   }
-  const outside = $derived(row !== -1 && !holds($view.rows, row));
+  const outside = $derived(row !== -1 && (loadedRow === -1 || !holds($view.rows, row)));
 
   // Watches for the section on screen, and forgets it was when the section
   // goes, so a PR chosen later loads only once it is on screen in its turn.
@@ -76,13 +120,20 @@
 </script>
 
 {#if pr !== null}
-  <section id="pr" aria-labelledby="pr-heading" bind:this={section} {@attach watch}>
+  <section id="pr" aria-labelledby="pr-heading" aria-busy={looking ? 'true' : undefined} bind:this={section} {@attach watch}>
     <h2 id="pr-heading" tabindex="-1" bind:this={heading}>
       Pull request <a href={prUrl(meta.repo, pr)} target="_blank" rel="noopener noreferrer">#{pr}</a>
     </h2>
     {#if row === -1 || located === null}
       {#if $data.loading}
         <p class="status" role="status">Loading the data…</p>
+      {:else if elsewhere === null || elsewhere.status === 'looking'}
+        <p class="status" role="status">Looking for #{pr} in the years this period does not load…</p>
+      {:else if elsewhere.status === 'error'}
+        <p class="missing" role="alert">
+          #{pr} could not be looked up in the years this period does not load: {elsewhere.message}. Reloading the page
+          will try again.
+        </p>
       {:else}
         <p class="missing">
           no such PR: #{pr} is not in the data{$data.errors.length > 0 ? ' that could be loaded' : ''}.
@@ -95,7 +146,14 @@
           this page counts it.
         </p>
       {/if}
-      <SelectedPr data={dataset} {row} index={located.index} table={loads.map.get(located.year)} onchoose={choose} />
+      <SelectedPr
+        data={dataset}
+        {row}
+        index={located.index}
+        table={loads.map.get(located.year)}
+        onchoose={choose}
+        isPr={isPr}
+      />
       {#if table === null}
         <p class="status waiting">The timeline of #{pr} loads when this section is on screen.</p>
       {:else}

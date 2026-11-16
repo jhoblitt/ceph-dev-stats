@@ -17,16 +17,25 @@
     table: TableLoad | undefined;
     /** Chooses the PR with this number. */
     onchoose: (pr: number) => void;
+    /** Whether the data holds the PR with this number, loaded or not. */
+    isPr: (pr: number) => Promise<boolean>;
   }
 
-  let { data, row, index, table, onchoose }: Props = $props();
+  let { data, row, index, table, onchoose, isPr }: Props = $props();
 
   const number = $derived(data.prs.number[row] as number);
   const repo = $derived(data.meta.repo);
   const loaded = $derived(table?.status === 'loaded' ? table.table : null);
   const tickets = $derived(loaded?.tickets[index] ?? []);
   const original = $derived(loaded?.backport_of[index] ?? 0);
-  const originalInData = $derived(original > 0 && data.prs.number.includes(original));
+  // The original may be in a year the period does not load; asking costs the
+  // index only then.
+  let originalInData = $state(false);
+  $effect(() => {
+    const asked = original;
+    originalInData = false;
+    if (asked > 0) void isPr(asked).then((known) => (originalInData = known && original === asked));
+  });
   const kind = $derived(data.prs.kind[row] as number);
 </script>
 

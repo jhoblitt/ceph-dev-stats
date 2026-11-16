@@ -245,7 +245,9 @@ test('the methods page renders every section, its figures, and an address to a s
   await expect(main.getByText(/\((not available|loading)\)/)).toHaveCount(0);
   await expect(main.getByText(/could not be computed/)).toHaveCount(0);
   await expect(
-    main.getByText(/\b[\d,]+ pull requests were open at some point in the window: [\d,]+ opened in it and [\d,]+ before it\b/),
+    main.getByText(
+      /\b[\d,]+ pull requests, on every branch, were open at some point in the report's default period, \d{4}-\d{2}-\d{2} to \d{4}-\d{2}-\d{2}: [\d,]+ opened in it and [\d,]+ before it\b/,
+    ),
   ).toBeVisible();
 
   // The address the contents gives a section, loaded fresh, lands on it.

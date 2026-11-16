@@ -10,7 +10,7 @@ The commits are the ones the pull request holds when it was last fetched. Commit
 
 ## The spans
 
-- **First commit to opened** estimates how long the work went on before the pull request was opened. When the earliest author date is after the opening, a rewritten history has hidden when the work began, and the span is unknown rather than negative. On the data as of {{asOf}}, of the {{prs.active}} pull requests open at some point in the window, {{commits.firstUnknown}} have commits whose earliest author date is after the opening, and {{commits.none}} have no commits at all; neither has this span.
+- **First commit to opened** estimates how long the work went on before the pull request was opened. When the earliest author date is after the opening, a rewritten history has hidden when the work began, and the span is unknown rather than negative. On the data as of {{asOf}}, of the {{prs.active}} pull requests open at some point in the default period, {{commits.firstUnknown}} have commits whose earliest author date is after the opening, and {{commits.none}} have no commits at all; neither has this span.
 - **Opened to last commit** is measured only for pull requests that have finished, since an open pull request's last commit can still move. A last commit before the opening counts as no time.
 - **Last commit to final disposition** is the wait after the code stopped changing. Like the other outcome measures it counts pull requests still open up to their age: see [Outcomes over time](#outcomes).
 

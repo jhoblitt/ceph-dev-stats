@@ -40,10 +40,11 @@ var _ = Describe("Write", func() {
 	}
 
 	It("creates the directory and writes every file", func() {
-		res, err := rollup.Write(dir, files("meta.json", "prs-2026.json"))
+		res, err := rollup.Write(dir, files("meta.json", "index.json", "prs-2026.json"))
 		Expect(err).NotTo(HaveOccurred())
-		Expect(res.Written).To(Equal([]string{"meta.json", "prs-2026.json"}))
+		Expect(res.Written).To(Equal([]string{"meta.json", "index.json", "prs-2026.json"}))
 		Expect(res.Removed).To(BeEmpty())
+		Expect(read("index.json")).To(Equal(`{"name":"index.json"}`))
 		Expect(read("prs-2026.json")).To(Equal(`{"name":"prs-2026.json"}`))
 	})
 
@@ -78,14 +79,16 @@ var _ = Describe("Write", func() {
 	It("removes the rollup's files it did not write, and nothing else", func() {
 		Expect(os.MkdirAll(dir, 0o750)).To(Succeed())
 		for _, n := range []string{
-			"prs-2024.json", "events-2024.json", "table-2024.json", ".prs-2024.json.123.tmp",
+			"prs-2024.json", "events-2024.json", "table-2024.json", ".prs-2024.json.123.tmp", ".index.json.456.tmp",
 			"notes.txt", "prs-2024.json.bak", "favicon.svg", "prs-latest.json",
 		} {
 			Expect(os.WriteFile(filepath.Join(dir, n), []byte("x"), 0o600)).To(Succeed())
 		}
 		res, err := rollup.Write(dir, files("meta.json"))
 		Expect(err).NotTo(HaveOccurred())
-		Expect(res.Removed).To(Equal([]string{".prs-2024.json.123.tmp", "events-2024.json", "prs-2024.json", "table-2024.json"}))
+		Expect(res.Removed).To(Equal([]string{
+			".index.json.456.tmp", ".prs-2024.json.123.tmp", "events-2024.json", "prs-2024.json", "table-2024.json",
+		}))
 		entries, err := os.ReadDir(dir)
 		Expect(err).NotTo(HaveOccurred())
 		var left []string

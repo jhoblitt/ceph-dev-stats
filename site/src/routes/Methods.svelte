@@ -8,8 +8,8 @@
 -->
 <script lang="ts">
   import { onMount, tick } from 'svelte';
-  import { type DataError, type TableYear } from '../lib/data';
-  import { dayOf } from '../lib/filters';
+  import { type DataError, type TableYear, yearsFor } from '../lib/data';
+  import { dayOf, periodRange } from '../lib/filters';
   import Prose from '../lib/methods/Prose.svelte';
   import {
     type DataFigures,
@@ -22,10 +22,14 @@
   } from '../lib/methods/present';
   import { sections } from '../lib/methods/sections';
   import { getPage } from '../lib/page';
-  import { sectionHash } from '../lib/state';
+  import { defaultFilters, sectionHash } from '../lib/state';
 
   const { meta, loader, selection } = getPage();
   const all = sections();
+  // The figures are over the report's default period, and need only the
+  // files of the PRs active in it.
+  const days = defaultFilters(meta);
+  const years = yearsFor(meta, periodRange(days).start);
 
   let data = $state<Loadable<DataFigures>>({ state: 'loading' });
   let tables = $state<Loadable<TableFigures>>({ state: 'loading' });
@@ -42,7 +46,7 @@
   onMount(() => {
     let live = true;
     void (async () => {
-      const loaded = await loader.load(meta.years);
+      const loaded = await loader.load(years);
       if (!live) return;
       if (loaded.errors.length > 0) {
         const message = loaded.errors.map((e) => `${e.file}: ${e.message}`).join('; ');
@@ -50,10 +54,10 @@
         tables = { state: 'error', message };
         return;
       }
-      data = { state: 'ready', value: dataFigures(loaded.dataset) };
+      data = { state: 'ready', value: dataFigures(loaded.dataset, days) };
       try {
-        const years = await Promise.all(meta.years.map((y) => loader.table(y).then((t): [number, TableYear] => [y, t])));
-        if (live) tables = { state: 'ready', value: tableFigures(loaded.dataset, new Map(years)) };
+        const loadedTables = await Promise.all(years.map((y) => loader.table(y).then((t): [number, TableYear] => [y, t])));
+        if (live) tables = { state: 'ready', value: tableFigures(loaded.dataset, new Map(loadedTables), days) };
       } catch (err) {
         if (live) tables = { state: 'error', message: describe(err) };
       }
@@ -121,7 +125,8 @@
     <h1 bind:this={heading} tabindex="-1">Methods</h1>
     <p>
       How each figure on this site is arrived at, and what it cannot show. The figures on this page are computed in
-      your browser from the same data as the report, as of {dayOf(meta.fetched_through)}.
+      your browser from the same data as the report, as of {dayOf(meta.fetched_through)}, over the report's default
+      period, {days.from} to {days.to}.
     </p>
     {#if failures.length > 0}
       <p class="notice" role="alert">

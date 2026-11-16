@@ -1,11 +1,11 @@
 // @vitest-environment jsdom
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/svelte';
 import { get } from 'svelte/store';
-import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import App from '../App.svelte';
-import { BASE, fixtureFetch } from '../lib/__fixtures__/fetch';
+import { BASE, fixtureFetch, withEarlierYear } from '../lib/__fixtures__/fetch';
 import { memoryLocation, meta } from '../lib/__fixtures__/page';
-import { DataLoader } from '../lib/data';
+import { DataLoader, type Meta, parseMeta } from '../lib/data';
 import { createDataStore, createViewStore, yearsForState } from '../lib/page';
 import { createStateStore, stateFromHash } from '../lib/state';
 import { fixture } from '../lib/stats/testing';
@@ -21,16 +21,22 @@ beforeAll(() => {
 const data = fixture();
 
 /** The App over the fixture at `hash`, recording the files fetched. */
-async function page(hash: string, files: Record<string, unknown> = {}) {
+async function page(hash: string, files: Record<string, unknown> = {}, m: Meta = meta) {
   const loc = memoryLocation(hash);
-  const selection = createStateStore(meta, loc);
+  const selection = createStateStore(m, loc);
   const fetched = fixtureFetch(files);
-  const loader = new DataLoader(meta, BASE, fetched.fetch);
-  const years = yearsForState(meta, get(selection));
+  const loader = new DataLoader(m, BASE, fetched.fetch);
+  const years = yearsForState(m, get(selection));
   const store = createDataStore(loader, selection, years, await loader.load(years));
   const view = createViewStore(selection, store);
-  return { props: { page: { meta, selection, data: store, view, loader } }, loc, requested: fetched.requested };
+  return { props: { page: { meta: m, selection, data: store, view, loader } }, loc, requested: fetched.requested };
 }
+
+// The fixture with 2025 before it, holding #60010 alone, and a period from
+// before 2025's merge, so the table lists PRs from both years' files.
+const earlier = withEarlierYear();
+const twoYears = parseMeta(earlier['meta.json']);
+const BACK = '#/?from=2025-03-01';
 
 function region() {
   return within(screen.getByRole('region', { name: 'Pull requests' }));
@@ -67,28 +73,70 @@ describe('PrTable', () => {
   it('is busy while a table file it needs is loading, and not once none is', async () => {
     // A fetch that holds the table files back until released.
     const held: (() => void)[] = [];
-    const base = fixtureFetch();
+    const base = fixtureFetch(earlier);
     const fetch = (url: string) =>
       url.includes('table-') ? new Promise<Response>((go) => held.push(() => go(base.fetch(url)))) : base.fetch(url);
-    const loc = memoryLocation('');
-    const selection = createStateStore(meta, loc);
-    const loader = new DataLoader(meta, BASE, fetch);
-    const years = yearsForState(meta, get(selection));
+    const loc = memoryLocation(BACK);
+    const selection = createStateStore(twoYears, loc);
+    const loader = new DataLoader(twoYears, BASE, fetch);
+    const years = yearsForState(twoYears, get(selection));
     const store = createDataStore(loader, selection, years, await loader.load(years));
-    render(App, { props: { page: { meta, selection, data: store, view: createViewStore(selection, store), loader } } });
-    await waitFor(() => expect(held.length).toBeGreaterThan(0));
+    const props = { page: { meta: twoYears, selection, data: store, view: createViewStore(selection, store), loader } };
+    render(App, { props });
+    await waitFor(() => expect(held.length).toBe(2));
     expect(table().getAttribute('aria-busy')).toBe('true');
-    expect(region().getAllByText(/^Loading the titles of the PRs opened in/)).toHaveLength(2);
+    expect(region().getByText('Loading the titles of the PRs finished in 2025…')).toBeTruthy();
+    expect(region().getByText('Loading the titles of the PRs finished in 2026 or still open…')).toBeTruthy();
     for (const go of held.splice(0)) go();
     await waitFor(() => expect(table().getAttribute('aria-busy')).toBe('false'));
     expect(region().queryByText(/^Loading the titles/)).toBeNull();
   });
 
+  describe('when a table file arrives', () => {
+    /** The App with the table files held back; `compares` counts the string comparisons the sorts make. */
+    async function held(hash: string) {
+      const waiting: (() => void)[] = [];
+      const base = fixtureFetch();
+      const fetch = (url: string) =>
+        url.includes('table-') ? new Promise<Response>((go) => waiting.push(() => go(base.fetch(url)))) : base.fetch(url);
+      const loc = memoryLocation(hash);
+      const selection = createStateStore(meta, loc);
+      const loader = new DataLoader(meta, BASE, fetch);
+      const years = yearsForState(meta, get(selection));
+      const store = createDataStore(loader, selection, years, await loader.load(years));
+      render(App, { props: { page: { meta, selection, data: store, view: createViewStore(selection, store), loader } } });
+      await waitFor(() => expect(waiting.length).toBe(1));
+      const compares = vi.spyOn(Intl.Collator.prototype, 'compare', 'get');
+      for (const go of waiting.splice(0)) go();
+      await waitFor(() => expect(table().getAttribute('aria-busy')).toBe('false'));
+      await waitFor(() => expect(within(table()).getByText('rgw: check the bucket owner before a copy')).toBeTruthy());
+      const count = compares.mock.calls.length;
+      compares.mockRestore();
+      return count;
+    }
+
+    it('does not sort the rows again under a sort that reads no title', async () => {
+      expect(await held('#/?sort=author')).toBe(0);
+      expect(listed()).toEqual(expected('#/?sort=author'));
+    });
+
+    it('sorts them again under the title sort, into the order of the titles', async () => {
+      expect(await held('#/?sort=title')).toBeGreaterThan(0);
+      const titles = within(table())
+        .getAllByRole('row')
+        .slice(1)
+        .map((r) => r.querySelectorAll('td')[1]?.textContent?.trim() ?? '');
+      const collator = new Intl.Collator('en', { sensitivity: 'base', numeric: true });
+      expect(titles).toHaveLength(9);
+      expect(titles).toEqual([...titles].sort((a, b) => collator.compare(a, b)));
+    });
+  });
+
   it('is not busy when a table file it needs failed to load', async () => {
-    render(App, (await page('', { 'table-2026.json': undefined })).props);
+    render(App, (await page(BACK, { ...earlier, 'table-2026.json': undefined }, twoYears)).props);
     // 2026's file fails, 2025's loads: then none is loading.
     await waitFor(() => expect(table().getAttribute('aria-busy')).toBe('false'));
-    expect(region().getByText(/PRs opened in 2026 could not be loaded/)).toBeTruthy();
+    expect(region().getByText(/PRs finished in 2026 or still open could not be loaded/)).toBeTruthy();
   });
 
   it('lists exactly the selected PRs, newest opened first', async () => {
@@ -131,10 +179,18 @@ describe('PrTable', () => {
   });
 
   it('says which year could not be loaded and keeps the others', async () => {
-    render(App, (await page('', { 'table-2026.json': undefined })).props);
-    await waitFor(() => expect(region().getByText(/PRs opened in 2026 could not be loaded/)).toBeTruthy());
+    render(App, (await page(BACK, { ...earlier, 'table-2026.json': undefined }, twoYears)).props);
+    await waitFor(() => expect(region().getByText(/PRs finished in 2026 or still open could not be loaded/)).toBeTruthy());
     expect(region().getByText(/table-2026\.json: HTTP 404/)).toBeTruthy();
+    // #60010's title, from 2025's file, which loaded.
     await waitFor(() => expect(within(table()).getByText('rgw: fix a stall in multisite bucket sync')).toBeTruthy());
+  });
+
+  it('loads no table file of a year before the period, nor of a year it lists no PR from', async () => {
+    const { props, requested } = await page('', earlier, twoYears);
+    render(App, props);
+    await waitFor(() => expect(within(table()).getByText('mds: rework the client session table')).toBeTruthy());
+    expect(requested.filter((u) => u.includes('-2025'))).toEqual([]);
   });
 
   it('sorts by a column chosen, writing it to the URL, and the other way when chosen again', async () => {
@@ -295,7 +351,7 @@ describe('the selected PR', () => {
   it('lists a ticket named twice twice, without breaking', async () => {
     // The loader does not promise unique tickets: 66900's two, with the first repeated.
     const table = (await import('../lib/__fixtures__/data/table-2026.json')).default;
-    const tickets = table.tickets.map((t: number[], i: number) => (i === 6 ? [72377, 72378, 72377] : t));
+    const tickets = table.tickets.map((t: number[], i: number) => (i === 8 ? [72377, 72378, 72377] : t));
     render(App, (await page('#/?pr=66900', { 'table-2026.json': { ...table, tickets } })).props);
     await waitFor(() => expect(within(panel()).getAllByRole('link', { name: /^Ticket 72377 / })).toHaveLength(2));
   });

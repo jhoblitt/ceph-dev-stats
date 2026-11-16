@@ -2,7 +2,7 @@
   import { areaLegend, areaTable, bucketLegend, bucketTable, describeArea, describeCounts, withCoverage } from '../lib/charts';
   import { dayStart, periodRange } from '../lib/filters';
   import { formatCount } from '../lib/format';
-  import { getPage } from '../lib/page';
+  import { getPage, sectionsBusy, sectionsStale } from '../lib/page';
   import { chooseBand, chooseBucket } from '../lib/selection';
   import { backlog } from '../lib/stats/backlog';
   import { weekly } from '../lib/stats/weekly';
@@ -42,7 +42,7 @@
   const backlogTitle = $derived(`Open PRs at the end of each ${step}, by age`);
 </script>
 
-<section id="velocity" aria-labelledby="velocity-heading" class:stale={$data.loading}>
+<section id="velocity" aria-labelledby="velocity-heading" class:stale={sectionsStale($view, $data)} aria-busy={sectionsBusy($view, $data) ? 'true' : undefined}>
   <h2 id="velocity-heading">Velocity</h2>
 
   <ChartFrame

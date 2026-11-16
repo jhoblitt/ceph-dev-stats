@@ -1,8 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import events2025 from './__fixtures__/data/events-2025.json';
 import events2026 from './__fixtures__/data/events-2026.json';
 import rawMeta from './__fixtures__/data/meta.json';
-import prs2025 from './__fixtures__/data/prs-2025.json';
 import prs2026 from './__fixtures__/data/prs-2026.json';
 import { combine, parseMeta, parseYear } from './data';
 import { type Filters, dayOf, dayStart, periodRange } from './filters';
@@ -12,7 +10,7 @@ import { META, all, at, dataset } from './stats/testing';
 import { weekly } from './stats/weekly';
 
 const meta = parseMeta(rawMeta);
-const data = combine(meta, [parseYear(2025, prs2025, events2025, meta), parseYear(2026, prs2026, events2026, meta)]);
+const data = combine(meta, [parseYear(2026, prs2026, events2026, meta)]);
 
 // Rows in the fixture: 0 #64010, 1 #65220, 2 #66100, 3 #66500, 4 #66510,
 // 5 #66600, 6 #66700, 7 #66800, 8 #66900, 9 #67000, 10 #67100, 11 #67250.

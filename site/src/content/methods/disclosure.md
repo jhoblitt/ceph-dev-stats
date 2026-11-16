@@ -10,7 +10,7 @@ A pull request discloses LLM use when its commit messages or its description say
 
 Each line is judged on its own. A line is first kept as a candidate when it names a tool or uses words such as "assisted by"; the tables then decide whether it counts. A trailer in a commit message counts by its key: a disclosing key or `Co-authored-by`. A line of the description, or of a commit message's text, counts only when it matches a phrase. A candidate that its key or a phrase would otherwise count, or a trailer whose key the table does not list, is listed in the table's `ignore` section, with the reason, when it is judged not to be a disclosure. Comments and reviews are not read for disclosure.
 
-On the data as of {{asOf}}, {{disclosure.disclosed}} of the {{prs.active}} pull requests open at some point in the window disclose LLM use ({{disclosure.share}}).
+On the data as of {{asOf}}, {{disclosure.disclosed}} of the {{prs.active}} pull requests open at some point in the default period disclose LLM use ({{disclosure.share}}).
 
 {{table.disclosureForms}}
 

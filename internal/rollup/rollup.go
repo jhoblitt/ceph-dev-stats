@@ -1,9 +1,12 @@
 // Package rollup turns the committed records, classified with the
-// hand-edited tables, into the statistics site's data files: meta.json,
-// and for each year a pull request was opened in, prs-<year>.json,
-// events-<year>.json and table-<year>.json. Times are epoch seconds and -1
-// means none or unknown; every other number is a count, a flag, or an
-// index into one of meta.json's dictionaries.
+// hand-edited tables, into the statistics site's data files: meta.json;
+// for each year, prs-<year>.json, events-<year>.json and table-<year>.json,
+// holding the pull requests that finished in that year, and those still
+// open under the year of fetched_through, each with all of its events and
+// its table row; and index.json, the year each pull request is filed under,
+// by number. Times are epoch seconds and -1 means none or unknown; every
+// other number is a count, a flag, or an index into one of meta.json's
+// dictionaries.
 package rollup
 
 import (
@@ -90,8 +93,16 @@ type metaFile struct {
 	PeopleBots []int `json:"people_bots"`
 }
 
-// Build returns the site's data files for in: meta.json first, then each
-// year's files, years ascending. The same input always gives the same
+// indexFile is index.json: Years[i] is the year whose files hold the pull
+// request numbered Numbers[i], and Numbers ascends. The site reads it only
+// to find a pull request outside the years it has loaded.
+type indexFile struct {
+	Numbers []int `json:"numbers"`
+	Years   []int `json:"years"`
+}
+
+// Build returns the site's data files for in: meta.json first, then
+// index.json, then each year's files, years ascending. The same input always gives the same
 // bytes, whatever the order of its records.
 func Build(in Input) ([]File, error) {
 	recs := slices.Clone(in.Records)
@@ -109,7 +120,9 @@ func Build(in Input) ([]File, error) {
 
 type builder struct {
 	meta        metaFile
+	index       indexFile
 	windowStart time.Time
+	fetchedYear int
 	bases       map[string]int
 	components  map[string]int
 	families    map[string]int
@@ -180,7 +193,9 @@ func newBuilder(in Input, recs []record.Record) *builder {
 
 	return &builder{
 		meta:        m,
+		index:       indexFile{Numbers: []int{}, Years: []int{}},
 		windowStart: windowStart,
+		fetchedYear: time.Unix(m.FetchedThrough, 0).UTC().Year(),
 		bases:       indexOf(m.Bases, func(s string) string { return s }),
 		components:  indexOf(m.Components, namedID),
 		families:    indexOf(m.Families, namedID),
@@ -227,7 +242,7 @@ func (b *builder) files() ([]File, error) {
 	if b.meta.PeopleBots == nil {
 		b.meta.PeopleBots = []int{}
 	}
-	files := make([]File, 0, 1+3*len(b.years))
+	files := make([]File, 0, 2+3*len(b.years))
 	add := func(name string, v any) error {
 		data, err := encode(v)
 		if err != nil {
@@ -237,6 +252,9 @@ func (b *builder) files() ([]File, error) {
 		return nil
 	}
 	if err := add("meta.json", b.meta); err != nil {
+		return nil, err
+	}
+	if err := add("index.json", b.index); err != nil {
 		return nil, err
 	}
 	for _, y := range b.meta.Years {

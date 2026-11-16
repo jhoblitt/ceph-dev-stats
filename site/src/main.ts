@@ -2,7 +2,7 @@ import { mount } from 'svelte';
 import { get } from 'svelte/store';
 import App from './App.svelte';
 import { DataError, DataLoader, type Fetch, loadMeta } from './lib/data';
-import { createDataStore, createViewStore, yearsForState } from './lib/page';
+import { createDataStore, createViewStore, firstYears } from './lib/page';
 import { createStateStore, windowHashLocation } from './lib/state';
 import './styles/tokens.css';
 import './styles/base.css';
@@ -17,7 +17,7 @@ try {
   const meta = await loadMeta(dataUrl, fetchData);
   const selection = createStateStore(meta, windowHashLocation(window));
   const loader = new DataLoader(meta, dataUrl, fetchData);
-  const years = yearsForState(meta, get(selection));
+  const years = firstYears(meta, get(selection));
   const data = createDataStore(loader, selection, years, await loader.load(years));
   const view = createViewStore(selection, data);
   mount(App, { target, props: { page: { meta, selection, data, view, loader } } });

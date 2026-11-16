@@ -1,9 +1,0 @@
-{
-  "titles": ["rgw: fix a stall in multisite bucket sync","reef: rbd: backport a mirroring fix"],
-  "authors": ["fixture-author-a","fixture-author-b"],
-  "commits": [[["1cb4b5be8482a3864387b8b4f390946b683f9078",1761825600,1761825600],["aa05e1f71642c6f448198f23e577f56095e049b9",1771236000,1771236000],["a95899ba9a30a363d66bc19d35f7acce583191b8",1780646400,1780646400]],[["bf1f4a32a90b6049ee99812a1b4e38161c9c9da7",1764579600,1765803600]]],
-  "refs": ["3400276880","2900363281","89348e545c3020aac41e428e167d4637d388a788","2902091283","c96161e3fe35dd8aa754ca513ceaddb5f89360c7","3400581085","3402194606"],
-  "tickets": [[71234],[]],
-  "backport_of": [0,63980],
-  "kind_source": ["tracker",""]
-}

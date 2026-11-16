@@ -3,7 +3,7 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-li
 import { get } from 'svelte/store';
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import App from '../App.svelte';
-import { BASE, fixtureFetch } from '../lib/__fixtures__/fetch';
+import { BASE, fixtureFetch, withEarlierYear } from '../lib/__fixtures__/fetch';
 import rawEvents2026 from '../lib/__fixtures__/data/events-2026.json';
 import rawMeta from '../lib/__fixtures__/data/meta.json';
 import rawPrs2026 from '../lib/__fixtures__/data/prs-2026.json';
@@ -275,7 +275,8 @@ describe('PrTimeline', () => {
 
   it('says "no such PR" for a number not in the data, and draws nothing', async () => {
     const section = await timeline('#/?target=all&pr=12345');
-    expect(within(section).getByText(/no such PR: #12345 is not in the data/)).toBeTruthy();
+    // The number is looked up in the index first: the period loads one year.
+    expect(await within(section).findByText(/no such PR: #12345 is not in the data/)).toBeTruthy();
     expect(within(section).queryByRole('group')).toBeNull();
     expect(within(section).queryByRole('figure')).toBeNull();
   });
@@ -324,6 +325,25 @@ describe('before the timeline is on screen', () => {
     for (const o of observed) if (o.node === section) o.cb([{ isIntersecting: true }]);
     await waitFor(() => expect(tables()).toEqual([`${BASE}table-2026.json`]));
     expect(await within(section).findByRole('group', { name: 'The marks on the line, in time order' })).toBeTruthy();
+  });
+
+  it('looks up a PR outside the loaded years only once its section is shown, then fetches the index and its one year', async () => {
+    // #60010 is in 2025's files, which the default period does not load.
+    const { props, requested } = await fixturePage('#/?target=all&pr=60010', withEarlierYear());
+    const before = requested.length;
+    render(App, { props });
+    const section = await screen.findByRole('region', { name: 'Pull request #60010' });
+    await new Promise((r) => setTimeout(r, 20));
+    expect(requested.slice(before)).toEqual([]);
+    expect(within(section).getByRole('status').textContent).toBe('Looking for #60010 in the years this period does not load…');
+    for (const o of observed) if (o.node === section) o.cb([{ isIntersecting: true }]);
+    expect(await within(section).findByRole('figure', { name: 'The life of #60010' })).toBeTruthy();
+    expect(requested.slice(before)).toEqual([
+      `${BASE}index.json`,
+      `${BASE}prs-2025.json`,
+      `${BASE}events-2025.json`,
+      `${BASE}table-2025.json`,
+    ]);
   });
 });
 
@@ -400,5 +420,81 @@ describe('the chosen PR’s section', () => {
       'This pull request is not in the current selection: the filters leave it out, so no chart, lane or table on this page counts it.',
     );
     expect(await within(section).findByRole('figure', { name: 'The life of #66600' })).toBeTruthy();
+  });
+});
+
+describe('a PR in a year the period does not load', () => {
+  // 2025's files hold #60010 alone, merged 2025-06-10; the default period,
+  // from 2026-05-15, loads 2026's alone.
+  const earlier = withEarlierYear();
+  const line = /^This pull request is not in the current selection/;
+
+  async function shown(hash: string, files: Record<string, unknown> = earlier) {
+    const { props, requested } = await fixturePage(hash, files);
+    render(App, { props });
+    const section = await screen.findByRole('region', { name: /^Pull request #/ });
+    return { section, requested };
+  }
+
+  it('does not fetch the index, nor any earlier year, for a PR the loaded years hold', async () => {
+    const { section, requested } = await shown('#/?target=all&pr=66500');
+    await within(section).findByRole('figure', { name: 'The life of #66500' });
+    expect(requested.filter((u) => u.endsWith('index.json') || u.includes('-2025'))).toEqual([]);
+  });
+
+  it('finds it through the index, loads its one year, and draws its panel and timeline, saying the selection leaves it out', async () => {
+    const { section, requested } = await shown('#/?target=all&pr=60010');
+    expect(await within(section).findByRole('figure', { name: 'The life of #60010' })).toBeTruthy();
+    expect(within(section).getByText(line)).toBeTruthy();
+    expect(within(section).getByRole('group', { name: 'Selected PR #60010' })).toBeTruthy();
+    expect(requested.filter((u) => u.endsWith('index.json'))).toHaveLength(1);
+    expect(requested.filter((u) => u.includes('-2025'))).toEqual([
+      `${BASE}prs-2025.json`,
+      `${BASE}events-2025.json`,
+      `${BASE}table-2025.json`,
+    ]);
+  });
+
+  it('leaves the figures to the period: the year loaded for the PR joins no chart, lane or table', async () => {
+    const { props } = await fixturePage('#/?target=all&pr=60010', earlier);
+    render(App, { props });
+    await screen.findByRole('figure', { name: 'The life of #60010' });
+    expect(get(props.page.view).dataset.years.map((y) => y.year)).toEqual([2026]);
+    const lanes = within(screen.getByRole('region', { name: 'Timelines' }));
+    expect(within(lanes.getByRole('list', { name: /PRs in the lanes/ })).queryByRole('link', { name: '#60010' })).toBeNull();
+  });
+
+  it('says "no such PR" for a number in no year, after asking the index once', async () => {
+    const { section, requested } = await shown('#/?target=all&pr=12345');
+    expect(await within(section).findByText(/no such PR: #12345 is not in the data/)).toBeTruthy();
+    expect(within(section).queryByRole('figure')).toBeNull();
+    expect(requested.filter((u) => u.endsWith('index.json'))).toHaveLength(1);
+    expect(requested.filter((u) => u.includes('-2025'))).toEqual([]);
+  });
+
+  it('says so when the index cannot be loaded', async () => {
+    const { section } = await shown('#/?target=all&pr=60010', { ...earlier, 'index.json': undefined });
+    const alert = await within(section).findByRole('alert');
+    expect(alert.textContent).toMatch(/#60010 could not be looked up in the years this period does not load: index\.json: HTTP 404/);
+  });
+
+  it('says so when the year that holds it cannot be loaded', async () => {
+    const { section } = await shown('#/?target=all&pr=60010', { ...earlier, 'events-2025.json': undefined });
+    const alert = await within(section).findByRole('alert');
+    expect(alert.textContent).toMatch(/events-2025\.json: HTTP 404/);
+  });
+
+  it('shows it in the selection once the period reaches back to its year', async () => {
+    const { section } = await shown('#/?target=all&from=2025-03-01&pr=60010');
+    expect(await within(section).findByRole('figure', { name: 'The life of #60010' })).toBeTruthy();
+    expect(within(section).queryByText(line)).toBeNull();
+  });
+
+  it('offers a backport’s original from a year not loaded, and shows it from there', async () => {
+    // #65220, open on reef, made a backport of #60010.
+    const table = { ...rawTable2026, backport_of: rawTable2026.backport_of.map((b, i) => (i === 1 ? 60010 : b)) };
+    const { section } = await shown('#/?target=all&pr=65220', { ...earlier, 'table-2026.json': table });
+    await fireEvent.click(await within(section).findByRole('button', { name: 'Show #60010 here' }));
+    expect(await screen.findByRole('figure', { name: 'The life of #60010' })).toBeTruthy();
   });
 });

@@ -8,8 +8,8 @@
 //   #/methods?target=main&section=disclosure
 //
 // <route> is empty for the report or `methods`. The target is always written;
-// the period only when it differs from the whole window, so a link to the
-// default view keeps following the data as it grows. Parsing never throws:
+// the period only when it differs from the default, the last six months, so
+// a link to the default view keeps following the data as it grows. Parsing never throws:
 // what is unknown, malformed or outside the data falls back to its default.
 
 import { type Readable, writable } from 'svelte/store';
@@ -118,10 +118,35 @@ export function parseHash(hash: string): RawState {
   return { route, params };
 }
 
+/** How many calendar months the default period reaches back from the last fetched day. */
+export const DEFAULT_MONTHS = 6;
+
+/**
+ * The `YYYY-MM-DD` day `months` calendar months before `day`; when that
+ * month is too short for the day, its last day.
+ */
+export function monthsBefore(day: string, months: number): string {
+  const start = dayStart(day);
+  if (start === null) throw new Error(`not a day: ${day}`);
+  const d = new Date(start * 1000);
+  const year = d.getUTCFullYear();
+  const month = d.getUTCMonth() - months;
+  const length = new Date(Date.UTC(year, month + 1, 0)).getUTCDate();
+  return dayOf(Date.UTC(year, month, Math.min(d.getUTCDate(), length)) / 1000);
+}
+
+/** The first and last days a period may name: from the window's start to the last fetch. */
+export function dataDays(meta: Meta): { first: string; last: string } {
+  return { first: dayOf(meta.window_start), last: dayOf(meta.fetched_through) };
+}
+
+/** The last six months of the data, or the whole window when it is shorter. */
 export function defaultFilters(meta: Meta): Filters {
+  const { first, last } = dataDays(meta);
+  const back = monthsBefore(last, DEFAULT_MONTHS);
   return {
-    from: dayOf(meta.window_start),
-    to: dayOf(meta.fetched_through),
+    from: back > first ? back : first,
+    to: last,
     target: 'main',
     component: null,
     size: null,
@@ -155,13 +180,18 @@ function isRoute(s: string): s is Route {
 }
 
 /**
- * Each end of the period that is a real day inside the data is kept, the
- * other falls back to its default; a period that ends before it starts is
- * the default.
+ * Each end of the period that is a real day inside the data, from the
+ * window's start to the last fetch, is kept, the other falls back to its
+ * default; a period that ends before it starts is the default.
  */
-function validPeriod(from: string | undefined, to: string | undefined, d: Filters): Pick<Filters, 'from' | 'to'> {
-  const first = dayStart(d.from) as number;
-  const last = dayStart(d.to) as number;
+function validPeriod(
+  from: string | undefined,
+  to: string | undefined,
+  d: Filters,
+  days: { first: string; last: string },
+): Pick<Filters, 'from' | 'to'> {
+  const first = dayStart(days.first) as number;
+  const last = dayStart(days.last) as number;
   const inData = (day: string | undefined): string | null => {
     if (day === undefined) return null;
     const start = dayStart(day);
@@ -190,7 +220,7 @@ export function validateState(raw: RawState, meta: Meta): AppState {
   const component = p.component;
   const kind = p.kind;
   const filters: Filters = {
-    ...validPeriod(p.from, p.to, d),
+    ...validPeriod(p.from, p.to, d, dataDays(meta)),
     target: findChoice(TARGETS, p.target) ?? d.target,
     component: component !== undefined && meta.components.some((c) => c.id === component) ? component : null,
     size: findChoice(SIZE_BANDS, p.size),

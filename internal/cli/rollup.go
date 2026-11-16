@@ -20,12 +20,14 @@ func newRollupCmd(v *viper.Viper) *cobra.Command {
 		Use:   "rollup",
 		Short: "Write the statistics site's data from the records and the tables",
 		Long: `Classify the records with the hand-edited tables and tickets.json, and
-write the statistics site's data: meta.json, and for each year a pull
-request was opened in, its columns of pull requests, its events, and its
-table of titles and links.
+write the statistics site's data: meta.json; for each year, the columns
+of the pull requests that finished in it, their events, and their table
+of titles and links, with the pull requests still open filed under the
+year of fetched_through; and index.json, the year each pull request is
+filed under, by number.
 
 Only the files whose content changes are rewritten, and a file of a year
-that no longer has records is removed. Other files in the output
+that no longer has a pull request is removed. Other files in the output
 directory are left alone. tickets.json and meta.json are optional, and so
 are records: with none, the data is an empty dataset the site can load.
 Rollup does not run check: tables that do not yet classify every label

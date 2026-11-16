@@ -8,17 +8,28 @@
     STANDING_BANDS,
     TARGETS,
     UNKNOWN_KIND,
-    dayOf,
     findChoice,
   } from '../lib/filters';
   import { GHOST, findLogin } from '../lib/handles';
   import { getPage } from '../lib/page';
+  import { DEFAULT_MONTHS, dataDays, defaultFilters, monthsBefore } from '../lib/state';
+  import { formatDate } from '../lib/timeline-axis';
 
   const { meta, selection } = getPage();
   const uid = $props.id();
-  const first = dayOf(meta.window_start);
-  const last = dayOf(meta.fetched_through);
+  const { first, last } = dataDays(meta);
+  const recent = defaultFilters(meta);
   const filters = $derived($selection.filters);
+
+  // A period the reader can reach in one choice: the default, and the whole
+  // window when it reaches further back, which the date inputs reach only
+  // a field at a time. A window shorter than the default's reach is the
+  // default itself, so it is one choice, named for what it is.
+  const whole = { label: `All, from ${formatDate(meta.window_start)}`, from: first, to: last };
+  const presets =
+    monthsBefore(last, DEFAULT_MONTHS) < first
+      ? [whole]
+      : [{ label: `Last ${DEFAULT_MONTHS} months`, from: recent.from, to: recent.to }, ...(first < recent.from ? [whole] : [])];
 
   function set(patch: Partial<Filters>) {
     selection.update((s) => ({ ...s, filters: { ...s.filters, ...patch } }));
@@ -156,6 +167,15 @@
           value={filters.to}
           onchange={(e) => setDay('to', e.currentTarget)}
         />
+      </div>
+      <div class="presets">
+        {#each presets as p (p.label)}
+          <button
+            type="button"
+            aria-pressed={filters.from === p.from && filters.to === p.to ? 'true' : 'false'}
+            onclick={() => set({ from: p.from, to: p.to })}>{p.label}</button
+          >
+        {/each}
       </div>
     </div>
   </fieldset>
@@ -314,7 +334,25 @@
     align-items: center;
   }
 
-  .person button {
+  .presets {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: end;
+    gap: var(--space-2);
+  }
+
+  .presets button[aria-pressed='true'] {
+    background: var(--accent);
+    color: var(--accent-ink);
+  }
+
+  .presets button:focus-visible {
+    outline: 2px solid var(--focus);
+    outline-offset: 2px;
+  }
+
+  .person button,
+  .presets button {
     min-height: 2.25rem;
     padding: var(--space-1) var(--space-2);
     border: 1px solid var(--border-strong);

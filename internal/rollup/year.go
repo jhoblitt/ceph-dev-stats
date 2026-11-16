@@ -12,7 +12,7 @@ import (
 	"github.com/jhoblitt/ceph-dev-stats/internal/record"
 )
 
-// year is the three files of the pull requests opened in one year, each a
+// year is the three files of the pull requests filed under one year, each a
 // set of columns of equal length.
 type year struct {
 	prs    prsFile
@@ -102,12 +102,15 @@ func (b *builder) add(r *record.Record, p *classify.PR) error {
 	if err != nil {
 		return err
 	}
-	y, ok := b.years[r.Created.UTC().Year()]
+	fy := b.fileYear(r)
+	y, ok := b.years[fy]
 	if !ok {
 		y = newYear()
-		b.years[r.Created.UTC().Year()] = y
+		b.years[fy] = y
 	}
 	row := len(y.prs.Number)
+	b.index.Numbers = append(b.index.Numbers, r.Number)
+	b.index.Years = append(b.index.Years, fy)
 
 	author := b.person(r.Author.Login, !p.AuthorHuman)
 	for _, e := range events {
@@ -321,6 +324,17 @@ func responses(r *record.Record, p *classify.PR, ready int64) (response, approva
 		}
 	}
 	return response, approval
+}
+
+// fileYear is the UTC year whose files hold r: that of its final
+// disposition, or, while it is open, that of fetched_through. A view of a
+// period then needs only the years from the period's start onward, since a
+// pull request finished before that year cannot be active in it.
+func (b *builder) fileYear(r *record.Record) int {
+	if r.State == record.StateOpen {
+		return b.fetchedYear
+	}
+	return time.Unix(closedAt(r), 0).UTC().Year()
 }
 
 // closedAt is the final disposition: the last merge or close of a pull
