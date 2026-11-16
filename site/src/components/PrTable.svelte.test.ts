@@ -188,6 +188,9 @@ describe('before the table is on screen', () => {
     for (const cb of observed) cb([{ isIntersecting: true }]);
     await waitFor(() => expect(requested.filter((u) => u.includes('table-')).length).toBeGreaterThan(0));
     expect(requested).toContain(`${BASE}table-2026.json`);
+    // The timeline asks for the same file for the same PR, so the table must
+    // show it loaded its own: its rows carry the titles.
+    await waitFor(() => expect(within(table()).getByText('mds, mgr: report stuck client requests')).toBeTruthy());
   });
 
   afterAll(() => {

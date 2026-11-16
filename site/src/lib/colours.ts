@@ -44,6 +44,37 @@ export const COLOURS = {
   partial: 'var(--text-faint)',
 } as const;
 
+/**
+ * The timelines of PRs. Colour says who acted, in the review hues' meaning
+ * (another person, a bot), or how the PR ended, in the outcome hues'; the
+ * PR's own lifecycle and its author's activity are ink. Shape and row tell
+ * the kinds apart, never colour alone.
+ *
+ * Validated as they meet: within a row, another person against a bot
+ * (adjacent), and the outcomes all pairs on the PR's line. The outcome hues
+ * fail against both review hues in dark mode (merged against another
+ * person, CVD ΔE 1.6; merged against a bot, normal-vision ΔE 9.8; still open
+ * against a bot, CVD ΔE 3.0), so the line never shares a row with them, a
+ * row of ink lies between, and the lanes draw their events in ink.
+ */
+export const TIMELINE_COLOURS = {
+  /** The PR's own line and lifecycle: opened, its commits, ready, draft, force-push, reopened. */
+  lifecycle: 'var(--text)',
+  /** What the PR's author did on it. */
+  author: 'var(--text-muted)',
+  /** The stretch before the PR opened, and the lanes' events. */
+  quiet: 'var(--text-faint)',
+  byOther: COLOURS.humanReviews,
+  byBot: COLOURS.botReviews,
+  merged: COLOURS.reached,
+  /** A close, and a stretch the PR spent closed. */
+  closed: COLOURS.finishedWithout,
+  open: COLOURS.waiting,
+  command: COLOURS.command,
+  /** The wash behind a cut or stretched stretch of the time axis. */
+  axisNote: COLOURS.notYetKnown,
+} as const;
+
 /** The backlog's age bands, youngest first: an ordinal ramp of neutrals, since no series hue is free. */
 export const AGE_COLOURS: Record<(typeof AGE_BANDS)[number]['id'], string> = {
   lt7: 'var(--ordinal-1)',
