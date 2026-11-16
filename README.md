@@ -145,7 +145,17 @@ make data-refresh   # fetch, extract, tickets, check
 none of the three variables is set, it passes `gh auth token`'s token to
 `fetch` alone.
 
-If the closing `check` fails, the records hold something the tables do not
+If the closing `check` fails on a count, the records hold more than 0.5%
+more or fewer pull requests opened in the window, or open, than GitHub's
+counts in `data/meta.json`, taken as the walk that wrote it ended. The
+failure names the count it compared with: `listing`, or `search` for a
+`data/meta.json` written before the listing's total was used, which the
+next `make data-refresh` replaces with the listing's. Fewer records mean a
+walk missed some, which `CEPHSTATS_FULL=true make data-refresh` lists and
+fetches; more mean the records keep pull requests GitHub no longer lists,
+which no refresh removes. No table edit clears a count failure.
+
+If it fails on anything else, the records hold something the tables do not
 cover yet. Then:
 
 1. `make data-report` runs `check --report`, which prints the candidate
