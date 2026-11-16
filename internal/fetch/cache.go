@@ -137,6 +137,14 @@ type Meta struct {
 	// written before entries carried them, and then the next walk completes
 	// the cache.
 	DeletedAuthorsNamed bool `json:"deleted_authors_named,omitzero"`
+	// GoneEntries is the entries of an older FormatVersion whose pull
+	// requests GitHub no longer has, by number: those the last walk from the
+	// window start to finish left as they were, and GitHub then answered
+	// NOT_FOUND for when asked about them by number. Each is the entry's
+	// FetchedAt, so that a mark no longer matches once a walk writes the
+	// entry again. They are kept as they are, and no longer send a default
+	// walk back to the window start.
+	GoneEntries map[int]time.Time `json:"gone_entries,omitempty"`
 }
 
 // ReadMeta reads cacheDir/meta.json. A meta.json written before it recorded
@@ -246,22 +254,25 @@ func cachedEntries(cacheDir string) ([]string, error) {
 	return paths, nil
 }
 
-// staleEntries counts the cache's entries written in an older FormatVersion.
-func staleEntries(cacheDir string) (int, error) {
+// staleEntries returns the cache's entries written in an older
+// FormatVersion, by pull request number, each as its FetchedAt.
+func staleEntries(cacheDir string) (map[int]time.Time, error) {
 	paths, err := cachedEntries(cacheDir)
 	if err != nil {
-		return 0, err
+		return nil, err
 	}
-	stale := 0
+	stale := map[int]time.Time{}
 	for _, p := range paths {
 		var v struct {
-			FormatVersion int `json:"formatVersion"`
+			Number        int       `json:"number"`
+			FetchedAt     time.Time `json:"fetchedAt"`
+			FormatVersion int       `json:"formatVersion"`
 		}
 		if err := ReadJSON(p, &v); err != nil {
-			return 0, err
+			return nil, err
 		}
 		if v.FormatVersion < FormatVersion {
-			stale++
+			stale[v.Number] = v.FetchedAt
 		}
 	}
 	return stale, nil

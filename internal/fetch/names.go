@@ -140,25 +140,14 @@ func (w *walker) askNames(ctx context.Context, numbers []int) (map[int]*CommitNa
 		} `json:"repository"`
 	}
 	err := w.client.Do(ctx, ghapi.CommitNames(len(numbers)), vars, &resp)
-	missing := map[string]bool{}
-	if nf, ok := errors.AsType[*ghapi.NotFoundError](err); ok {
-		for _, p := range nf.Paths {
-			missing[p] = true
-		}
-	}
-	aliased := 0
-	for i := range numbers {
-		if missing[aliasPath(i)] {
-			aliased++
-		}
-	}
-	if err != nil && (len(missing) == 0 || aliased < len(missing)) {
+	missing, ok := notFoundAliases(err, len(numbers))
+	if !ok {
 		return nil, nil, fmt.Errorf("asking commit names: %w", err)
 	}
 	out := make(map[int]*CommitNames, len(numbers))
 	var unresolved []*unresolvedError
 	for i, n := range numbers {
-		if missing[aliasPath(i)] {
+		if missing[i] {
 			unresolved = append(unresolved, &unresolvedError{number: n, err: fmt.Errorf("asking commit names of pull request %d: %w", n, err)})
 			continue
 		}
@@ -185,9 +174,34 @@ func (w *walker) askNames(ctx context.Context, numbers []int) (map[int]*CommitNa
 	return out, unresolved, nil
 }
 
-// aliasPath is where a CommitNames reply holds its i-th pull request.
+// aliasPath is where a CommitNames or PullRequestNumbers reply holds its
+// i-th pull request.
 func aliasPath(i int) string {
 	return "repository.p" + strconv.Itoa(i)
+}
+
+// notFoundAliases returns which of a reply's n aliased pull requests err, the
+// error of the request, says GitHub could not resolve. It is false when err
+// is more than that: another error, or a NOT_FOUND anywhere else.
+func notFoundAliases(err error, n int) (map[int]bool, bool) {
+	if err == nil {
+		return nil, true
+	}
+	nf, ok := errors.AsType[*ghapi.NotFoundError](err)
+	if !ok {
+		return nil, false
+	}
+	paths := map[string]bool{}
+	for _, p := range nf.Paths {
+		paths[p] = true
+	}
+	missing := map[int]bool{}
+	for i := range n {
+		if paths[aliasPath(i)] {
+			missing[i] = true
+		}
+	}
+	return missing, len(paths) > 0 && len(missing) == len(paths)
 }
 
 // completeNames gives their CommitNames to the cached entries of deleted

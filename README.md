@@ -177,7 +177,15 @@ cover yet. Then:
 When the cache format changes, the next `fetch` finds the entries in the
 older format and walks back to the window start by itself, through every
 pull request since ceph/ceph was created, to fetch them again; the next
-`extract` then re-derives their records.
+`extract` then re-derives their records. Once that walk has finished,
+`fetch` asks GitHub by number about each entry it left in the older format.
+One whose pull request GitHub cannot find is kept as it is and marked in the
+cache's `meta.json`, so later walks do not go back for it again, and every
+`fetch` that finishes warns how many such pull requests the cache holds,
+naming up to 20 of them. One GitHub still has, such as one updated while the
+walk ran, which can move past the point the walk had reached, is left
+unmarked, and the next `fetch` walks back for it as before. A walk that
+lists a marked one again fetches it as any other.
 
 A refresh trusts GitHub's last-updated time, `updatedAt`. `fetch` lists the
 pull requests updated since a day before the last walk began, then every
