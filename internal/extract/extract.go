@@ -147,10 +147,11 @@ func comments(cs []fetch.Comment) []record.Comment {
 }
 
 // commentText is the comment's text when it is short enough to be a bot
-// command, and empty otherwise.
+// command, and empty otherwise. A text with an `@` is not kept: a mention
+// or an e-mail address names a person, and a bot command has neither.
 func commentText(body string) string {
 	t := strings.TrimSpace(body)
-	if strings.ContainsAny(t, "\r\n") || utf8.RuneCountInString(t) > maxCommentText {
+	if strings.ContainsAny(t, "\r\n@") || utf8.RuneCountInString(t) > maxCommentText {
 		return ""
 	}
 	return t
