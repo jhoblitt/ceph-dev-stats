@@ -1,0 +1,4 @@
+{
+  "titles": ["mds: rework the client session table","rgw: check the bucket owner before a copy","doc: fix a typo","mgr: split the dashboard module","rbd: [WIP] new journal format","squid: rgw: check the bucket owner before a copy","mds, mgr: report stuck client requests","rgw, rbd: share the throttle code","mgr: add a health check for slow ops","tentacle: doc: update the release notes"],
+  "authors": ["fixture-author-c","fixture-author-d","fixture-author-e","fixture-author-f","fixture-author-g","fixture-author-h","fixture-author-a","fixture-author-i","fixture-author-d","fixture-author-j"]
+}

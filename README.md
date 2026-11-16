@@ -34,6 +34,29 @@ to a commit SHA: run `pinact run` after editing a workflow and `actionlint`
 before committing it. `make check` is the local gate, `make tools` installs
 the pinned linter, and that pin lives in the `Makefile`.
 
+## Site
+
+The page is a Vite, Svelte and TypeScript site under `site/`, built with the
+Node version in `.nvmrc`. It computes every figure in the browser from data
+files it fetches at run time from `site/public/data/`, which
+`cephstats rollup` writes from `data/` and git ignores.
+
+```sh
+make site-install   # npm ci --ignore-scripts
+make site-build     # cephstats rollup, then vite build into site/dist
+make site-test      # typecheck and unit tests
+```
+
+`site-build` and `site-test` install the dependencies first when
+`node_modules` is missing or older than the lockfile. `cephstats rollup` is
+not implemented yet, so `site-build` fails for now.
+
+To work on the site without the Go side, `make site-dev-data` copies the
+test fixture into `site/public/data/`; then run `npm run dev` in `site/` for
+a live server, or `npm run build` and `npm run preview` to serve the built
+site under its Pages base path, `/ceph-dev-stats/`. A build takes its
+version from `APP_VERSION`; without it the footer reads `dev`.
+
 ## License
 
 [Apache-2.0](LICENSE)
