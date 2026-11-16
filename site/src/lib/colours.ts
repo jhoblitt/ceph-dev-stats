@@ -7,6 +7,8 @@
 // - the outcomes, all pairs (they meet as lines in one curve);
 // - the review kinds, adjacent (they stack);
 // - disclosure, adjacent (it stacks).
+// The PRs naming a tool family all disclose, so the family panels are drawn
+// in the disclosed colour, each named by its panel.
 // No outcome or review-kind hue clears the floors against both disclosure
 // hues, so no line is drawn over the disclosure bars: a chart that sets them
 // against each other stacks them in panels on one time axis.
@@ -14,7 +16,7 @@
 import type { AGE_BANDS } from './filters';
 
 export const COLOURS = {
-  /** PRs by disclosure. Nothing else uses these two. */
+  /** PRs by disclosure, and the tool families named by the disclosing. Nothing else uses these two. */
   notDisclosed: 'var(--series-1)',
   disclosed: 'var(--series-2)',
 
