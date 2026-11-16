@@ -1,0 +1,684 @@
+# Ceph Pull-Request Statistics Implementation Plan
+
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+
+**Goal:** Publish an interactive GitHub Pages page of `ceph/ceph`
+pull-request statistics over the last six months, refreshable with one
+command.
+
+**Architecture:** A Go CLI, `cephstats`, walks GitHub's GraphQL API into a
+local raw cache (`fetch`), turns each cached PR into a compact committed
+record (`extract`), validates the hand-edited tables against the records
+(`check`), and writes the site's data as columns by year (`rollup`). A Vite +
+Svelte + TypeScript site fetches those files and computes every statistic in
+the browser. semantic-release tags each merge to `main`; the tag deploys to
+Pages.
+
+**Tech Stack:** Go 1.27 (per `go-conventions`: cobra, viper, `log/slog`,
+Ginkgo v2 and Gomega), `net/http` and `encoding/json` with hand-written
+GraphQL queries (no GitHub client library), YAML tables, Vite, Svelte 5,
+TypeScript, `d3-scale`, `d3-shape`, `d3-array`, Vitest, Playwright, GitHub
+Actions, semantic-release.
+
+**Spec:** `docs/superpowers/specs/2026-11-15-ceph-pr-stats-design.md`
+
+This plan follows the owner's rule that plans carry behaviour and seams, not
+code. Code blocks are sketches; behaviour, seams and values bind. An
+implementer who finds a sketch that contradicts another task follows the
+behaviour and records the ruling in the PR description.
+
+## Global Constraints
+
+- Repository `jhoblitt/ceph-dev-stats`, public. Pages base path
+  `/ceph-dev-stats/`. Module `github.com/jhoblitt/ceph-dev-stats`, binary
+  `cephstats`, environment prefix `CEPHSTATS_`.
+- The only source is `ceph/ceph`. The window starts at
+  `2026-05-15T00:00:00Z` and never moves: the data accumulates.
+- The GitHub token is read from the environment only:
+  `CEPHSTATS_GITHUB_TOKEN`, else `GH_TOKEN`, else `GITHUB_TOKEN`. It is never
+  a flag, never logged, never written to disk.
+- No test calls the live API. Fetch is tested against `httptest` servers and
+  recorded responses.
+- Raw API responses live in `.cache/` and are gitignored. Committed:
+  `data/prs/*.jsonl`, `data/authors.json`, `data/meta.json`, `data/*.yaml`.
+  Everything under `site/public/data/` is build output and gitignored. No
+  derived statistic is committed.
+- All times are UTC. A week is an ISO week, Monday 00:00 UTC.
+- Wording on the page: "disclosed" and "not disclosed". Never
+  "human-written", "AI-written" or "LLM-generated".
+- No view ranks named people. The site data carries reviewers and
+  commenters only as opaque indexes; author logins ship only for the PR
+  table.
+- No duration on the page is negative or NaN: a span that cannot be
+  measured is unknown.
+- Any Go work: load `go-conventions:go-conventions` first. Any workflow,
+  commit, PR or repo-config work: load
+  `github-conventions:github-conventions` first. Any chart work: load
+  `dataviz` first. Their rules bind over this plan's sketches.
+- Shell is thin glue; logic lives in Go (tooling) or TypeScript (site).
+- Scratch goes in `$TMPDIR`. Subagents: at most 4 in flight, `model: opus`.
+- Each task lands as its own PR, merged once CI is green (the owner granted
+  this, as on the sibling), except Task 1's first commit, which seeds
+  `main`. Nothing is deployed before Task 13. Check in with the owner when
+  Task 13's page is live.
+- A data refresh is user-visible content and must cut a release.
+
+## Review Focus
+
+1. GitHub returns an empty or 5xx response mid-walk, or the hourly allowance
+   runs out (an oversized page came back empty while probing). Expected:
+   retry with backoff, halve the page size after repeated failure, stop
+   cleanly on exhaustion naming the reset time, and a re-run resumes without
+   refetching PRs already cached at the same `updatedAt` (Task 2).
+2. A PR is updated while the walk runs, so it appears on two pages or slips
+   between them. Expected: one cache entry per PR, the later `updatedAt`
+   wins, and the next refresh's overlap picks up anything that slipped
+   (Task 2).
+3. A deleted account: GitHub returns a null author for a PR, a comment or a
+   review. Expected: recorded as `ghost`; a ghost commenter is never taken
+   for the PR's author, even when the author is a ghost too; nothing crashes
+   (Tasks 3, 6).
+4. Timestamps out of order: a response before the waiting clock starts, a
+   last commit before the first, a merge before the PR was marked ready, a
+   commit dated in the future. Expected: the span clamps at zero or becomes
+   unknown, never negative (Tasks 6, 8).
+5. A shared link with an unknown filter value, a period outside the data, or
+   a selection matching no PRs. Expected: unknown values fall back to
+   defaults, and an empty selection draws empty charts with "no PRs match",
+   not errors (Tasks 7, 9).
+
+---
+
+## File Structure
+
+```
+cmd/cephstats/              main
+internal/cli/               cobra tree: fetch, extract, check, rollup
+internal/ghapi/             GraphQL transport: token, retries, rate limit, queries
+internal/fetch/             the walk, nested paging, the raw cache
+internal/record/            the committed record, monthly JSONL, meta, authors
+internal/extract/           raw PR → record
+internal/tables/            the hand-edited YAML tables: load and validate
+internal/classify/          record + tables → kinds, disclosure, components
+internal/rollup/            classified records → site data files
+data/tools.yaml             what counts as a disclosure, and tool families
+data/bots.yaml              bot accounts GitHub types as users
+data/commands.yaml          bot commands
+data/labels.yaml            label → component, process state, or other
+data/prs/YYYY-MM.jsonl      committed records, by month opened
+data/authors.json           prior-PR baselines at the window start
+data/meta.json              window start, fetch high-water mark, counts
+site/                       Vite + Svelte app
+site/public/data/           rollup output (gitignored)
+site/src/lib/data.ts        load and type the site data
+site/src/lib/select.ts      filters → row selection
+site/src/lib/stats/         outcome curves, weekly series, spans, shares
+site/src/lib/state.ts       URL-backed filters and selection
+site/src/components/        filters, charts, table, timelines
+site/src/content/methods/   methods prose
+.github/workflows/          ci, commitlint, workflow-lint, release, deploy, …
+```
+
+## Seams
+
+Four formats cross task boundaries. Each is fixed here so tasks on either
+side can proceed from fixtures.
+
+### Seam 1 — raw cache (Task 2 → Task 3)
+
+`.cache/raw/<number>.json`: one PR's GraphQL node with every nested
+connection fully paged and merged, plus the walk's `fetchedAt`. Fields:
+`number title body state isDraft createdAt updatedAt closedAt mergedAt
+baseRefName additions deletions changedFiles authorAssociation`,
+`author{login __typename}`, `labels{name}`,
+`commits{authoredDate committedDate message}`,
+`comments{createdAt body author{login __typename}}`,
+`reviews{submittedAt state author{login __typename}}`, and timeline events
+of types `READY_FOR_REVIEW_EVENT`, `CONVERT_TO_DRAFT_EVENT`,
+`HEAD_REF_FORCE_PUSHED_EVENT`, `CLOSED_EVENT`, `REOPENED_EVENT`,
+`MERGED_EVENT`, each with `createdAt`.
+
+`.cache/authors.json`: login → number of PRs opened in `ceph/ceph` before
+the window start. `.cache/meta.json`: when the walk began, and GitHub's own
+counts taken at its end (PRs opened since the window start; PRs open).
+
+### Seam 2 — the record (Task 3 → Tasks 4, 5, 6)
+
+`data/prs/YYYY-MM.jsonl`, the month of `created`; one PR per line, sorted by
+number, keys in a fixed order, so two runs over the same cache write the
+same bytes.
+
+```
+{ "number", "updated", "title",
+  "author": {"login", "bot"}, "association",
+  "base", "created", "state": "open|merged|closed", "draft",
+  "additions", "deletions", "files", "labels": [sorted],
+  "commits": {"count", "first_authored", "last_committed"},
+  "prior_prs": n | null,
+  "events":   [ {"at", "kind": "ready|draft|force_push|closed|reopened|merged"} ],
+  "reviews":  [ {"at", "by", "bot", "state": "approved|changes_requested|commented|dismissed"} ],
+  "comments": [ {"at", "by", "bot", "text"} ],
+  "disclosure": {"trailers": [], "description": [], "commit_prose": []} }
+```
+
+- Times are RFC 3339 UTC to the second. Lists are in time order.
+- `bot` is GitHub's own typing of the account. `data/bots.yaml` is applied
+  later, in classify, so it can change without a new extract.
+- A null author is `{"login": "ghost", "bot": false}`.
+- `comments[].text` is present only when the comment is a single line of at
+  most 80 characters after trimming. That is what the bot-command table and
+  the "looks like a command" report need; longer comments are not stored.
+- `disclosure` holds candidates, not verdicts, de-duplicated:
+  - `trailers`: a commit trailer line whose key or value matches the broad
+    word list, except that a `Co-authored-by:` line is kept only when its
+    value matches. This keeps people's names and addresses out of the data.
+  - `description` and `commit_prose`: lines of the PR description, and of
+    commit messages outside trailers, that match the broad word list, each
+    cut at 200 characters.
+  - The broad word list is in the extract code and is generous: it must
+    keep every form listed in the spec's Measurements.
+- `prior_prs` is the author's baseline from `data/authors.json` plus the
+  number of that author's records opened at or after the window start and
+  before this PR. It is `null` for a PR opened before the window start.
+
+`data/meta.json`: `repo`, `window_start`, `fetched_through` (when the last
+walk began), and GitHub's counts from that walk.
+
+### Seam 3 — the tables (Task 4 ↔ Tasks 5, 6)
+
+```
+tools.yaml
+  trailer_keys: [assisted-by, …]      # keys that make a trailer a disclosure
+  phrases: [regexp, …]                # a description or prose line must match one
+  families: [ {id, name, patterns: [regexp, …]} ]   # first match wins
+  ignore: [ {line, why} ]             # candidates judged not a disclosure
+bots.yaml
+  accounts: [ {login, why} ]
+commands.yaml
+  commands: [ {id, name, pattern} ]   # against the whole lower-cased comment
+labels.yaml
+  components: [ {id, name, labels: [name or glob, …]} ]
+  process: [name or glob, …]
+  other: [name or glob, …]
+```
+
+### Seam 4 — site data (Task 6 → Tasks 7–12)
+
+Under `site/public/data/`, fetched at run time, never bundled.
+
+- `meta.json`: `repo`, `fetched_through`, `window_start`, `years`, and the
+  dictionaries every index below refers to: `bases`, `components`,
+  `families`, `commands`, `disclosure` (`none`, `description`, `coauthor`,
+  `trailer`), `event_kinds`.
+- `prs-<year>.json`, the year the PR opened; arrays of equal length, rows
+  sorted by number. Times are epoch seconds; `-1` means none or unknown.
+
+  ```
+  number created ready closed state(0 open,1 merged,2 closed) base
+  draft opened_draft reopened in_window
+  additions deletions files commits
+  first_commit last_commit first_response first_approval
+  human_reviews bot_reviews bot_commands
+  disclosure families[][] components[][] standing
+  ```
+
+- `events-<year>.json`: arrays `pr` (row in that year's file), `at`, `kind`,
+  `sub`, `actor`; sorted by `pr`, then `at`. Kinds: `comment_other`,
+  `comment_author`, `command_author`, `command_other`, `bot_account`,
+  `review_approved`, `review_changes`, `review_commented`, `bot_review`,
+  `ready`, `draft`, `force_push`, `closed`, `reopened`, `merged`. `sub` is
+  the command's index for a command, else `-1`. `actor` is an opaque person
+  index, stable across the dataset, for `comment_other` and the three human
+  review kinds, else `-1`.
+- `table-<year>.json`: `titles` and `authors`, aligned with the PR rows.
+
+---
+
+### Task 1: Repository bootstrap
+
+**Files:** repo root scaffolding, `.github/**`, `go.mod`, `Makefile`,
+`.golangci.yml`, `README.md`, `LICENSE`, `.commitlintrc.yml`, `.nvmrc`,
+`.gitignore`.
+
+- [ ] Run `go-conventions:go-new-project` for module
+  `github.com/jhoblitt/ceph-dev-stats` with one binary, `cephstats`, whose
+  subcommands `fetch`, `extract`, `check` and `rollup` exist and return
+  "not implemented".
+- [ ] Run `github-conventions:github-new-repo`: visibility **public**;
+  license Apache-2.0, as the sibling; description "Interactive statistics on
+  ceph/ceph pull requests"; homepage the Pages URL. The existing
+  `docs/superpowers/` files go in the seed commit.
+- [ ] `.gitignore` adds `/.cache/`, `/site/public/data/`, the site's
+  `node_modules`, `dist` and `test-results`, `/.superpowers/` and
+  `/.claude/`.
+- [ ] CI as the sibling's `ci.yml`: Go test, lint, the no-diff checks and
+  govulncheck, plus placeholder `data-check` and `site` jobs later tasks
+  fill. Commitlint, workflow-lint, CodeQL, dependency review, Scorecard,
+  dependabot (gomod, npm under `/site`, github-actions) and the `main`
+  ruleset per the canon: a PR and the CI checks required, no required
+  approvals, squash merge only.
+- [ ] Verify: `make check` passes locally (unsandboxed); the first PR's CI
+  is green.
+
+The working directory is not yet a git repository. Inside the sandbox it
+shows character-device dotfiles (`.bashrc`, `.gitconfig`, …) that are mounts,
+not files: stage by explicit path, never `git add -A`.
+
+**Produces:** a `main` every later task branches from; `make check`.
+
+### Task 2: `cephstats fetch`
+
+**Files:** `internal/ghapi/*`, `internal/fetch/*`, `internal/cli/fetch.go`,
+tests beside them.
+
+**Behaviour:**
+- `cephstats fetch [--since <RFC 3339>] [--full] [--cache-dir .cache]`.
+  `--since` defaults to `data/meta.json`'s `fetched_through` minus 24 hours,
+  or to the window start when there is no meta. `--full` is the window
+  start.
+- Phase 1 walks `pullRequests` ordered by `UPDATED_AT` descending and stops
+  at the first PR whose `updatedAt` is before `--since`. Phase 2 walks every
+  open PR. Phase 3 asks, for each PR author with no entry in
+  `.cache/authors.json`, how many PRs that login opened before the window
+  start (a search `issueCount`), 25 logins to a request.
+- A PR whose cached `updatedAt` equals the listed one is skipped. Otherwise
+  its commits, comments, reviews and events are paged to the end and the
+  entry is written whole, through a temporary file and a rename, so an
+  interrupted run leaves no partial entry.
+- Page size starts at 25 PRs. A failed or empty response is retried with
+  backoff; after three failures the page size halves, down to 1. A rate
+  limit stops the run with an error naming the reset time.
+- Requests are sequential. Progress goes to the log; the two GitHub counts
+  and the walk's start time go to `.cache/meta.json` at the end.
+
+**Tests** (an `httptest` server scripted per spec):
+- a PR with 3 pages of commits, 2 of comments and 2 of reviews is cached
+  with all of them, in order;
+- the walk stops at `--since` and does not request the next page;
+- a PR listed on two pages is cached once, at the later `updatedAt`;
+- a second run over an unchanged server makes no nested-page requests;
+- two empty responses then a good one succeed; persistent failure halves
+  the page size, and the request bodies show it;
+- a rate-limit response ends the run with the reset time in the error and
+  leaves earlier entries intact;
+- the token is absent from every log line and from the cache;
+- no token in the environment is an error before any request.
+
+- [ ] Tests first, implement, pass. `make check`.
+
+### Task 3: The record and `cephstats extract`
+
+**Files:** `internal/record/*`, `internal/extract/*`,
+`internal/cli/extract.go`, fixtures under `internal/extract/testdata/`.
+
+**Behaviour:**
+- `cephstats extract [--all] [--cache-dir .cache] [--data data]` upserts:
+  it reads the existing monthly files, replaces the record of every cached
+  PR whose `updatedAt` is newer than the record's `updated` (every cached
+  PR with `--all`), and rewrites only the months that changed. With an
+  empty cache it changes nothing.
+- It copies `.cache/authors.json` into `data/authors.json` (sorted) and the
+  cache's meta into `data/meta.json`.
+- Record fields follow Seam 2. `commits.first_authored` is the earliest
+  author date and `commits.last_committed` the latest committer date among
+  the PR's commits.
+
+**Tests** (fixtures in Seam 1's shape):
+- a backport, a draft later marked ready, a PR closed and reopened then
+  merged, a PR force-pushed, and a PR whose commits all postdate its
+  opening each give the expected record;
+- every disclosure form in the spec's Measurements lands in the right
+  candidate list; a `Co-authored-by:` naming a person is not kept; a
+  description that names Copilot without disclosing is kept as a candidate
+  (the verdict is Task 4's);
+- a one-line comment of 80 characters keeps its text and one of 81 does
+  not; a multi-line comment does not;
+- null authors become `ghost`;
+- `prior_prs` for an author's third PR in the window with a baseline of 4
+  is 6, and is `null` for a PR opened before the window;
+- two runs write identical bytes; a run after one PR changed rewrites
+  exactly one monthly file.
+
+- [ ] Tests first, implement, pass. `make check`.
+
+### Task 4: Tables, classification and `cephstats check`
+
+**Files:** `internal/tables/*`, `internal/classify/*`,
+`internal/cli/check.go`, skeleton `data/*.yaml` seeded from the spec's
+Measurements, CI's `data-check` job, `make data-check`.
+
+**Behaviour — classification:**
+- **Human**: not typed a bot by GitHub and not listed in `bots.yaml`.
+- **Comment kind**, in this order: from a bot account; a bot command (the
+  whole lower-cased text matches a `commands.yaml` pattern), from the PR's
+  author or from someone else; by the author; by another person.
+- **Disclosure class**, the highest present: `trailer` (a candidate trailer
+  whose key is in `trailer_keys`), `coauthor` (a kept `Co-authored-by:`),
+  `description` (a description or prose candidate matching a phrase), else
+  `none`. A candidate listed under `ignore` counts for nothing.
+- **Families**: every family whose pattern matches a counted disclosure's
+  text.
+- **Components**: the components whose labels the PR carries.
+
+**Behaviour — `cephstats check`** fails, listing every problem, on:
+- a table that does not parse, an invalid regexp, a duplicate id;
+- a candidate trailer whose key is neither in `trailer_keys`, nor
+  `Co-authored-by`, nor covered by `ignore`;
+- a counted disclosure whose text matches no family;
+- a label carried by 5 or more PRs that no table entry classifies;
+- records whose counts disagree with `data/meta.json`'s GitHub counts by
+  more than 0.5%, which allows for PRs opened or closed during the walk.
+
+It reports, without failing: the description candidates that matched no
+phrase, most frequent first; the short comments by people that matched no
+command, most frequent first; the accounts with the most comments that are
+not typed bots; and the base branches seen, with their counts.
+
+**Tests:** each classification rule with a minimal record; kind precedence
+(a bot account posting command text is a bot account; the author posting
+`jenkins test make check` is a command, not an author comment); every
+`check` failure with a minimal bad fixture; a clean fixture passes.
+
+- [ ] Tests first, implement, pass. Wire `make data-check` into CI.
+
+### Task 5: The first pull and the tables' contents
+
+**Files:** `data/prs/*.jsonl`, `data/authors.json`, `data/meta.json`,
+`data/*.yaml`, `Makefile` (`data-refresh`), `README.md` ("Updating").
+
+This is the analysis the page rests on.
+
+- [ ] `make data-refresh`: `cephstats fetch`, then `extract`, then `check`,
+  taking the token from `gh auth token` when the environment has none. Run
+  it for the first time with `fetch --full` (unsandboxed).
+- [ ] Work `cephstats check` to a clean pass by filling the tables:
+  - `labels.yaml`: every label carried by 5 or more PRs, as a component, a
+    process state or other.
+  - `commands.yaml`: start from the spec's list and add what the "looks
+    like a command" report shows.
+  - `bots.yaml`: user-typed accounts whose comments are automated.
+  - `tools.yaml`: trailer keys, phrases, families. `LLM` and `AI` alone map
+    to a family named "unspecified".
+- [ ] Spot-check 30 PRs by hand against GitHub: 10 disclosed, 10 not, 5
+  backports, 5 with bot commands. Record each disagreement and its fix.
+- [ ] Record in the PR description: the counts beside GitHub's, the API
+  points spent, and every judgment call in the tables. The tables are the
+  owner's to correct.
+- [ ] Confirm which changes move a PR's `updatedAt`: run a refresh a day
+  later and compare, for 20 PRs that received a comment, a review, a push,
+  a label or a close since, the record against GitHub. Write the result in
+  the README's "Updating" section, with `fetch --full` as the fallback.
+
+### Task 6: `cephstats rollup`
+
+**Files:** `internal/rollup/*`, `internal/cli/rollup.go`, `Makefile`
+(`site-data`), a small committed fixture dataset the site's tests share
+(`site/src/lib/__fixtures__/data/`, written by a spec from hand-made
+records).
+
+**Behaviour:** `cephstats rollup --out site/public/data` writes Seam 4 from
+the records and tables. Per PR:
+
+- `opened_draft`: the first draft event is `ready`, or the PR is a draft now
+  with no draft event.
+- `ready`: `created`, or the first `ready` event when `opened_draft`; `-1`
+  when it was never ready.
+- `closed`: the time of the last `merged` or `closed` event when the PR is
+  not open, else `-1`. `reopened`: the number of `reopened` events.
+- `first_response`: the earliest `comment_other` or human review by someone
+  other than the author; clamped to no earlier than `ready`; `-1` if none or
+  if `ready` is `-1`.
+- `first_approval`: the earliest approving review by a human other than the
+  author, clamped the same way.
+- `first_commit`: `commits.first_authored`, or `-1` when it is after
+  `created`. `last_commit`: `commits.last_committed`.
+- `standing`: `prior_prs`, or `-1`. `in_window`: `created` at or after the
+  window start.
+- `actor` indexes are assigned in order of first appearance over the whole
+  dataset, so they are stable for a given set of records.
+
+**Tests:** each derivation above with a minimal record, including the
+out-of-order cases of Review Focus 4 (a response before `ready`, a review by
+a ghost on a ghost's PR); every column of a year file has one length; every
+index is inside its dictionary; events are sorted and each `pr` is a valid
+row; no file contains a commenter's or reviewer's login; two runs write
+identical bytes.
+
+- [ ] Tests first, implement, pass. `make check`.
+
+### Task 7: Site shell
+
+May start once Task 1 has merged: it needs only Seam 4 and a hand-made
+fixture, which Task 6's fixture later replaces.
+
+**Files:** `site/` (Vite, Svelte 5, TypeScript, Vitest),
+`site/src/lib/{data,state,version,theme}.ts`, header, footer, filter bar,
+routes; `Makefile` targets `site-install`, `site-build`, `site-test`,
+`site-dev-data`; CI's `site` job.
+
+**Behaviour:**
+- Take the sibling's shell as the starting point: header, footer, theme
+  toggle, `tokens.css`, `base.css`, `version.ts`, and `state.ts`'s
+  hash-parsing pattern. Vite base `/ceph-dev-stats/`.
+- `make site-build` runs `cephstats rollup`, then `vite build`.
+  `make site-dev-data` copies the fixture into `site/public/data/`.
+- `data.ts` loads `meta.json`, then the year files the period needs, into
+  typed arrays; `table-<year>.json` only on demand. A year that fails to
+  load shows an error naming the file, and the rest of the page still
+  works.
+- Header: "data as of" the `fetched_through` date. Footer: `v<version>`
+  linking to its release, and a link to the repository.
+- The filter bar holds: period, target (main, backports and other branches,
+  all), component, size band, author standing band, disclosure, drafts,
+  reopened. Defaults: the whole window, `main`, everything else unfiltered.
+- `state.ts` keeps the filters, the selected week or band, and the selected
+  PR in the URL hash, and restores them on load.
+- Routes: `#/` and `#/methods`. The page body has one empty, named section
+  per later task (velocity, review, llm, dots, timelines, table), so Tasks
+  9–11 add components without editing each other's files.
+
+**Tests (Vitest):** state round-trips through the hash; unknown values,
+malformed hashes and a period outside the data yield defaults; `data.ts`
+rejects a year file whose columns differ in length.
+
+### Task 8: Statistics library
+
+**Files:** `site/src/lib/select.ts`, `site/src/lib/stats/*.ts`, tests
+beside them. Pure functions over typed arrays; no DOM.
+
+**Seams:**
+
+```
+select(data, filters): Uint32Array                 // row ids
+outcomeCurve(data, rows, span): Curve
+  // span: response | approval | merge | afterApproval | afterLastCommit
+  //       | firstCommitToOpened | openedToLastCommit
+  // Curve: { days: number[], shares: { [outcome]: number[] } }
+quantileDays(curve, outcome, q): number | null     // null: not yet known
+weekly(data, rows, series): { week: number[], values: Record<string, number[]> }
+  // series: opened | merged | closed | reviews | reviewers | commands
+  //         | disclosureShare | waitingByWeekOpened
+backlog(data, rows): { week: number[], bands: number[][] }
+reviewerShare(data, rows, top: number): number
+```
+
+**Behaviour:**
+- An outcome curve is a cumulative incidence with competing outcomes and
+  censoring. Sort the rows by duration. With `S = 1` and `n` at risk, at
+  each time with `d_k` outcomes of kind `k`: add `S × d_k / n` to that
+  kind's share, then set `S ← S × (1 − Σd_k / n)`. A PR with no outcome yet
+  leaves the risk set at its age, measured to `fetched_through`, after the
+  outcomes at that same time. The shares and `S` sum to one at every point.
+- For `merge` the outcomes are merged and closed unmerged. For `response`
+  and `approval` they are the event itself and "finished without one".
+- Durations run from `ready` for `response`, `approval` and `merge`. A row
+  whose start is `-1` is left out. A negative duration is zero.
+- `firstCommitToOpened` leaves out rows whose `first_commit` is `-1`.
+- Weekly series by calendar week count events; series by week opened use
+  only rows with `in_window`. The step is a week for a period of up to 53
+  weeks and a calendar month beyond that.
+- Bands. Size, by lines added plus deleted: up to 10, 11–100, 101–1,000,
+  over 1,000. Author standing, by `standing`: 0 (first PR), 1–9, 10–99, 100
+  or more, and unknown for `-1`.
+- The backlog at a week's end counts rows open then: opened at or before
+  it, and not inside a closed stretch between a `closed` and a `reopened`
+  event. Age bands: under 7 days, 7–30, 30–90, over 90.
+- `reviewerShare` is the share of human review events made by the `top`
+  busiest actors. It returns a number only, never who.
+
+**Tests:**
+- Four PRs: merged at day 1, closed at day 2, open at age 3, merged at
+  day 5. Merged share is 0.25 from day 1 and 0.75 from day 5; closed is
+  0.25 from day 2; the median days to merge is 5. Without the fourth PR
+  the median is `null`.
+- An empty selection gives empty curves and series, and `null` quantiles.
+- A row whose last commit predates its opening gives zero days for
+  `openedToLastCommit`; one whose merge predates `ready` gives zero days to
+  merge; one whose last commit is after `fetched_through` gives zero days
+  for `afterLastCommit`. None gives a negative or NaN value.
+- A PR opened Sunday 23:59:59 UTC and one opened Monday 00:00:00 fall in
+  different weeks.
+- A PR closed in week 2 and reopened in week 4 is out of the backlog in
+  week 3 and in it in week 5.
+- A selection with every filter at its default equals all rows; each
+  filter alone selects the rows a hand count of the fixture gives.
+- Property: for random rows, shares are monotone, within [0, 1], and sum
+  with `S` to one.
+
+### Task 9: Velocity and Review views
+
+**Files:** `site/src/components/{charts/*,Velocity,Review}.svelte`, tests.
+
+**Behaviour:**
+- Shared chart parts (axes, a weekly bar and line chart, a stacked area, a
+  step curve) drawn as SVG with `d3-scale` and `d3-shape`. Every chart has
+  a text summary for screen readers, a tooltip with exact values, and an
+  empty state reading "no PRs match".
+- Velocity: PRs per week (opened, stacked disclosed and not disclosed;
+  merged; closed unmerged), and the open backlog per week in age bands.
+- Review: human reviews and bot reviews per week; people reviewing per
+  week; outcome curves for first response, first approval and merge;
+  median and 90th percentile waits by week opened, drawn as "not yet
+  known" where the curve has not reached them; time after approval; bot
+  commands per week by command, with the share of PRs that have one and
+  the number a merged PR took; the share of reviews done by the ten busiest
+  reviewers, as one figure.
+- Spans: first commit to opened, opened to last commit, and last commit to
+  final disposition, each as a curve and by week opened. When the target
+  filter includes other branches, the first span is labelled "original work
+  to backport opened".
+- One chart sets PRs arriving, split by disclosure, against human reviews
+  done and people reviewing, on a shared time axis.
+- Selecting a week or a band sets the selection in the URL.
+
+**Tests:** component tests on the fixture that each chart renders the
+series the statistics library returns and shows the empty state for an
+empty selection.
+
+### Task 10: LLM-use view, the dot plot and the PR table
+
+**Files:** `site/src/components/{LlmUse,DotPlot,PrTable}.svelte`, tests.
+
+**Behaviour:**
+- LLM use: the share of PRs disclosing per week, by family; and disclosed
+  against not disclosed, side by side, for size, first commit to opened,
+  merge rate, time to merge and bot reviews. A line under the section says
+  that "not disclosed" is not "no LLM" and links to the methods page.
+- Dot plot, on a canvas so it stays responsive at 75,000 points: each PR a
+  dot, opened date across, days to final disposition up on a log scale,
+  coloured by disclosure; an open PR is a hollow dot at its age. Hover
+  shows the PR's number; click selects it.
+- PR table: the PRs of the current selection, virtualised; columns number,
+  title, author, opened, state, waits, size, disclosure, reopened; sortable;
+  each number links to the PR on GitHub. It loads `table-<year>.json` when
+  first shown.
+
+**Tests:** the side-by-side figures equal the statistics library's for the
+two selections; the table shows exactly the selected rows and sorts; a
+click on a dot or a row sets the selected PR in the URL.
+
+### Task 11: Timelines
+
+**Files:** `site/src/components/{PrTimeline,Lanes}.svelte`, tests.
+
+**Behaviour:**
+- One PR's timeline, as sketched in the spec: first commit, opened, each
+  event by kind with the spec's legend, last commit, final disposition, and
+  the three spans labelled beneath. An unknown first commit is left off and
+  said so. Events show kind and time, never who.
+- Lanes: the same line for up to 200 PRs of the current selection, one per
+  row, on a canvas; a switch between the calendar and days since opening;
+  ordered by opening unless the table is sorted. When the selection is
+  larger, a note says how many are shown.
+
+**Tests:** a fixture PR with every event kind renders one mark per event in
+time order; a PR with `first_commit` unknown renders without it; lanes cap
+at 200 and say so.
+
+### Task 12: Methods page
+
+**Files:** `site/src/content/methods/*.md`, the prose route.
+
+- [ ] One section per definition in the spec, each stating the rule the
+  code applies. Figures come from the data, not retyped.
+- [ ] What disclosure can and cannot show; that Ceph's trailer rule was a
+  draft on 2026-10-12; that a backport's disclosure describes the original
+  work.
+- [ ] What six months cannot show: no pre-LLM baseline, and unknown author
+  standing for PRs opened before the window.
+- [ ] The hand-edited tables, linked to their files in the repository.
+- [ ] How to check a number: the PR table and the links to GitHub.
+- [ ] Every claim about the code's behaviour is checked against the code
+  before it is written.
+
+### Task 13: Release and deploy
+
+**Files:** `.releaserc.yml`, `.github/workflows/{release,deploy}.yml`,
+`site/e2e/smoke.spec.ts`, `site/playwright.config.ts`.
+
+- [ ] Mirror the sibling's `release.yml`, `deploy.yml` and `.releaserc.yml`,
+  substituting this repository's names and build.
+- [ ] Browser smoke test against `vite preview` on the committed data: the
+  page loads with no console errors; changing the target filter changes a
+  headline figure; selecting a week narrows the table; opening a PR shows
+  its timeline; a hash with an unknown filter value loads defaults; the
+  footer shows a version and the repository link; the methods page
+  renders. Wire it into CI.
+- [ ] Enable Pages with source "GitHub Actions"; allow the `github-pages`
+  environment to deploy from `v*` tags.
+- [ ] Merge; watch release, then deploy, with one background watcher.
+- [ ] Verify the live site: HTTP 200, the footer's version equals the
+  latest tag, the smoke test passes against the Pages URL.
+- [ ] Check in with the owner: the URL, what the six months show for the
+  three questions, and what the full history would add.
+
+---
+
+## Order
+
+```
+1 ─┬─ 2 ─ 3 ─ 4 ─ 5 ─ 6 ──────────────┐
+   └─ 7 ─ 8 ─┬─ 9  ─┐                 ├─ 13
+             ├─ 10 ─┼─ 12 ────────────┘
+             └─ 11 ─┘
+```
+
+The Go line (2–6) and the site line (7–11) run side by side. Tasks 9, 10
+and 11 are independent of each other. Task 13 needs all of them.
+
+## Self-review notes
+
+- Spec coverage: measures and stages (6, 8, 9); backports as a category (4,
+  7); first commit to opened, last commit and the three spans (3, 6, 8, 11);
+  disclosure and tool families (3, 4, 5, 10); bot commands as a category
+  (4, 5, 9); plots over time and the dot plot (9, 10); timelines and
+  reopening (3, 6, 8, 11); drill-down table and linked views (7, 10); one
+  command to update (5); public from the first release with the methods
+  page (12, 13); named-people rules (6, 8, 9, 11).
+- The spec leaves the estimator of the outcome curves to the builder; this
+  plan fixes it (Task 8) because Tasks 9 and 10 depend on its shape.
+- The spec leaves author standing's source to the builder; this plan takes
+  a per-author baseline at the window start (Tasks 2, 3) and marks older
+  PRs unknown. The full history removes the baseline.
+- Not in this plan, as in the spec: the full history, a QA stage from label
+  history, a scheduled refresh.

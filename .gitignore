@@ -1,0 +1,16 @@
+/bin/
+/dist/
+coverage.out
+
+# Raw GitHub API responses: a local cache, rebuilt by `cephstats fetch`.
+/.cache/
+
+# The site: dependencies, build output, and the data `cephstats rollup` writes.
+/site/node_modules/
+/site/dist/
+/site/public/data/
+/site/test-results/
+
+# Local agent scratch and harness state.
+/.superpowers/
+/.claude/
