@@ -5,24 +5,131 @@
 # and no kind label in kinds.yaml, classifies.
 
 # A pull request with two component labels belongs to both components.
+# Most of these labels are set by ceph/ceph's labeler from the paths a pull
+# request touches, so one pull request often carries several.
 components:
   - id: rgw
     name: RGW
     labels: [rgw]
-  - id: core
-    name: Core
-    labels: [core]
   - id: cephfs
     name: CephFS
     labels: [cephfs]
+  - id: rbd
+    name: RBD
+    labels: [rbd]
+  - id: core
+    name: Core (RADOS)
+    labels: [core]
+  - id: mon
+    name: Monitor
+    labels: [mon]
+  - id: mgr
+    name: Manager
+    labels: [mgr]
+  - id: dashboard
+    name: Dashboard
+    labels: [dashboard]
+  # SeaStore is Crimson's object store: 27 of its 29 pull requests carry
+  # crimson too. crimson-perf marks Crimson performance work.
+  - id: crimson
+    name: Crimson
+    labels: [crimson, seastore, crimson-perf]
+  - id: bluestore
+    name: BlueStore
+    labels: [bluestore]
+  - id: cephadm
+    name: cephadm
+    labels: [cephadm]
+  - id: orchestrator
+    name: Orchestrator
+    labels: [orchestrator]
+  - id: rook
+    name: Rook
+    labels: [rook]
+  - id: nvmeof
+    name: NVMe-oF
+    labels: [nvmeof]
+  - id: nfs
+    name: NFS
+    labels: [nfs]
+  - id: smb
+    name: SMB
+    labels: [smb]
+  - id: ceph-volume
+    name: ceph-volume
+    labels: [ceph-volume]
+  - id: monitoring
+    name: Monitoring
+    labels: [monitoring]
+  - id: telemetry
+    name: Telemetry
+    labels: [telemetry]
+  - id: libcephsqlite
+    name: libcephsqlite
+    labels: [libcephsqlite]
+  - id: common
+    name: Common
+    labels: [common]
+  - id: pybind
+    name: Python bindings
+    labels: [pybind]
+  - id: tracing
+    name: Tracing
+    labels: [tracing]
+  - id: tools
+    name: Tools
+    labels: [tools]
+  - id: scripts
+    name: Scripts
+    labels: [script]
+  - id: build-ops
+    name: Build/ops
+    labels: [build/ops]
+  - id: ci
+    name: CI
+    labels: [CI]
+  - id: docs
+    name: Documentation
+    labels: [documentation]
+  - id: tests
+    name: Tests
+    labels: [tests]
 
-# Where a pull request is in the review and test process.
+# Where a pull request is in the review, test, backport and merge process.
 process:
-  - needs-review
-  - needs-qa
-  - needs-ci-approval
-  - 'wip-*-testing'
+  - 'needs-*'
+  - 'need-*'
+  - 'wip-*'
+  - 'releng-audit-*'
+  - 'backport*'
+  - 'ui-tested-*'
   - DNM
+  - do-not-merge
+  - In Progress
+  - ci-approved
+  - ready-to-merge
+  - TESTED
+  - RGW-TESTED
+  - Rados-Tested
+  - core-Tested
+  - passed-qa
+  - no-backport-required
+  - tentacle-next
+  - dashboard-umbrella
+  - rocky10-tentacle
+  - jaya-bluestore-testing
+  - stale
+  - pinned
 
-# Labels that are neither.
-other: []
+# Labels that are neither: what kind of change it is beyond its kind, the
+# platform, the dependency-update bot's own labels, a programme.
+other:
+  - api-change
+  - config-change
+  - performance
+  - FreeBSD
+  - dependencies
+  - javascript
+  - python
+  - github_actions
+  - GSoC / Outreachy
