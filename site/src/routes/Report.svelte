@@ -42,7 +42,7 @@
 <style>
   .load-errors {
     padding: var(--space-3) var(--space-4);
-    border: 1px solid var(--series-2);
+    border: 1px solid var(--border-strong);
     border-radius: var(--radius);
     background: var(--surface);
   }
