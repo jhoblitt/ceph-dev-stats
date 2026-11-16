@@ -21,7 +21,7 @@ A pull request that finished before {{windowStart}} can be among the records too
 - **Component** and **kind**: see [Target, component and kind](#kind). A pull request with two components is in both.
 - **Size**: lines added plus lines deleted.
 - **Author standing**: see [What the data cannot show](#limits).
-- **AI use disclosure**: "AI use disclosed" is any of the forms in [Disclosure of LLM use](#disclosure), and "AI use not disclosed" is none of them.
+- **AI use disclosure**: "AI use disclosed" is any of the forms in [Disclosure of AI use](#disclosure), and "AI use not disclosed" is none of them.
 - **Exclude drafts**: leaves out the pull requests that are drafts now, not those that were drafts once.
 - **Reopened**: keeps the pull requests reopened at least once.
 - **Author**: keeps the pull requests a login opened, or those credited to a deleted account's name or to "(deleted, unknown)" ([Deleted accounts](#people-deleted-accounts)).

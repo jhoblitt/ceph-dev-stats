@@ -2,14 +2,11 @@
   import { bucketTable, withCoverage } from '../lib/charts';
   import { COLOURS } from '../lib/colours';
   import { DISCLOSED, NOT_DISCLOSED, dayStart, periodRange } from '../lib/filters';
-  import { formatShare } from '../lib/format';
   import {
     comparison,
     comparisonSummary,
     describeShares,
     familiesModel,
-    OWN_PANEL_SHARE,
-    foldFamilies,
     percent,
     shareModel,
   } from '../lib/llm';
@@ -17,7 +14,7 @@
   import { openedIn } from '../lib/select';
   import { chooseBucket } from '../lib/selection';
   import { sectionHash } from '../lib/state';
-  import { disclosureCounts, familiesShare, namingAny } from '../lib/stats/measures';
+  import { disclosureCounts } from '../lib/stats/measures';
   import { weekly } from '../lib/stats/weekly';
   import BucketChart from './charts/BucketChart.svelte';
   import ChartFrame from './charts/ChartFrame.svelte';
@@ -40,44 +37,28 @@
   const share = $derived(withCoverage(shareModel(shares), period, fetched));
   const step = $derived(share.step);
   const counts = $derived(disclosureCounts(dataset, opened));
-  // The threshold for a panel of its own applies to the current selection, so the panels follow the filters.
-  const fold = $derived(foldFamilies(dataset.meta.families, counts));
-  const families = $derived(
-    familiesModel(
-      shares,
-      familiesShare(dataset, rows, period, fold.folded),
-      namingAny(dataset, opened, fold.folded),
-      fold,
-      dataset.meta.families,
-      counts,
-    ),
-  );
+  const families = $derived(familiesModel(shares, dataset.meta.families, counts));
   const familyModel = $derived(withCoverage(families.model, period, fetched));
-  const familyTable = $derived(withCoverage(families.table, period, fetched));
-  const familyNote = $derived(
-    'In percent of the PRs opened, on one scale. A PR can name more than one tool, and “unspecified” counts a disclosure that names none, so the shares by tool do not add up to the share disclosing.' +
-      (families.folded === null
-        ? ''
-        : ` Tools named on fewer than ${formatShare(OWN_PANEL_SHARE)} of the PRs opened share the panel “other named tools”: ${families.folded}. The table lists each.`),
-  );
+  const familyNote =
+    'In percent of the PRs opened, on one scale. A PR can name more than one tool, and “unspecified” counts a disclosure that names none, so the shares by tool do not add up to the share disclosing.';
   const compared = $derived(comparison(dataset, opened));
 
   const noneOpened = 'no PR was opened in this period';
   const shareNothing = $derived(opened.length === 0 ? noneOpened : null);
   const familyNothing = $derived(
-    opened.length === 0 ? noneOpened : counts.disclosed === 0 ? 'no PR opened in this period discloses LLM use' : null,
+    opened.length === 0 ? noneOpened : counts.disclosed === 0 ? 'no PR opened in this period discloses AI use' : null,
   );
 
   const selected = $derived($selection.week === null ? null : dayStart($selection.week));
   const onbucket = (bucket: number) => selection.update((s) => chooseBucket(s, bucket));
 
-  const shareTitle = $derived(`Share of PRs opened that disclose LLM use, per ${step}`);
+  const shareTitle = $derived(`Share of PRs opened that disclose AI use, per ${step}`);
   const familyTitle = $derived(`Share of PRs opened naming each tool, per ${step}`);
   const compareTitle = `${DISCLOSED} against not disclosed, PRs opened in the period`;
 </script>
 
 <section id="llm" aria-labelledby="llm-heading" class:stale={sectionsStale($view, $data)} aria-busy={sectionsBusy($view, $data) ? 'true' : undefined}>
-  <h2 id="llm-heading">LLM use</h2>
+  <h2 id="llm-heading">AI use</h2>
 
   <ChartFrame
     title={shareTitle}
@@ -103,7 +84,7 @@
     summary={describeShares(familyModel)}
     {empty}
     nothing={familyNothing}
-    table={bucketTable(familyTable, percent)}
+    table={bucketTable(familyModel, percent)}
   >
     <BucketChart
       model={familyModel}
@@ -151,9 +132,9 @@
   <ReviewsRecordedNote />
 
   <p class="caveat">
-    “{NOT_DISCLOSED}” is not “no LLM”: disclosure is voluntary, and a PR can use an LLM without saying so. The two
+    “{NOT_DISCLOSED}” is not “no AI”: disclosure is voluntary, and a PR can use AI without saying so. The two
     groups also differ in other ways, such as kind, size and author, so a difference between them does not show that
-    LLM use caused it. Disclosed PRs are newer on average, so the share merged at a long horizon is about fewer of them,
+    AI use caused it. Disclosed PRs are newer on average, so the share merged at a long horizon is about fewer of them,
     and only their earliest ones, opened when disclosure was rarer. To compare PRs of like size, use the Size filter.
     <a href={sectionHash($selection, 'disclosure', meta)}>How disclosure is detected, and what it cannot show</a>.
   </p>

@@ -1,6 +1,6 @@
 # AI use disclosed against not disclosed
 
-The LLM-use section sets the pull requests that disclose LLM use against those that do not, figure by figure, among the selected pull requests opened during the period. A pull request is in the disclosed group when it discloses in any of the [forms](#disclosure), and in the other group otherwise. Each figure says how many pull requests it rests on, where there are any.
+The AI-use section sets the pull requests that disclose AI use against those that do not, figure by figure, among the selected pull requests opened during the period. A pull request is in the disclosed group when it discloses in any of the [forms](#disclosure), and in the other group otherwise. Each figure says how many pull requests it rests on, where there are any.
 
 ## The figures
 
@@ -13,7 +13,7 @@ There is no median time to merge: the groups can differ in age, and a median far
 
 ## What else sets the groups apart
 
-This table sets the two groups side by side on things other than disclosure: the pull requests on the development branch, `main` or `master`, opened in the last {{const.recentMonths}} months, which are those the LLM-use section compares over those months with every other filter as the report opens, as of {{asOf}}:
+This table sets the two groups side by side on things other than disclosure: the pull requests on the development branch, `main` or `master`, opened in the last {{const.recentMonths}} months, which are those the AI-use section compares over those months with every other filter as the report opens, as of {{asOf}}:
 
 {{table.disclosureGroups}}
 

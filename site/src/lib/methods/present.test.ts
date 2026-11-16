@@ -76,8 +76,6 @@ describe('inline figures on the fixture', () => {
     ['view.notDisclosedInPeriod', '67%'],
     ['view.disclosedInPeriod', '100%'],
     ['const.reviewsRecordedFrom', '2016-09-14'],
-    ['const.compareWeeks', '4'],
-    ['const.compareNeeded', '8'],
     ['people.authors', '6'],
     ['people.botAuthors', '0'],
     ['people.reviewers', '5'],
@@ -94,7 +92,7 @@ describe('inline figures on the fixture', () => {
   });
 
   it('has a spec above for every inline figure', () => {
-    expect(Object.keys(INLINE_FIGURES).length).toBe(47);
+    expect(Object.keys(INLINE_FIGURES).length).toBe(45);
   });
 });
 
@@ -242,11 +240,11 @@ describe('table figures on the fixture', () => {
     ]);
   });
 
-  it('sets side by side the two groups the LLM-use section compares over the last six months', () => {
+  it('sets side by side the two groups the AI-use section compares over the last six months', () => {
     // Rows 3, 4, 5, 6, 8, 9 and 10: main, opened in the period.
     expect(model('table.disclosureGroups')).toEqual({
       caption:
-        'The 7 pull requests on the development branch opened in the last 6 months, 2026-05-15 to 2026-11-15, those the LLM-use section compares over those months with every other filter as the report opens, by disclosure, as of 2026-11-15',
+        'The 7 pull requests on the development branch opened in the last 6 months, 2026-05-15 to 2026-11-15, those the AI-use section compares over those months with every other filter as the report opens, by disclosure, as of 2026-11-15',
       head: ['', 'AI use not disclosed', 'AI use disclosed'],
       rows: [
         ['pull requests', '4', '3'],

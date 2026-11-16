@@ -1,4 +1,4 @@
-// The LLM-use section's charts and its side-by-side comparison, from the
+// The AI-use section's charts and its side-by-side comparison, from the
 // statistics library's results. Every figure of the comparison is the
 // library's, over the two sub-selections; nothing here computes one.
 
@@ -41,102 +41,40 @@ export function shareModel(shares: Weekly<number | null>): BucketModel {
   };
 }
 
-/** A family gets a panel of its own when at least this share of the PRs opened name it. */
-export const OWN_PANEL_SHARE = 0.02;
-
-/** The family id for a disclosure that names no tool: a different thing from a tool, so never folded. */
+/** The family id for a disclosure that names no tool: a different thing from a tool, so drawn last. */
 const UNSPECIFIED = 'unspecified';
 
-/** Which families, by index into meta's `families`, get a panel of their own and which share one. */
-export interface Fold {
-  /** Most named first, ties by name. */
-  own: number[];
-  /** Named by fewer than `OWN_PANEL_SHARE` of the PRs opened, most named first. */
-  folded: number[];
-  /** "unspecified", always its own last panel when any PR has it. */
-  unspecified: number | null;
-}
-
-function byUse(families: readonly Named[], counts: DisclosureCounts): number[] {
-  return families
-    .map((_, i) => i)
-    .filter((i) => (counts.families[i] ?? 0) > 0)
-    .sort(
-      (a, b) =>
-        (counts.families[b] ?? 0) - (counts.families[a] ?? 0) ||
-        (families[a]?.name ?? '').localeCompare(families[b]?.name ?? '', 'en'),
-    );
-}
-
-/**
- * Splits the families named in the selection into those drawn alone and
- * those folded into one panel. A fold of a single family would only rename
- * it, so a family alone below the threshold keeps its own panel.
- */
-export function foldFamilies(families: readonly Named[], counts: DisclosureCounts): Fold {
-  const used = byUse(families, counts);
-  const unspecified = used.find((i) => families[i]?.id === UNSPECIFIED) ?? null;
-  const tools = used.filter((i) => i !== unspecified);
-  const small = (i: number) => (counts.families[i] ?? 0) / counts.rows < OWN_PANEL_SHARE;
-  const folded = tools.filter(small);
-  if (folded.length < 2) return { own: tools, folded: [], unspecified };
-  return { own: tools.filter((i) => !small(i)), folded, unspecified };
-}
-
 export interface FamilyChart {
-  /** One line per panel: the families alone, the folded ones as `other`, then "unspecified". */
+  /** One line per panel: each family named in the selection, then "unspecified". */
   model: BucketModel;
   panels: Panel[];
-  /** Every family on its own, for the table view. */
-  table: BucketModel;
-  /**
-   * The folded families with their counts, "OpenAI 58, Cursor 28", or null
-   * when none is folded. Printed beside the chart: a panel's title is one
-   * line of SVG and would run off a phone's screen.
-   */
-  folded: string | null;
 }
 
 /**
  * The share of the PRs opened in each bucket that name each tool family, on
- * one scale and in the disclosed colour, since every such PR discloses.
- * `other` is the share naming any folded family and `otherCount` how many PRs
- * did over the period. Each panel's title gives its count and share.
+ * one scale and in the disclosed colour, since every such PR discloses: a
+ * panel for each family named in the selection, most named first, ties by
+ * name, and "unspecified" last. Each panel's title gives its count and share.
  */
-export function familiesModel(
-  shares: Weekly<number | null>,
-  other: Weekly<number | null>,
-  otherCount: number,
-  fold: Fold,
-  families: readonly Named[],
-  counts: DisclosureCounts,
-): FamilyChart {
+export function familiesModel(shares: Weekly<number | null>, families: readonly Named[], counts: DisclosureCounts): FamilyChart {
   const share = (n: number) => `${plural(n, 'PR')}, ${formatShare(n / counts.rows)} of those opened`;
-  const alone = (i: number) => {
+  const used = families
+    .map((_, i) => i)
+    .filter((i) => (counts.families[i] ?? 0) > 0)
+    .sort(
+      (a, b) =>
+        Number(families[a]?.id === UNSPECIFIED) - Number(families[b]?.id === UNSPECIFIED) ||
+        (counts.families[b] ?? 0) - (counts.families[a] ?? 0) ||
+        (families[a]?.name ?? '').localeCompare(families[b]?.name ?? '', 'en'),
+    );
+  const parts = used.map((i) => {
     const f = families[i] as Named;
     const n = counts.families[i] ?? 0;
     return { line: shareLine(f.id, f.name, COLOURS.disclosed, shares.values[f.id] ?? []), panel: { keys: [f.id], unit: `${f.name}: ${share(n)}` } };
-  };
-  const parts = fold.own.map(alone);
-  const folded =
-    fold.folded.length === 0
-      ? null
-      : fold.folded.map((i) => `${families[i]?.name} ${formatCount(counts.families[i] ?? 0)}`).join(', ');
-  if (folded !== null) {
-    parts.push({
-      line: shareLine('other', 'other named tools', COLOURS.disclosed, other.values['any'] ?? []),
-      panel: { keys: ['other'], unit: `Other named tools: ${share(otherCount)}` },
-    });
-  }
-  if (fold.unspecified !== null) parts.push(alone(fold.unspecified));
-  const every = byUse(families, counts).filter((i) => i !== fold.unspecified);
-  if (fold.unspecified !== null) every.push(fold.unspecified);
-  const base = { step: shares.step, buckets: shares.week, bars: [] };
+  });
   return {
-    model: { ...base, lines: parts.map((p) => p.line) },
+    model: { step: shares.step, buckets: shares.week, bars: [], lines: parts.map((p) => p.line) },
     panels: parts.map((p) => p.panel),
-    table: { ...base, lines: every.map((i) => alone(i).line) },
-    folded,
   };
 }
 

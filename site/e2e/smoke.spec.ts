@@ -87,7 +87,7 @@ async function open(page: Page, hash = ''): Promise<void> {
 test('the page loads whole, with every section', async ({ page }) => {
   await open(page);
   await expect(page.getByRole('heading', { level: 1, name: 'Ceph pull requests' })).toBeAttached();
-  for (const name of ['Filters', 'Velocity', 'Review', 'LLM use', 'Each PR', 'Timelines', 'Pull requests', 'People']) {
+  for (const name of ['Filters', 'Velocity', 'Review', 'AI use', 'Each PR', 'Timelines', 'Pull requests', 'People']) {
     await expect(page.getByRole('heading', { level: 2, name, exact: true }), name).toBeAttached();
   }
   await expect(page.getByRole('alert')).toHaveCount(0);
@@ -331,7 +331,7 @@ const OVER_THE_PERIOD = [
   /^Review capacity against arrivals, per /,
   /^Human and bot reviews per /,
   /^Bot commands per /,
-  /^Share of PRs opened that disclose LLM use, per /,
+  /^Share of PRs opened that disclose AI use, per /,
   /^Share of PRs opened naming each tool, per /,
 ];
 

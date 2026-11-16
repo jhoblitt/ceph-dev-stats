@@ -52,7 +52,7 @@ describe('the methods page', () => {
 
   it('gives disclosure the anchor the rest of the site links to', async () => {
     const { main } = await methods();
-    expect(main.querySelector('section#disclosure h2')?.textContent).toBe('Disclosure of LLM use');
+    expect(main.querySelector('section#disclosure h2')?.textContent).toBe('Disclosure of AI use');
   });
 
   it('lists every section in its contents, each link leading to a section on the page', async () => {
@@ -66,7 +66,7 @@ describe('the methods page', () => {
   it('gives each contents link the address of its section, which survives being copied', async () => {
     await methods();
     const link = within(screen.getByRole('navigation', { name: 'Contents' })).getByRole('link', {
-      name: 'Disclosure of LLM use',
+      name: 'Disclosure of AI use',
     });
     expect(link.getAttribute('href')).toBe('#/methods?target=main&section=disclosure');
   });
@@ -74,7 +74,7 @@ describe('the methods page', () => {
   it('moves to a section from its contents link, naming it in the address', async () => {
     const { loc } = await methods();
     const link = within(screen.getByRole('navigation', { name: 'Contents' })).getByRole('link', {
-      name: 'Disclosure of LLM use',
+      name: 'Disclosure of AI use',
     });
     await fireEvent.click(link);
     expect(loc.hash()).toBe('#/methods?target=main&section=disclosure');
@@ -87,7 +87,7 @@ describe('the methods page', () => {
     await waitFor(() => expect(document.activeElement?.id).toBe('disclosure'));
     (document.activeElement as HTMLElement).blur();
     const link = within(screen.getByRole('navigation', { name: 'Contents' })).getByRole('link', {
-      name: 'Disclosure of LLM use',
+      name: 'Disclosure of AI use',
     });
     await fireEvent.click(link);
     expect(loc.hash()).toBe('#/methods?target=main&section=disclosure');
@@ -122,7 +122,7 @@ describe('the methods page', () => {
     expect(loc.hash()).toBe('#/methods?target=main');
   });
 
-  it("lands on the disclosure section from the LLM-use section's link", async () => {
+  it("lands on the disclosure section from the AI-use section's link", async () => {
     const { page } = await methods({}, '#/');
     const link = screen.getByRole('link', { name: 'How disclosure is detected, and what it cannot show' });
     const href = link.getAttribute('href') as string;

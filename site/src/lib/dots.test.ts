@@ -162,7 +162,7 @@ describe('describing the dots', () => {
 
   it('counts the PRs by state and disclosure, in words', () => {
     expect(describeDots(d)).toBe(
-      '7 PRs opened in the period: 4 merged, 1 closed unmerged and 2 still open; 3 disclose LLM use. ' +
+      '7 PRs opened in the period: 4 merged, 1 closed unmerged and 2 still open; 3 disclose AI use. ' +
         'Their days from opening to merging or closing run from 4 days to 48 days; an open PR is drawn at its age, up to 166 days.',
     );
   });
@@ -185,7 +185,7 @@ describe('describing the dots', () => {
       rows: [
         { label: 'opened', value: '2026-05-18', color: null, mark: 'total' },
         { label: 'to merge', value: '4 days', color: null, mark: 'total' },
-        { label: 'LLM use', value: 'disclosed', color: 'var(--series-2)', mark: 'line', shape: 'circle' },
+        { label: 'AI use', value: 'disclosed', color: 'var(--series-2)', mark: 'line', shape: 'circle' },
       ],
     });
   });

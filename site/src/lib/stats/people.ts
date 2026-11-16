@@ -40,7 +40,7 @@ export interface AuthorRow {
   response: Median;
   /** Days from opened to merged, from the outcome curve over these PRs. */
   merge: Median;
-  /** Those of these PRs that disclose LLM use. */
+  /** Those of these PRs that disclose AI use. */
   disclosed: number;
 }
 

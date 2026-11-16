@@ -6,7 +6,6 @@ import {
   capacityNote,
   capacityNothing,
   capacityPanels,
-  capacitySentences,
   describeCapacity,
   formatRatio,
   commandFigures,
@@ -152,39 +151,10 @@ describe('capacity on the fixture', () => {
     expect(readout.filter((r) => r.color === null).map((r) => r.label)).toEqual(['PRs opened', 'human reviews']);
   });
 
-  it('compares the first four full weeks with the last four, saying what it left out, and the PRs waiting at both ends', () => {
-    // First four full weeks, 05-18 to 06-08: per person 2, —, —, 0; reviews per PR 0.5, —, 0, —.
-    // Last four, 10-12 to 11-02: no one giving reviews and no PRs opened.
-    // PRs waiting: 1 at the end of 05-18, the first full week; 0 at the end of 11-02, the last.
-    expect(capacitySentences(c, partial)).toEqual([
-      'PRs opened per person giving reviews, a week on average: 1 in the first four full weeks (2 weeks with no one giving reviews left out), ' +
-        'none in the last four, no one giving reviews in all 4.',
-      'Human reviews per PR opened, a week on average: 0.25 in the first four full weeks (2 weeks with no PRs opened left out), ' +
-        'none in the last four, no PRs opened in all 4.',
-      'PRs waiting for a first response: 1 at the end of the first full week, 0 at the end of the last, 1 fewer.',
-    ]);
-  });
-
-  it('says there are too few full weeks to compare when there are fewer than eight, and still gives the PRs waiting', () => {
-    // 2026-05-15 to 2026-06-30: full weeks 05-18 to 06-22, six of them; 06-22 ends with none waiting.
-    const short = { start: period.start, end: at('2026-07-01T00:00:00Z') };
-    const s = capacity(
-      weekly(data, rows, short, 'opened'),
-      weekly(data, rows, short, 'reviews'),
-      weekly(data, rows, short, 'reviewers'),
-      awaitingResponse(data, rows, short),
-    );
-    expect(capacitySentences(s, coverage(s.week, s.step, short, META.fetched_through))).toEqual([
-      'Too few full weeks to compare the first four with the last four: 6 of the 8 needed.',
-      'PRs waiting for a first response: 1 at the end of the first full week, 0 at the end of the last, 1 fewer.',
-    ]);
-  });
-
-  it('states the people giving reviews, the answer, the gaps once each and the partial weeks as its text alternative', () => {
+  it('states the people giving reviews, the gaps once each and the partial weeks as its text alternative', () => {
     expect(describeCapacity(c, partial)).toBe(
       'By week, 27 weeks from 2026-05-11 to 2026-11-09. People giving reviews: from 0 to 2 a full week. ' +
-        capacitySentences(c, partial).join(' ') +
-        ' No one giving reviews in 20 weeks. No PRs opened in 21 weeks. ' +
+        'No one giving reviews in 20 weeks. No PRs opened in 21 weeks. ' +
         "Partial, each ratio dividing two partial counts and the PRs waiting counted at the week's end, " +
         "or at the period's end or the data's last fetch if sooner: " +
         'week of 2026-05-11, partial: 3 of 7 days; week of 2026-11-09, partial: 6 of 7 days.',

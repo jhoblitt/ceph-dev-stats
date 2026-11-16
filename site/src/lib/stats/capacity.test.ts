@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { DAY } from '../filters';
 import { awaitingResponse } from './backlog';
-import { capacity, compareEnds, ratio } from './capacity';
+import { capacity, ratio } from './capacity';
 import { all, at, dataset } from './testing';
 import { weekly } from './weekly';
 
@@ -64,36 +64,5 @@ describe('capacity', () => {
     expect(c.opened).toEqual([2, 0, 0]);
     expect(c.waiting).toEqual([2, 1, 1]);
     expect(c.reviewsPerOpened).toEqual([0, null, null]);
-  });
-});
-
-describe('compareEnds', () => {
-  // Twelve weeks, the first and last partial, so ten complete: weeks 1–10.
-  const complete = [false, ...Array.from({ length: 10 }, () => true), false];
-
-  it('takes the means of the first four and the last four complete weeks, leaving out the weeks with no value', () => {
-    const values = [9, 1, 2, null, 3, 5, 4, 6, 7, 8, 10, 9];
-    expect(compareEnds(values, complete)).toEqual({
-      // Weeks 1–4: 1, 2, (none), 3.
-      first: { mean: 2, weeks: 4, missing: 1 },
-      // Weeks 7–10: 6, 7, 8, 10.
-      last: { mean: 7.75, weeks: 4, missing: 0 },
-    });
-  });
-
-  it('has no mean for four weeks with no value', () => {
-    const values = [9, null, null, null, null, 5, 4, 6, 7, 8, 10, 9];
-    expect(compareEnds(values, complete)?.first).toEqual({ mean: null, weeks: 4, missing: 4 });
-  });
-
-  it('compares nothing with fewer than eight complete weeks', () => {
-    expect(compareEnds([1, 2, 3, 4, 5, 6, 7, 8], [false, true, true, true, true, true, true, true])).toBeNull();
-  });
-
-  it('compares exactly eight complete weeks, end to end', () => {
-    expect(compareEnds([1, 2, 3, 4, 5, 6, 7, 8], Array.from({ length: 8 }, () => true))).toEqual({
-      first: { mean: 2.5, weeks: 4, missing: 0 },
-      last: { mean: 6.5, weeks: 4, missing: 0 },
-    });
   });
 });

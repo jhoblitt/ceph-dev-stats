@@ -9,7 +9,6 @@ import { formatCount, formatDays, formatShare } from '../format';
 import { HORIZONS, MIN_FOLLOWED } from '../llm';
 import { REVIEWS_RECORDED_FROM } from '../review';
 import { openedIn } from '../select';
-import { COMPARE_WEEKS } from '../stats/capacity';
 import { MIN_PRS } from '../stats/people';
 import { RECENT_MONTHS, recentFilters } from '../state';
 import {
@@ -57,7 +56,7 @@ export interface DataFigures {
   /** The People tables over the period with every other filter as the report opens. */
   people: PeopleFigures;
   /**
-   * The PRs the LLM-use section compares over the period with every other
+   * The PRs the AI-use section compares over the period with every other
    * filter as the report opens, those
    * on the development branch opened in the period, split by disclosure.
    */
@@ -180,8 +179,6 @@ export const INLINE_FIGURES: Record<string, Figure<string>> = {
     show: (_m, d) => (d.viewGroups.disclosed.openedInPeriod === null ? '–' : formatShare(d.viewGroups.disclosed.openedInPeriod)),
   },
   'const.reviewsRecordedFrom': constant(dayOf(REVIEWS_RECORDED_FROM)),
-  'const.compareWeeks': constant(formatCount(COMPARE_WEEKS)),
-  'const.compareNeeded': constant(formatCount(2 * COMPARE_WEEKS)),
   'people.authors': count((d) => d.people.authors),
   'people.botAuthors': count((d) => d.people.botAuthors),
   'people.reviewers': count((d) => d.people.reviewers),
@@ -285,7 +282,7 @@ export const TABLE_FIGURES: Record<string, Figure<TableModel>> = {
       const pct = (v: number | null | undefined) => (v === null || v === undefined ? '–' : formatShare(v));
       const kinds = [...m.kinds.map((k) => ({ id: k.id, name: k.name })), { id: 'unknown', name: 'Unknown' }];
       return {
-        caption: `The ${formatCount(d.compared)} pull requests on the development branch opened in ${periodOf(d)}, those the LLM-use section compares over those months with every other filter as the report opens, by disclosure, as of ${dayOf(m.fetched_through)}`,
+        caption: `The ${formatCount(d.compared)} pull requests on the development branch opened in ${periodOf(d)}, those the AI-use section compares over those months with every other filter as the report opens, by disclosure, as of ${dayOf(m.fetched_through)}`,
         head: ['', NOT_DISCLOSED, DISCLOSED],
         rows: [
           ['pull requests', ...cells((g) => formatCount(g.prs))],

@@ -6,7 +6,7 @@
 Interactive statistics on [ceph/ceph](https://github.com/ceph/ceph) pull
 requests: how long a pull request waits for a human response, for approval
 and for merge, how much of that is spent after the code stopped changing,
-and whether disclosed LLM assistance is changing any of it. A Go tool,
+and whether disclosed AI assistance is changing any of it. A Go tool,
 `cephstats`, fetches the pull requests and builds the data; a static site
 renders it and computes the statistics in the browser.
 
@@ -94,7 +94,7 @@ are derived from it by `cephstats rollup` and are not committed.
 
 | File | What it holds | Written by |
 |---|---|---|
-| `prs/YYYY-MM.jsonl` | one record per pull request, in the file of the month it was opened: its author, times, state, size, labels, commits, lifecycle events, reviews and comments, and the lines that might disclose LLM use or say what kind of change it is. The author of a pull request opened by an account since deleted is the login `ghost` and, when its commits give one, a `name` | `extract` |
+| `prs/YYYY-MM.jsonl` | one record per pull request, in the file of the month it was opened: its author, times, state, size, labels, commits, lifecycle events, reviews and comments, and the lines that might disclose AI use or say what kind of change it is. The author of a pull request opened by an account since deleted is the login `ghost` and, when its commits give one, a `name` | `extract` |
 | `authors.json` | for each author, how many pull requests they opened before `meta.json`'s `window_start`: the baseline their `prior_prs` starts from, and 0 for everyone once that is 2011-09-01. `extract` adds the cache's baselines to it while `meta.json` is of the window `extract` derives for, and otherwise replaces it with them | `extract` |
 | `meta.json` | the window start, when the last walk began, and GitHub's counts at its end: the pull requests opened since the window start, and those open. The open ones are the total of the repository's pull-request listing. So are those opened since the window start when it is no later than the repository's creation, since every pull request is then in the window; for a later window they are the count of a search, which has been seen to omit pull requests the listing returns. `opened_in_window_source` says which, `listing` or `search`; a `meta.json` without it is from the search | `extract` |
 | `tickets.json` | the type of each tracker ticket a record references, and the ticket a Backport ticket was copied from | `tickets` |

@@ -34,11 +34,18 @@
     order?: ArrayLike<number> | undefined;
     /** How `order` is ordered, in words: "newest opened first". */
     orderName?: string;
+    /** Whether `order` is newest opened first. */
+    newest?: boolean;
     /** Which PRs `order` holds, in words: "opened in the week of 2026-05-18". */
     rowsName?: string;
   }
 
-  let { order, orderName = 'newest opened first', rowsName = 'open at some point in the period' }: Props = $props();
+  let {
+    order,
+    orderName = 'newest opened first',
+    newest = true,
+    rowsName = 'open at some point in the period',
+  }: Props = $props();
   const { selection, view, meta, data } = getPage();
 
   const dataset = $derived($view.dataset);
@@ -207,7 +214,7 @@
   const ENDED = { merged: 'merged', closed: 'closed unmerged', open: 'still open' } as const;
   const hrefFor = (number: number) => hashFromState({ ...$selection, pr: number }, meta);
   const summary = $derived(describeLanes(lanes, model.total, orderName));
-  const note = $derived(lanesLine(lanes.length, model.total, rowsName, orderName));
+  const note = $derived(lanesLine(lanes.length, model.total, rowsName, orderName, newest));
 </script>
 
 <section id="timelines" aria-labelledby="timelines-heading" aria-busy={sectionsBusy($view, $data) ? 'true' : undefined}>

@@ -66,8 +66,8 @@ describe('PrTable', () => {
     expect(table().querySelector('caption')?.textContent).toBe('Pull requests, sorted by Opened, descending');
     await fireEvent.click(within(table()).getByRole('button', { name: /^PR/ }));
     expect(table().querySelector('caption')?.textContent).toBe('Pull requests, sorted by PR, ascending');
-    await fireEvent.click(within(table()).getByRole('button', { name: /^LLM use/ }));
-    expect(table().querySelector('caption')?.textContent).toBe('Pull requests, sorted by LLM use, ascending');
+    await fireEvent.click(within(table()).getByRole('button', { name: /^AI use/ }));
+    expect(table().querySelector('caption')?.textContent).toBe('Pull requests, sorted by AI use, ascending');
   });
 
   it('is busy while a table file it needs is loading, and not once none is', async () => {
@@ -157,7 +157,7 @@ describe('PrTable', () => {
     const heads = within(table())
       .getAllByRole('columnheader')
       .map((h) => h.textContent?.replace(/[↑↓]/g, '').trim());
-    expect(heads.slice(0, 4)).toEqual(['PR', 'Title', 'LLM use', 'Author']);
+    expect(heads.slice(0, 4)).toEqual(['PR', 'Title', 'AI use', 'Author']);
     expect(heads).toContain('First response');
   });
 

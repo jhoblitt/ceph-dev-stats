@@ -134,13 +134,16 @@ describe('describeLanes and lanesLine', () => {
 
   it('says which PRs the lanes show, how many and in what order, whatever their count', () => {
     const order = 'in the PR table’s order, by Opened, descending';
-    expect(lanesLine(200, 4279, 'open at some point in the period', order)).toBe(
-      'The first 200 of 4,279 PRs open at some point in the period, in the PR table’s order, by Opened, descending.',
+    expect(lanesLine(200, 4279, 'open at some point in the period', order, true)).toBe(
+      'The 200 most recently opened of 4,279 PRs open at some point in the period, in the PR table’s order, by Opened, descending.',
     );
-    expect(lanesLine(12, 12, 'open at some point in the period', order)).toBe(
+    expect(lanesLine(200, 4279, 'open at some point in the period', 'in the PR table’s order, by Size, descending', false)).toBe(
+      'The first 200 in the PR table’s order, by Size, descending, of 4,279 PRs open at some point in the period.',
+    );
+    expect(lanesLine(12, 12, 'open at some point in the period', order, true)).toBe(
       '12 PRs open at some point in the period, in the PR table’s order, by Opened, descending.',
     );
-    expect(lanesLine(1, 1, 'opened in the week of 2026-05-18', order)).toBe(
+    expect(lanesLine(1, 1, 'opened in the week of 2026-05-18', order, true)).toBe(
       '1 PR opened in the week of 2026-05-18, in the PR table’s order, by Opened, descending.',
     );
   });

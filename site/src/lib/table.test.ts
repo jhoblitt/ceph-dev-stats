@@ -105,7 +105,7 @@ describe('tableOrder', () => {
   it('says the order in words, keeping the column label’s capitals', () => {
     expect(sortWords({ column: 'opened', descending: true })).toBe('by Opened, descending');
     expect(sortWords({ column: 'number', descending: false })).toBe('by PR, ascending');
-    expect(sortWords({ column: 'disclosure', descending: false })).toBe('by LLM use, ascending');
+    expect(sortWords({ column: 'disclosure', descending: false })).toBe('by AI use, ascending');
   });
 });
 

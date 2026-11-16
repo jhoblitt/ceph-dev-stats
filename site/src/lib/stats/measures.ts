@@ -4,8 +4,6 @@
 
 import { type Dataset, PR_STATE } from '../data';
 import { DAY } from '../filters';
-import { type Period, bucketOf, buckets } from './buckets';
-import type { Weekly } from './weekly';
 
 /** A whole-number measure of one PR: lines added plus deleted, files changed, bot reviews. */
 export type Measure = 'lines' | 'files' | 'botReviews';
@@ -94,55 +92,10 @@ export function mergedWithin(data: Dataset, rows: Uint32Array, days: number): Me
   return { followed, merged, share: followed === 0 ? null : merged / followed };
 }
 
-/** Whether row `r` discloses and names any of the families, by index into meta's `families`. */
-function names(data: Dataset, none: number, families: readonly number[], r: number): boolean {
-  if (data.prs.disclosure[r] === none) return false;
-  return (data.prs.families[r] as readonly number[]).some((f) => families.includes(f));
-}
-
-/** How many of the rows name any of the families: a PR naming two of them counts once. */
-export function namingAny(data: Dataset, rows: Uint32Array, families: readonly number[]): number {
-  const none = data.meta.disclosure.indexOf('none');
-  let n = 0;
-  for (let i = 0; i < rows.length; i++) if (names(data, none, families, rows[i] as number)) n++;
-  return n;
-}
-
-/**
- * By week opened, as `weekly`'s `disclosureShare` counts it, the share of the
- * PRs opened that name any of the families, under `any`; null for a week with
- * none opened.
- */
-export function familiesShare(
-  data: Dataset,
-  rows: Uint32Array,
-  period: Period,
-  families: readonly number[],
-): Weekly<number | null> {
-  const b = buckets(period);
-  if (rows.length === 0) return { week: [], step: b.step, values: { any: [] } };
-  const none = data.meta.disclosure.indexOf('none');
-  const opened = b.starts.map(() => 0);
-  const naming = b.starts.map(() => 0);
-  for (let i = 0; i < rows.length; i++) {
-    const r = rows[i] as number;
-    if (data.prs.in_window[r] !== 1) continue;
-    const w = bucketOf(b, data.prs.created[r] as number);
-    if (w === -1) continue;
-    opened[w] = (opened[w] as number) + 1;
-    if (names(data, none, families, r)) naming[w] = (naming[w] as number) + 1;
-  }
-  return {
-    week: b.starts,
-    step: b.step,
-    values: { any: naming.map((n, w) => (opened[w] === 0 ? null : n / (opened[w] as number))) },
-  };
-}
-
 export interface DisclosureCounts {
   /** The rows counted. */
   rows: number;
-  /** Those disclosing LLM use in any form. */
+  /** Those disclosing AI use in any form. */
   disclosed: number;
   /** Those naming each of meta's `families`, by its index; a PR naming two counts under both. */
   families: number[];

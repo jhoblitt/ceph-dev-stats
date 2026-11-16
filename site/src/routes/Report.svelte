@@ -138,7 +138,12 @@
   <Review />
   <LlmUse />
   <DotPlot />
-  <Lanes order={laneOrder} orderName={laneOrderName} rowsName={laneRowsName} />
+  <Lanes
+    order={laneOrder}
+    orderName={laneOrderName}
+    newest={sort.column === 'opened' && sort.descending}
+    rowsName={laneRowsName}
+  />
   <!-- The chosen PR, what it is and then its timeline, between the views that choose one. -->
   <PrTimeline />
   <PrTable />

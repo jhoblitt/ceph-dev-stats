@@ -59,36 +59,3 @@ export function capacity(
     reviewsPerOpened: ratio(r, o),
   };
 }
-
-export interface WindowMean {
-  /** The mean of the weeks with a value; null when none has one. */
-  mean: number | null;
-  weeks: number;
-  /** The weeks with no value, left out of the mean. */
-  missing: number;
-}
-
-/** How many complete buckets each end of the comparison takes. */
-export const COMPARE_WEEKS = 4;
-
-/**
- * The means of the first `n` and the last `n` complete buckets, or null with
- * fewer than `2n` complete buckets to compare.
- */
-export function compareEnds(
-  values: readonly (number | null)[],
-  complete: readonly boolean[],
-  n = COMPARE_WEEKS,
-): { first: WindowMean; last: WindowMean } | null {
-  const whole = values.flatMap((_, i) => (complete[i] ? [i] : []));
-  if (whole.length < 2 * n) return null;
-  const window = (indexes: number[]): WindowMean => {
-    const known = indexes.map((i) => values[i] ?? null).filter((v): v is number => v !== null);
-    return {
-      mean: known.length === 0 ? null : known.reduce((a, b) => a + b, 0) / known.length,
-      weeks: indexes.length,
-      missing: indexes.length - known.length,
-    };
-  };
-  return { first: window(whole.slice(0, n)), last: window(whole.slice(-n)) };
-}
