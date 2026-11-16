@@ -16,12 +16,15 @@ import (
 // broad is the broad word list. Everything is case-insensitive except "AI",
 // which is matched only as an upper-case word. "cursor" is a RADOS term, so
 // Cursor is matched only by its agent address here, and as the value of a
-// -by trailer below.
+// -by trailer below. "claude" stays unbounded, since values such as
+// "IBM-Bob:ClaudeSonnet" run it into the next word; the words bounded here
+// otherwise match inside "raider", "philanthropic" and "regenerated
+// without".
 var broad = regexp.MustCompile(`(?i:` +
-	`claude|anthropic|copilot|gemini|codex|chatgpt|openai|` +
+	`claude|\banthropic\b|copilot|gemini|codex|chatgpt|openai|` +
 	`\bgpt(?:\b|\d)|\bllms?\b|` +
-	`aider|windsurf|ibm[ -]bob|` +
-	`assisted[ -]by|assistant[ -]by|generated[ -](?:with|by)|raised[ -]by|` +
+	`\baider\b|windsurf|ibm[ -]bob|` +
+	`assisted[ -]by|assistant[ -]by|\bgenerated[ -](?:with|by)\b|raised[ -]by|` +
 	`cursoragent|cursor\.com` +
 	`)|\bAI\b`)
 
