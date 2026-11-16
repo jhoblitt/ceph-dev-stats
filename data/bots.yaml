@@ -1,6 +1,9 @@
 # Accounts GitHub types as users whose comments and reviews are automated.
 # Accounts GitHub types as bots need no entry. Logins match in any case.
-#
-#   - login: some-ci-account
-#     why: posts test results
-accounts: []
+accounts:
+  - login: ceph-jenkins
+    why: >-
+      ceph/ceph's Jenkins. Every one of its comments in the window is one of
+      three templates: a "Thank you for your contribution" note, "Can one of
+      the admins verify this patch?", and a doc-render link. The pull
+      requests it opens are the release-version bumps (v19.2.5, v20.2.3, …).

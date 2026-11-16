@@ -80,6 +80,12 @@ var _ = Describe("Candidates", func() {
 		Entry("AI only as part of a longer word", "AIO and RAID paths are untouched", none()),
 		Entry("gpt inside a word", "gptfdisk is not installed", none()),
 		Entry("llm inside a word", "fillmore street", none()),
+		Entry("aider inside a word", "the raider thread stops at shutdown", none()),
+		Entry("anthropic inside a word", "a philanthropic default for the cache size", none()),
+		Entry("generated with inside regenerated without", "the unit file is regenerated without the stale mount", none()),
+		Entry("aider as a word", "drafted with aider", prose("drafted with aider")),
+		Entry("Anthropic as a word", "an Anthropic model wrote the first draft", prose("an Anthropic model wrote the first draft")),
+		Entry("re-generated with, generous on purpose", "keys are re-generated with the new cipher", prose("keys are re-generated with the new cipher")),
 	)
 
 	DescribeTable("a PR description line",

@@ -89,6 +89,16 @@ var _ = Describe("FromEntry", func() {
 			Expect(text("jenkins test make check\njenkins test api")).To(BeEmpty())
 			Expect(text("jenkins test make check\r\njenkins test api")).To(BeEmpty())
 		})
+
+		DescribeTable("is not kept for a short line containing an @",
+			func(body string) {
+				Expect(text(body)).To(BeEmpty(), "comment %q", body)
+			},
+			Entry("a mention", "@alice can you take another look?"),
+			Entry("a mention after a command", "jenkins test make check @alice"),
+			Entry("an e-mail address", "Reviewed-by: Ana Smith <ana@example.com>"),
+			Entry("an @ alone", "ping @"),
+		)
 	})
 
 	It("truncates every time to the second in UTC", func() {
