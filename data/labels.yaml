@@ -25,10 +25,11 @@ components:
     name: Core (RADOS)
     labels: [core, cache-tiering]
   # The messenger, src/msg, is RADOS's network layer. Most pull requests
-  # labelled messenger, from 2019 and 2020, carry no core label.
+  # labelled messenger, from 2019 and 2020, carry no core label. rdma marks
+  # the messenger's RDMA transport.
   - id: messenger
     name: Messenger
-    labels: [messenger]
+    labels: [messenger, rdma]
   - id: mon
     name: Monitor
     labels: [mon]
@@ -72,12 +73,21 @@ components:
   - id: monitoring
     name: Monitoring
     labels: [monitoring]
+  # The daemon that exports the performance counters of a host's daemons to
+  # Prometheus.
+  - id: ceph-exporter
+    name: ceph-exporter
+    labels: [exporter]
   - id: telemetry
     name: Telemetry
     labels: [telemetry]
   - id: libcephsqlite
     name: libcephsqlite
     labels: [libcephsqlite]
+  # The asynchronous C++ RADOS client library, src/neorados.
+  - id: neorados
+    name: neorados
+    labels: [neorados]
   - id: common
     name: Common
     labels: [common]
@@ -102,9 +112,11 @@ components:
   - id: docs
     name: Documentation
     labels: [documentation]
+  # vstart_runner marks the harness that runs teuthology tasks on a vstart
+  # cluster.
   - id: tests
     name: Tests
-    labels: [tests]
+    labels: [tests, vstart_runner]
 
 # Where a pull request is in the review, test, backport and merge process.
 process:
@@ -168,7 +180,6 @@ other:
   - aarch64
   - Clang
   - python3
-  - rdma
   - dependencies
   - javascript
   - python
@@ -179,8 +190,3 @@ other:
   - 'open-source-day*'
   # Red Hat QE's changes to its downstream branches, rh-nautilus and others.
   - rh-qe-downstream-change
-  # The harness that runs teuthology tasks on a vstart cluster.
-  - vstart_runner
-  # Parts of Ceph with too few pull requests for a filter entry of their own.
-  - exporter
-  - neorados
